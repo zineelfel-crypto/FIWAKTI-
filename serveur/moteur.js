@@ -178,6 +178,14 @@ async function etat(def, mats, du, au, idTache, source){
 let file = Promise.resolve();
 /* v50 : le module peut aussi être chargé dans le fil principal (moteur léger pour la date de travail) */
 module.exports = {chargerMoteur};
+/* 56.33.11 : sous Linux, la priorité est propre à chaque fil d'exécution : les fils de calcul passent en priorité basse
+   (nice 10). Ils gardent toute la puissance libre, mais cèdent le processeur aux requêtes des utilisateurs et à
+   PostgreSQL (après un import massif de badgeages, trois fils à 100 % ralentissaient tous les écrans sur 4 cœurs).
+   Réglable : FIWAKTI_PRIORITE_CALCUL (0 = désactivé). Sous Windows le réglage s'appliquerait à tout le processus : non appliqué. */
+if (parentPort && process.platform === "linux"){
+  const nice = process.env.FIWAKTI_PRIORITE_CALCUL === undefined ? 10 : Number(process.env.FIWAKTI_PRIORITE_CALCUL);
+  if (nice > 0) try { require("os").setPriority(Math.min(19, nice)); } catch(e){}
+}
 if (parentPort) parentPort.on("message", m=>{
   file = file.then(async ()=>{
     try {

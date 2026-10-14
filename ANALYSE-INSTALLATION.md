@@ -1,5 +1,9 @@
 # Analyse de l'installation — FIWAKTI 56.33.10
 
+> **Statut (56.33.11)** : les anomalies A à M sont corrigées et retestées, sauf J (fichier SQLite vide laissé après une
+> installation PostgreSQL), laissée en l'état comme N (règles de mot de passe contrôlées seulement au clic). Les
+> performances à grand effectif sont dans `PERFORMANCES-GRAND-EFFECTIF.md`.
+
 Source analysée : `fiwakti-56.33.10-claude-code.zip` (1 343 fichiers, dont `serveur/node_modules`).
 Périmètre : assistant `public/installation.html` + `installation.js`, routes `/api/installation*` et
 démarrage dans `serveur/principal.js`, scripts `demarrer-dev.*`.

@@ -63,10 +63,26 @@ function creer(o){
     const tri = q.tri === "mat" ? (a, b)=>COLL_MAT.compare(String(a.mat), String(b.mat)) : (a, b)=>COLL_NOM.compare(String(a.nom), String(b.nom)) || COLL_NOM.compare(String(a.prenom), String(b.prenom));
     return classer(l.slice().sort(tri));
   }
+  /* 56.33.11 : un seul passage sur l'ordre déjà trié (périmètre, filtres et recherche combinés), sans copie ni
+     ensemble de 50 000 éléments par requête ; résultat mémorisé pour feuilleter les pages (même ordre qu'avant) */
+  const LISTES = new Map();
+  function filtrerRapide(tous, set, q){
+    const PR = prepare(tous), a = auj(), s = String(q.q||"").trim().toLowerCase(), mots = s ? s.split(/\s+/).filter(Boolean) : [];
+    const ok = e => (set === null || set.has(String(e.mat))) && (!q.site || e.siteId === q.site) && (!q.dept || e.deptId === q.dept) && (!q.fonction || (e.poste||"") === q.fonction)
+      && (q.statut !== "actifs" || !e.sortie || e.sortie >= a) && (q.statut !== "sortis" || (e.sortie && e.sortie < a))
+      && (!mots.length || (t => t.indexOf(s) >= 0 || mots.every(m=>t.indexOf(m) >= 0))(PR.texte.get(e)));
+    const l = (q.tri === "mat" ? PR.parMat : PR.parNom).filter(ok);
+    if (mots.length < 2) return l;
+    const exacte = e => PR.texte.get(e).indexOf(s) >= 0;
+    return l.filter(exacte).concat(l.filter(e=>!exacte(e)));
+  }
   async function liste(login, q){
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||100));
-    const {emps} = await perimetre(login), l = filtrer(emps, q, await D.employes());
-    return {total:l.length, offset:off, lignes:l.slice(off, off + lim).map(LEGER)};
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, {P, emps: tous} = await D.perimetreDe(ref, login);
+    const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.tri === "mat" ? "mat" : "", auj()]);
+    let m = LISTES.get(cle);
+    if (!m || m.tous !== tous || m.P !== P){ m = {tous, P, l:filtrerRapide(tous, P.set, q)}; if (LISTES.size > 500) LISTES.clear(); LISTES.set(cle, m); }
+    return {total:m.l.length, offset:off, lignes:m.l.slice(off, off + lim).map(LEGER)};
   }
   async function fiche(login, mat){ const {emps} = await perimetre(login); return emps.find(e=>String(e.mat) === String(mat)) || null; }
   async function lot(login, mats, ids){ const {emps} = await perimetre(login), s = new Set((mats||[]).slice(0, 500).map(String)), si = new Set((ids||[]).slice(0, 500).map(String));

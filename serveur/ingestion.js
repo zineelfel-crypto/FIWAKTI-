@@ -70,12 +70,23 @@ function creer(o){
     /* 56.33.11 : paramétrage partagé (lecture) pour la clé et les lectures du lot ; copie neuve pour le moteur, qui peut
        compléter ses objets */
     const ref = await D.referentielLecture() || {}, emps = await D.employes();
-    const cle = (ref.__versions ? JSON.stringify(ref.__versions) : "") + "|" + emps.length + "|" + (emps === moteur_emps ? "=" : "≠");
+    const cle = (ref.__versions ? JSON.stringify(ref.__versions) : "") + "|" + emps.length;
     if (!moteur){ moteur = require("./moteur.js").chargerMoteur(o.appJs); }
-    if (cle !== cleMoteur){ moteur.M.db = Object.assign({}, await D.referentiel() || {}, {emps, ptg:[], abs:[], corrections:[], dmd:[], audit:[], notifs:[], journal:[], exemple:false}); moteur.M.reinit(); cleMoteur = cle; moteur_emps = emps; }
+    /* 56.33.11 : une seule réinitialisation partagée par les lots qui arrivent ensemble (20 réinitialisations de
+       ~8 Mo pour une rafale de 20 pointeuses auparavant), et plus de seconde réinitialisation due à la clé « =/≠ » */
+    if (cle !== cleMoteur || emps !== moteur_emps){
+      if (!REINIT || REINIT.cle !== cle || REINIT.emps !== emps){
+        const r = REINIT = {cle, emps, p:(async ()=>{
+          const refM = await D.referentiel() || {};
+          moteur.M.db = Object.assign({}, refM, {emps, ptg:[], abs:[], corrections:[], dmd:[], audit:[], notifs:[], journal:[], exemple:false}); moteur.M.reinit();
+          cleMoteur = cle; moteur_emps = emps; })()};
+        r.p.catch(()=>{}).then(()=>{ if (REINIT === r) REINIT = null; });
+      }
+      await REINIT.p;
+    }
     return {ref, emps};
   }
-  let moteur_emps = null;
+  let moteur_emps = null, REINIT = null;
   /* la journée de nuit J couvre J à partir de 12:00 et J+1 avant 12:00 (même règle que le moteur de calcul) */
   function dateDeTravail(e, local){
     const d = local.slice(0, 10), mn = (+local.slice(11, 13)) * 60 + (+local.slice(14, 16));

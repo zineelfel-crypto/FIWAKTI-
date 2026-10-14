@@ -11,9 +11,9 @@ const URL_B = process.env.BANC_URL || "http://localhost:8099";
 const LOGIN = process.env.BANC_LOGIN || "admin", MDP = process.env.BANC_MDP || "Kx7mPq2vLt9w";
 let COOKIE = "", CSRF = "";
 
-async function appel(methode, chemin, corps, entetes){
+async function appel(methode, chemin, corps, entetes, sess){
   const t0 = performance.now();
-  const r = await fetch(URL_B + chemin, {method:methode, headers:Object.assign({"Cookie":COOKIE, "X-CSRF":CSRF, "Accept-Encoding":"gzip"},
+  const r = await fetch(URL_B + chemin, {method:methode, headers:Object.assign({"Cookie":sess ? sess.cookie : COOKIE, "X-CSRF":sess ? sess.csrf : CSRF, "Accept-Encoding":"gzip"},
     corps !== undefined && typeof corps !== "string" ? {"Content-Type":"application/json"} : {}, entetes || {}),
     body:corps === undefined ? undefined : typeof corps === "string" ? corps : JSON.stringify(corps)});
   const texte = await r.text(), ms = performance.now() - t0;
@@ -177,6 +177,46 @@ async function phaseMesuresChef(){
   await mesurer("calcul : accueil", ()=>appel("GET", "/api/v1/calcul/accueil"));
   await mesurer("à traiter", ()=>appel("GET", "/api/v1/a-traiter"));
 }
+/* charge simultanée : N utilisateurs qui enchaînent des écrans (sans pause) pendant D secondes, pendant que les 20
+   pointeuses envoient chacune un badgeage toutes les 100 ms (200 badgeages/s, l'arrivée du matin) */
+async function phaseConcurrence(n, duree, pauseMs){
+  const p2 = x => String(x).padStart(2, "0"), d = new Date(); d.setDate(d.getDate() - 1);
+  const hier = d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate());
+  const d7 = new Date(d); d7.setDate(d7.getDate() - 6); const du = d7.getFullYear()+"-"+p2(d7.getMonth()+1)+"-"+p2(d7.getDate());
+  const ecrans = [
+    ["annuaire (page)", i=>"/api/v1/employes?limit=50&offset="+((i * 50) % 40000)],
+    ["annuaire (recherche)", i=>"/api/v1/employes?limit=20&q="+["ben", "amine trab", "1004", "salah 2", "masmoudi"][i % 5]],
+    ["badgeages du jour", i=>"/api/v1/pointages?du="+hier+"&au="+hier+"&offset="+((i * 100) % 5000)+"&limit=100"],
+    ["badgeages d'un salarié", i=>"/api/v1/pointages?du="+du+"&au="+hier+"&q="+(100001 + (i * 37) % 49000)],
+    ["journées du jour", i=>"/api/v1/calcul/journees?du="+hier+"&au="+hier+"&offset="+((i * 100) % 5000)+"&limit=100"],
+    ["anomalies 7 j", ()=>"/api/v1/calcul/anomalies?du="+du+"&au="+hier+"&limit=100"],
+    ["à traiter", ()=>"/api/v1/a-traiter"],
+    ["accueil", ()=>"/api/v1/calcul/accueil"]];
+  const t = new Map(ecrans.map(e=>[e[0], []])); let erreurs = 0, pousses = 0; const tp = [];
+  /* une session par utilisateur virtuel (le serveur limite le débit par session) */
+  const sessions = [];
+  for (let k = 0; k < n; k += 10){ const lot = await Promise.all(Array.from({length:Math.min(10, n - k)}, async ()=>{
+    const r = await fetch(URL_B+"/api/v1/connexion", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({login:LOGIN, mdp:MDP})});
+    const cookie = (r.headers.get("set-cookie")||"").split(";")[0], s2 = await (await fetch(URL_B+"/api/v1/session", {headers:{Cookie:cookie}})).json();
+    return {cookie, csrf:s2.csrf}; })); sessions.push(...lot); }
+  const codes = {};
+  const vu = async k => { let i = k * 7;
+    while (Date.now() < fin){ const [nom, url] = ecrans[i % ecrans.length]; const r = await appel("GET", url(i), undefined, undefined, sessions[k]); t.get(nom).push(r.ms); if (r.statut !== 200){ erreurs++; codes[r.statut] = (codes[r.statut]||0) + 1; } i++;
+      if (pauseMs) await new Promise(ok=>setTimeout(ok, pauseMs * (0.5 + Math.random()))); } };
+  const pointeuse = async s => { let m = 0;
+    while (Date.now() < fin){ const h = new Date(); const ts = h.getFullYear()+"-"+p2(h.getMonth()+1)+"-"+p2(h.getDate())+" "+p2(h.getHours())+":"+p2(h.getMinutes())+":"+p2(h.getSeconds());
+      const r = await appel("POST", "/iclock/cdata?SN=BANC"+s+"&table=ATTLOG&Stamp=1", String(100000 + s + NB_SITES * (m++ % 2400))+"\t"+ts+"\t0\t1", {"Content-Type":"text/plain"});
+      tp.push(r.ms); pousses++; if (r.statut !== 200) erreurs++;
+      await new Promise(ok=>setTimeout(ok, Math.max(0, 100 - r.ms))); } };
+  const t0 = Date.now(), fin = t0 + duree * 1000;
+  await Promise.all([...Array.from({length:n}, (_, k)=>vu(k)), ...Array.from({length:NB_SITES}, (_, s)=>pointeuse(s + 1))]);
+  const sec = (Date.now() - t0) / 1000; let total = 0;
+  console.log("— "+n+" utilisateurs simultanés"+(pauseMs ? " (un clic toutes les "+(pauseMs/1000)+" s en moyenne)" : " sans pause")+" + 20 pointeuses en temps réel, "+Math.round(sec)+" s —");
+  for (const [nom, l] of t){ total += l.length; const st = stat(l); console.log((nom+" ".repeat(26)).slice(0, 26)+" n="+String(l.length).padStart(5)+"  méd "+String(Math.round(st.med)).padStart(5)+" ms  p95 "+String(Math.round(st.p95)).padStart(5)+" ms  max "+String(Math.round(st.max)).padStart(6)+" ms"); }
+  const sp = stat(tp);
+  console.log(("badgeage temps réel"+" ".repeat(26)).slice(0, 26)+" n="+String(tp.length).padStart(5)+"  méd "+String(Math.round(sp.med)).padStart(5)+" ms  p95 "+String(Math.round(sp.p95)).padStart(5)+" ms  max "+String(Math.round(sp.max)).padStart(6)+" ms");
+  console.log("débit : "+Math.round(total / sec)+" écrans/s, "+Math.round(pousses / sec)+" badgeages/s ; erreurs : "+erreurs+(erreurs ? " "+JSON.stringify(codes) : ""));
+}
 (async ()=>{
   const [phase, a, b, c] = process.argv.slice(2);
   await connexion();
@@ -185,6 +225,7 @@ async function phaseMesuresChef(){
   else if (phase === "push") await phasePush(Number(a) || 100000, Number(b) || 1, Number(c) || 50000);
   else if (phase === "mesures") await phaseMesures();
   else if (phase === "mesures-chef"){ await connexionChef(); await phaseMesuresChef(); }
+  else if (phase === "concurrence") await phaseConcurrence(Number(a) || 100, Number(b) || 60, Number(c) || 0);
   else if (phase === "comptes") await phaseComptes(Number(a) || 50000);
   else console.log("phase inconnue");
 })().catch(e=>{ console.error(e); process.exit(1); });

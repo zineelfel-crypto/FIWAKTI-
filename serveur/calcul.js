@@ -9,6 +9,14 @@ const COLL = new Intl.Collator();
 const REF_GLOBALES = ["cals","jours","tt","arits","convs","sites","depts","champs","clotures","params","secu","regles","circuits","reglesV","etablissements"];
 function creer(B, D, opts){
   let GENERATION = 0;
+  /* 56.33.11 : deux générations. GENERATION change à chaque modification faite par un utilisateur (correction,
+     validation, paramétrage) : les résultats en cache sont abandonnés tout de suite. GEN_P change à chaque badgeage
+     reçu d'une pointeuse : un résultat reste servi au plus 5 s après. À l'heure d'arrivée (200 badgeages/s), chaque
+     badgeage abandonnait auparavant tous les caches de calcul : chaque écran refaisait ses contrôles sur tout le
+     personnel (accueil à 15 s, délais dépassés). */
+  let GEN_P = 0; const FRAIS_P = 5000;
+  const marque = () => ({t:Date.now(), gen:GENERATION, genP:GEN_P});
+  const frais = (c, ttl) => !!c && c.gen === GENERATION && Date.now() - c.t < ttl && (c.genP === GEN_P || Date.now() - c.t < FRAIS_P);
   /* plusieurs fils de calcul avec PostgreSQL (un seul avec la base intégrée, qui n'a qu'un écrivain) */
   const NB = opts.base && opts.base.type === "pg" ? Math.max(1, Math.min(4, require("os").cpus().length - 1)) : 1;
   const fils = []; let seq = 0; const attente = new Map();
@@ -52,7 +60,12 @@ function creer(B, D, opts){
   }
   const auj = () => { const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); };
   const ajout = (k, j) => { const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+j); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
-  const nbJours = (du, au) => Math.round((new Date(au) - new Date(du)) / 86400000) + 1;
+  /* 56.33.11 : dates AAAA-MM-JJ comptées sans objet Date (même valeur que new Date(), qui les lit en UTC) */
+  const JOUR_ISO = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+  const nbJours = (du, au) => JOUR_ISO.test(du) && JOUR_ISO.test(au)
+    ? Math.round((Date.UTC(+au.slice(0,4), +au.slice(5,7)-1, +au.slice(8,10)) - Date.UTC(+du.slice(0,4), +du.slice(5,7)-1, +du.slice(8,10))) / 86400000) + 1
+    : Math.round((new Date(au) - new Date(du)) / 86400000) + 1;
+  const MEMO_ATT = new Map();
   /* un calcul à la fois pour une même période : les demandes simultanées attendent le même résultat */
   const enCours = new Map();
   /* v49 : une vérification de couverture récente (moins d'une minute, sans invalidation depuis) n'est pas refaite */
@@ -69,7 +82,7 @@ function creer(B, D, opts){
     if (!mats.length) return 0;
     const cle = du+"|"+au+"|"+mats.length+"|"+mats[0]+"|"+mats[mats.length-1];
     const v = VERIFIES.get(cle);
-    if (v && v.gen === GENERATION && Date.now() - v.t < 60000) return 0;
+    if (frais(v, 60000)) return 0;
     if (enCours.has(cle)) return enCours.get(cle);
     const p = (async ()=>{
       const aujourdhui = auj(), hier = ajout(aujourdhui, -1), limite = new Date(Date.now() - 10*60000).toISOString();
@@ -86,9 +99,13 @@ function creer(B, D, opts){
       if (du <= auPasse){
         /* v56.3 : jours attendus calculés sans boucle par jour (bornes d'entrée et de sortie), puis contrôle global en une
            seule requête de comptage ; le détail par salarié n'est lu que s'il manque des journées */
-        const attendus = {}; const nb = nbJours(du, auPasse);
-        emps.forEach(e=>{ if (!e.entree && !e.sortie){ attendus[e.mat] = nb; return; }
-          const a = e.entree && e.entree > du ? e.entree : du, b = e.sortie && e.sortie < auPasse ? e.sortie : auPasse; attendus[e.mat] = a <= b ? nbJours(a, b) : 0; });
+        const nb = nbJours(du, auPasse), cleA = du+"|"+auPasse, mA = MEMO_ATT.get(cleA);
+        let attendus;
+        if (mA && mA.emps === emps) attendus = mA.attendus;
+        else { attendus = {};
+          emps.forEach(e=>{ if (!e.entree && !e.sortie){ attendus[e.mat] = nb; return; }
+            const a = e.entree && e.entree > du ? e.entree : du, b = e.sortie && e.sortie < auPasse ? e.sortie : auPasse; attendus[e.mat] = a <= b ? nbJours(a, b) : 0; });
+          if (MEMO_ATT.size > 100) MEMO_ATT.clear(); MEMO_ATT.set(cleA, {emps, attendus}); }
         const attenduTotal = mats.reduce((s, m)=>s + (attendus[m] !== undefined ? attendus[m] : nb), 0);
         const total = Number((await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d>=? AND d<=?"+fm, du, auPasse, ...f.a)).n);
         let manque = [];
@@ -137,25 +154,51 @@ function creer(B, D, opts){
       return tot;
     })();
     enCours.set(cle, p);
-    const gen = GENERATION;
-    try { const r = await p; VERIFIES.set(cle, {t:Date.now(), gen}); if (VERIFIES.size > 500) VERIFIES.clear(); return r; } finally { enCours.delete(cle); }
+    const m0 = marque();
+    try { const r = await p; VERIFIES.set(cle, m0); if (VERIFIES.size > 500) VERIFIES.clear(); return r; } finally { enCours.delete(cle); }
   }
   const EN_FOND = {actif:false, depuis:0, salaries:0};
-  async function invalider(touches, refCles){
-    GENERATION++;
+  async function invalider(touches, refCles, opts){
+    if ((refCles||[]).length || !(opts && opts.pointeuse)) GENERATION++; else GEN_P++;
     if ((refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0)){ await B.run("DELETE FROM calc_jour"); return; }
+    /* 56.33.11 : badgeage reçu d'une pointeuse pour hier ou aujourd'hui → journée marquée « à rafraîchir » (date de
+       calcul vidée) au lieu d'être effacée : les écrans servent la valeur précédente quelques secondes et le recalcul
+       part en tâche de fond (rafraîchissement d'hier et d'aujourd'hui), au lieu de faire attendre chaque écran à l'heure
+       d'arrivée. Jours plus anciens et modifications des utilisateurs : effacement, recalcul avant réponse, comme avant.
+       Écritures groupées par jour (une requête par badgeage auparavant). */
+    const recent = opts && opts.pointeuse ? ajout(auj(), -1) : null, parJour = new Map(), tous = [];
     for (const t of touches||[]){
       const [mat, d] = t.split("|");
-      if (d === "*") await B.run("DELETE FROM calc_jour WHERE mat=?", mat);
-      else await B.run("DELETE FROM calc_jour WHERE mat=? AND d=?", mat, d);
+      if (d === "*"){ tous.push(mat); continue; }
+      if (!parJour.has(d)) parJour.set(d, []); parJour.get(d).push(mat);
+    }
+    const lots = (l, n) => { const r = []; for (let i = 0; i < l.length; i += n) r.push(l.slice(i, i + n)); return r; };
+    for (const p of lots(tous, 500)) await B.run("DELETE FROM calc_jour WHERE mat IN ("+p.map(()=>"?").join(",")+")", ...p);
+    for (const [d, mats] of parJour) for (const p of lots(mats, 500)){
+      const dans = "mat IN ("+p.map(()=>"?").join(",")+")";
+      if (recent && d >= recent) await B.run("UPDATE calc_jour SET calc='' WHERE d=? AND "+dans, d, ...p);
+      else await B.run("DELETE FROM calc_jour WHERE d=? AND "+dans, d, ...p);
     }
   }
   /* ensemble d'employés : périmètre ∩ filtres (département avec sous-départements, équipe, recherche) */
+  /* 56.33.11 : sélection mémorisée pour un même périmètre, mêmes filtres, même jour et même liste de salariés, avec ses
+     matricules et sa table matricule → salarié. Auparavant chaque écran refiltrait les 50 000 salariés et reconstruisait
+     ces tables (~45 ms de calcul sur le fil principal par requête : 16 écrans/s au plus sous 100 utilisateurs). La
+     liste renvoyée est une copie (certains appelants la trient). */
+  const MEMO_SEL = new Map();
   async function selection(login, q){
     const ref = await (D.referentielLecture || D.referentiel)() || {};
-    const {P, emps} = await D.perimetreDe(ref, login);
+    const {P, emps: tous} = await D.perimetreDe(ref, login);
+    const cleM = [login, q.du || "", auj(), q.dept || "", q.site || "", q.chef || "", q.equipe || "", q.q || ""].join("|"), mm = MEMO_SEL.get(cleM);
+    if (mm && mm.tous === tous && mm.ref === ref && mm.P === P) return {emps:mm.l.slice(), ref, global:mm.global, mats:mm.mats, parMat:mm.parMat};
+    const r = selectionCalcul(ref, P, tous, q);
+    r.mats = r.emps.map(e=>String(e.mat)); r.parMat = new Map(r.emps.map(e=>[String(e.mat), e]));
+    if (Object.isFrozen(ref)){ if (MEMO_SEL.size > 300) MEMO_SEL.clear(); MEMO_SEL.set(cleM, {tous, ref, P, l:r.emps, global:r.global, mats:r.mats, parMat:r.parMat}); }
+    return Object.assign({}, r, {emps:r.emps.slice()});
+  }
+  function selectionCalcul(ref, P, emps, q){
     let l = emps.filter(e=>P.set === null || P.set.has(String(e.mat)));
-    const actifs = e => !(e.sortie && e.sortie < (q.du || auj()));
+    const limiteSortie = q.du || auj(), actifs = e => !(e.sortie && e.sortie < limiteSortie);
     l = l.filter(actifs);
     if (q.dept){
       const arbre = new Set([q.dept]); let ajoutes = true;
@@ -182,26 +225,49 @@ function creer(B, D, opts){
   const ident = e => ({mat:e.mat, nom:e.nom, prenom:e.prenom, deptId:e.deptId, siteId:e.siteId, id:e.id});
   /* v49 : anomalies — comptes calculés en SQL, seule la page demandée est lue et décodée
      (auparavant : toutes les journées en anomalie de la période, soit ~35 000 lignes à 25 000 employés) */
-  const CACHE_ANO = new Map(), CACHE_JT = new Map();
+  const CACHE_ANO = new Map(), CACHE_JT = new Map(), CACHE_ANOC = new Map();
+  /* 56.33.11 : calcul unique partagé — des demandes identiques arrivées ensemble attendent le même résultat (100
+     utilisateurs qui ouvrent l'accueil en même temps : une seule requête au lieu de 100) */
+  const EN_VOL = new Map();
+  function unique(cle, fn){ let p = EN_VOL.get(cle); if (!p){ p = fn(); EN_VOL.set(cle, p); const fin = () => { if (EN_VOL.get(cle) === p) EN_VOL.delete(cle); }; p.then(fin, fin); } return p; }
   async function anomalies(login, q){
-    const {emps, global} = await selection(login, q);
-    const mats = emps.map(e=>String(e.mat));
-    await assurer(mats, q.du, q.au);
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||40));
     const cle = login+"|"+[q.du, q.au, q.type||"", q.dept||"", q.chef||"", q.site||"", q.q||"", q.equipe||"", off, lim].join("|");
     const c0 = CACHE_ANO.get(cle);
-    if (c0 && c0.gen === GENERATION && Date.now() - c0.t < 60000) return c0.r;
-    const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(mats));
+    if (frais(c0, 60000)) return c0.r;
+    return unique("ano|"+cle, ()=>anomaliesCalcul(login, q, cle, off, lim));
+  }
+  /* comptes par type d'anomalie : indépendants de la page et du type affiché (mis en cache à part) */
+  async function compteAnomalies(login, q, sel){
+    const cleC = login+"|"+[q.du, q.au, q.dept||"", q.chef||"", q.site||"", q.q||"", q.equipe||""].join("|"), cc = CACHE_ANOC.get(cleC);
+    if (frais(cc, 60000)) return cc.compte;
+    return unique("anoc|"+cleC, async ()=>{
+      const m0 = marque(), {global, mats} = sel || await selection(login, q);
+      if (!sel) await assurer(mats, q.du, q.au);
+      const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(mats));
+      const compte = await compteAnomaliesSql(f, q);
+      CACHE_ANOC.set(cleC, Object.assign(m0, {compte})); if (CACHE_ANOC.size > 300) CACHE_ANOC.clear();
+      return compte;
+    });
+  }
+  async function compteAnomaliesSql(f, q){
     const n = await B.get("SELECT SUM(CASE WHEN types LIKE '%oubli%' THEN 1 ELSE 0 END) oubli, SUM(CASE WHEN types LIKE '%retard%' THEN 1 ELSE 0 END) retard,"+
       " SUM(CASE WHEN types LIKE '%absence%' THEN 1 ELSE 0 END) absence, SUM(CASE WHEN types LIKE '%hs%' THEN 1 ELSE 0 END) hs, SUM(CASE WHEN types LIKE '%depart%' THEN 1 ELSE 0 END) depart"+
       " FROM calc_jour WHERE d>=? AND d<=? AND nano>0"+f.sql, q.du, q.au, ...f.a);
     const N = x => Number(x)||0;
     const compte = {oubli:N(n.oubli), retard:N(n.retard), absence:N(n.absence), hs:N(n.hs), depart:N(n.depart)};
     compte[""] = compte.oubli + compte.retard + compte.absence + compte.hs + compte.depart;
+    return compte;
+  }
+  async function anomaliesCalcul(login, q, cle, off, lim){
+    const m0 = marque();
+    const {emps, global, mats, parMat} = await selection(login, q);
+    await assurer(mats, q.du, q.au);
+    const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(mats));
+    const compte = Object.assign({}, await compteAnomalies(login, q, {global, mats}));
     /* ordre d'affichage : oublis, puis retards et absences, puis heures supplémentaires ; les plus récents d'abord */
     const groupes = q.type ? [[q.type]] : [["oubli"], ["retard","depart","absence"], ["hs"]];
     const total = groupes.reduce((s, g)=>s + g.reduce((x, ty)=>x + (compte[ty]||0), 0), 0);
-    const parMat = new Map(emps.map(e=>[String(e.mat), e]));
     const items = []; let saut = off;
     for (const g of groupes){
       if (items.length >= lim) break;
@@ -215,21 +281,19 @@ function creer(B, D, opts){
       saut = 0;
     }
     const r = {compte, total, items, du:q.du, au:q.au};
-    CACHE_ANO.set(cle, {t:Date.now(), gen:GENERATION, r}); if (CACHE_ANO.size > 300) CACHE_ANO.clear();
+    CACHE_ANO.set(cle, Object.assign(m0, {r})); if (CACHE_ANO.size > 300) CACHE_ANO.clear();
     return r;
   }
   async function journees(login, q){
-    const {emps, global} = await selection(login, q);
-    const mats = emps.map(e=>String(e.mat));
+    const {emps, global, mats, parMat} = await selection(login, q);
     await assurer(mats, q.du, q.au);
     const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(mats));
     /* v49 : nombre total de journées gardé jusqu'au prochain changement (le parcours des pages ne le recompte pas) */
     const cleT = login+"|"+[q.du, q.au, q.dept||"", q.chef||"", q.site||"", q.q||"", q.equipe||""].join("|"), cT = CACHE_JT.get(cleT);
-    const tot = cT && cT.gen === GENERATION ? cT.tot : await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d>=? AND d<=?"+f.sql, q.du, q.au, ...f.a);
-    CACHE_JT.set(cleT, {gen:GENERATION, tot}); if (CACHE_JT.size > 300) CACHE_JT.clear();
+    const mT = marque(), tot = frais(cT, 300000) ? cT.tot : await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d>=? AND d<=?"+f.sql, q.du, q.au, ...f.a);
+    if (!frais(cT, 300000)){ CACHE_JT.set(cleT, Object.assign(mT, {tot})); if (CACHE_JT.size > 300) CACHE_JT.clear(); }
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||100));
     const lignes = await B.all("SELECT mat, d, ht, hp, ret, hs, nano, types, data FROM calc_jour WHERE d>=? AND d<=?"+f.sql+" ORDER BY d DESC, mat LIMIT "+lim+" OFFSET "+off, q.du, q.au, ...f.a);
-    const parMat = new Map(emps.map(e=>[String(e.mat), e]));
     return {total:Number(tot.n), offset:off, recalcul:EN_FOND.actif, items:lignes.map(r=>Object.assign({mat:r.mat, d:r.d, ht:r.ht, hp:r.hp, ret:r.ret, hs:r.hs, nano:Number(r.nano), types:r.types},
       JSON.parse(r.data||"{}"), {e:ident(parMat.get(r.mat)||{mat:r.mat})}))};
   }
@@ -238,10 +302,10 @@ function creer(B, D, opts){
   const CACHE_SY = new Map();
   async function synthese(login, q){
     const cleS = login+"|"+JSON.stringify(q), cs = CACHE_SY.get(cleS);
-    if (cs && cs.gen === GENERATION && Date.now() - cs.t < 60000) return cs.r;
-    const r0 = await syntheseCalcul(login, q);
-    CACHE_SY.set(cleS, {t:Date.now(), gen:GENERATION, r:r0}); if (CACHE_SY.size > 200) CACHE_SY.clear();
-    return r0;
+    if (frais(cs, 60000)) return cs.r;
+    return unique("sy|"+cleS, async ()=>{ const m0 = marque(), r0 = await syntheseCalcul(login, q);
+    CACHE_SY.set(cleS, Object.assign(m0, {r:r0})); if (CACHE_SY.size > 200) CACHE_SY.clear();
+    return r0; });
   }
   async function syntheseCalcul(login, q){
     const {emps, global} = await selection(login, q);
@@ -266,9 +330,16 @@ function creer(B, D, opts){
       .sort((a,b)=>a.du === b.du ? COLL.compare(String(a.mat), String(b.mat)) : (a.du < b.du ? 1 : -1));
     return {total:emps.length, offset:off, limit:lim, items};
   }
+  const CACHE_AC = new Map();
   async function accueil(login){
+    const c = CACHE_AC.get(login); if (frais(c, 60000) && c.jour === auj()) return c.r;
+    return unique("ac|"+login, async ()=>{ const m0 = marque(), r = await accueilCalcul(login);
+      CACHE_AC.set(login, Object.assign(m0, {r, jour:auj()})); if (CACHE_AC.size > 500) CACHE_AC.clear();
+      return r; });
+  }
+  async function accueilCalcul(login){
     const a = auj(), du = ajout(a, -7);
-    const r = await anomalies(login, {du, au:a, limit:1});
+    const r = {compte:await compteAnomalies(login, {du, au:a})};
     const {emps, global} = await selection(login, {});
     const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(emps.map(e=>String(e.mat))));
     const pres = await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d=? AND hp>0"+f.sql, a, ...f.a);
@@ -280,9 +351,9 @@ function creer(B, D, opts){
   async function preaudit(login, q){
     const clePA = login+"|"+q.du+"|"+q.au+"|"+(q.site||"");
     const cp = CACHE_PA.get(clePA);
-    if (cp && cp.gen === GENERATION && Date.now() - cp.t < 300000) return cp.r;
-    const r0 = await preauditCalcul(login, q);
-    CACHE_PA.set(clePA, {t:Date.now(), gen:GENERATION, r:r0}); if (CACHE_PA.size > 100) CACHE_PA.clear();
+    if (frais(cp, 300000)) return cp.r;
+    const m0 = marque(), r0 = await preauditCalcul(login, q);
+    CACHE_PA.set(clePA, Object.assign(m0, {r:r0})); if (CACHE_PA.size > 100) CACHE_PA.clear();
     return r0;
   }
   async function preauditCalcul(login, q){
@@ -348,6 +419,6 @@ function creer(B, D, opts){
     }
     return {requetes:n, ms:Date.now() - t0};
   }
-  return {recalculEnCours:()=>EN_FOND.actif, prechauffer, compteursPeriode, comparer, setWorkflow(w){ WF = w; }, generation:()=>GENERATION, charge, assurer, invalider, anomalies, journees, synthese, accueil, etat, precalculer, preaudit, contenuPeriode, arreter(){ fils.forEach(f=>{ if (f && f.w) f.w.terminate(); }); }};
+  return {recalculEnCours:()=>EN_FOND.actif, prechauffer, compteursPeriode, comparer, setWorkflow(w){ WF = w; }, generation:()=>GENERATION+"."+GEN_P, cacheFrais:frais, cacheMarque:marque, charge, assurer, invalider, anomalies, journees, synthese, accueil, etat, precalculer, preaudit, contenuPeriode, arreter(){ fils.forEach(f=>{ if (f && f.w) f.w.terminate(); }); }};
 }
 module.exports = {creer};

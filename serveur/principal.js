@@ -94,7 +94,7 @@ async function prechauffer(){
     const logins = (ref.users||[]).filter(u=>u.actif !== false && (u.admin || prof(u.profilId).admin || ["validation","config"].indexOf((prof(u.profilId).droits||{}).PTG) >= 0)).map(u=>u.login);
     const r = await K.prechauffer(logins); if (r.requetes) journal("préchauffage : "+r.requetes+" écran(s) en "+r.ms+" ms"); } catch(e){ journal("préchauffage : "+e.message); }
 }
-let VIS_I = null, AN_I = null, NB_CALC = null;
+let VIS_I = null, AN_I = null, NB_CALC = null; const EN_VOL_AT = new Map(); let IDX_PTG = null;
 function VIS(){ if (!VIS_I || VIS_I.B !== B){ VIS_I = VISAGES.creer({B, coffre:CF, audit}); VIS_I.B = B; } return VIS_I; }
 /* v56.24 : moteur de synchronisation biométrique, lié à la base en service (recréé après une restauration) */
 let BS_I = null;
@@ -108,7 +108,7 @@ function partitionneur(){
 async function chargerModules(){ try { if (!REVOQUES.size) await revocationsCharger(); await MOD.charger(await licenceActive()); } catch(e){ journal("modules : "+e.message); } }
 function initPointeuses(){
   /* v50 : ingestion (file persistante → événements bruts → normalisés) partagée par les pointeuses et l'application */
-  ING = INGESTION.creer({B, D, meta, audit, journal, config:()=>CONFIG, invalider:(t, r)=>K.invalider(t, r), appJs:path.join(APP, "app.js")});
+  ING = INGESTION.creer({B, D, meta, audit, journal, config:()=>CONFIG, invalider:(t, r)=>K.invalider(t, r, {pointeuse:true}), appJs:path.join(APP, "app.js")});
   D.tracerPtg = (login, avant, apres) => ING.tracerSaisie(login, avant, apres);
   /* v52 : cycle de vie des journées ; une clôture est refusée tant que la période a des journées en attente */
   WF = WORKFLOW.creer({B, D, audit, journal, regle:(c, m, d)=>ING.regle(c, m, d)});
@@ -1456,10 +1456,13 @@ async function traiter(req, res){
     const q = Object.fromEntries(u.searchParams.entries()), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const au = /^\d{4}-\d{2}-\d{2}$/.test(q.au||"") ? q.au : aujourdhui(), du = /^\d{4}-\d{2}-\d{2}$/.test(q.du||"") ? q.du : ajoutJours(au, -1);
     const lim = Math.min(200, Math.max(1, +q.limit||100)), off = Math.max(0, +q.offset||0);
-    const emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
+    /* 56.33.11 : table matricule → salarié et noms en minuscules gardés tant que la liste des salariés ne change pas */
+    const emps = await D.employes();
+    if (!IDX_PTG || IDX_PTG.emps !== emps) IDX_PTG = {emps, parMat:new Map(emps.map(e=>[String(e.mat), e])), mats:emps.map(e=>String(e.mat).toLowerCase()), noms:emps.map(e=>((e.nom||"")+" "+(e.prenom||"")).toLowerCase())};
+    const parMat = IDX_PTG.parMat;
     let mats = null;
     const s = String(q.q||"").trim().toLowerCase();
-    if (s) mats = emps.filter(e=>String(e.mat).toLowerCase() === s || ((e.nom||"")+" "+(e.prenom||"")).toLowerCase().indexOf(s) >= 0).map(e=>String(e.mat)).slice(0, 500);
+    if (s){ mats = []; for (let i = 0; i < emps.length && mats.length < 500; i++) if (IDX_PTG.mats[i] === s || IDX_PTG.noms[i].indexOf(s) >= 0) mats.push(String(emps[i].mat)); }
     if (P.set !== null) mats = (mats || Array.from(P.set)).filter(m=>P.set.has(m));
     if (mats && !mats.length) return json(res, 200, {total:0, lignes:[], du, au});
     let w = " WHERE coll='ptg' AND d>=? AND d<=?", a = [du, au];
@@ -1471,9 +1474,13 @@ async function traiter(req, res){
     return json(res, 200, {total, lignes:l, du, au});
   }
   /* ---- v56.7 : « À traiter » — une seule liste pour tous les modules actifs, selon les droits et le périmètre ---- */
-  if (p === "/api/v1/a-traiter" && req.method === "GET" && CACHE_AT.has(C.login) && Date.now() - CACHE_AT.get(C.login).t < 30000 && CACHE_AT.get(C.login).g === (K.generation ? K.generation() : 0))
+  if (p === "/api/v1/a-traiter" && req.method === "GET" && CACHE_AT.has(C.login) && K.cacheFrais(CACHE_AT.get(C.login), 30000))
     return json(res, 200, CACHE_AT.get(C.login).r);
   if (p === "/api/v1/a-traiter" && req.method === "GET"){
+    /* 56.33.11 : calcul unique partagé par les demandes simultanées d'un même utilisateur */
+    let vol = EN_VOL_AT.get(C.login);
+    if (!vol){
+      vol = (async ()=>{
     const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(y=>y.login === C.login)||{}).profilId) || {};
     const rang = c => admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[(pr.droits||{})[c]] || 0);
@@ -1499,8 +1506,12 @@ async function traiter(req, res){
     items.sort((a, b)=>(b.urgence||0) - (a.urgence||0) || b.nombre - a.nombre);
     const rep = {items, le:new Date().toISOString()};
     /* cache de 30 s par utilisateur, invalidé dès qu'un calcul change (génération) */
-    CACHE_AT.set(C.login, {t:Date.now(), g:(K.generation ? K.generation() : 0), r:rep}); if (CACHE_AT.size > 500) CACHE_AT.delete(CACHE_AT.keys().next().value);
-    return json(res, 200, rep);
+    CACHE_AT.set(C.login, Object.assign(K.cacheMarque(), {r:rep})); if (CACHE_AT.size > 500) CACHE_AT.delete(CACHE_AT.keys().next().value);
+    return rep;
+      })();
+      EN_VOL_AT.set(C.login, vol); const fin = () => { if (EN_VOL_AT.get(C.login) === vol) EN_VOL_AT.delete(C.login); }; vol.then(fin, fin);
+    }
+    return json(res, 200, await vol);
   }
   /* ---- v56.16 : planificateur central — état des tâches de fond, exécution immédiate ---- */
   if (p === "/api/v1/systeme/taches" && req.method === "GET"){ if (!admin) return erreur(res, 403, "Réservé aux administrateurs."); return json(res, 200, {taches:PLAN.etat(), minuteries:PLAN.minuteries()}); }

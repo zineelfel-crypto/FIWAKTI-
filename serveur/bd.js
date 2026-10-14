@@ -98,6 +98,8 @@ function schemaBase(type){
   ];
 }
 const INDEX_FILE_TERMINAL = "CREATE INDEX IF NOT EXISTS ingestion_queue_term ON ingestion_queue(terminal_id, recu_utc)";
+/* 56.33.11 : journal des badgeages trié par date puis identifiant (pages du jour sans tri de tous les badgeages) */
+const INDEX_ENREG_DATE_ID = "CREATE INDEX IF NOT EXISTS enreg_date_id ON enreg(coll, d, id)";
 function annuler(ctx){ (ctx.annul || []).forEach(f=>{ try { f(); } catch(e){} }); }
 const enPg = sql => { let i = 0; return sql.replace(/\?/g, ()=>"$"+(++i)); };
 
@@ -115,7 +117,7 @@ function ouvrirSqlite(fichier, dossier){
   /* v56.2 : colonne « mois » des événements normalisés (installations antérieures) */
   if (!d.prepare("PRAGMA table_info(normalized_events)").all().some(c=>c.name === "mois")) d.exec("ALTER TABLE normalized_events ADD COLUMN mois TEXT");
   if (!d.prepare("PRAGMA table_info(calc_jour)").all().some(c=>c.name === "nmv")){ d.exec("DROP TABLE calc_jour"); schema("sqlite").filter(s=>/calc_jour/.test(s)).forEach(s=>d.exec(s)); }
-  try { d.exec(INDEX_FILE_TERMINAL); } catch(e){}
+  try { d.exec(INDEX_FILE_TERMINAL); d.exec(INDEX_ENREG_DATE_ID); } catch(e){}
   const prep = new Map();
   const st = sql => { let p = prep.get(sql); if (!p){ p = d.prepare(sql); prep.set(sql, p); } return p; };
   const als = new AsyncLocalStorage();
@@ -235,7 +237,7 @@ async function ouvrirPg(cfg, dossier){
     if (part) for (const s of idx) await pool.query(s);                                  /* tables neuves : instantané */
     else setTimeout(async ()=>{ for (const s of idx.slice(1)) try { await pool.query(s.replace("INDEX IF NOT EXISTS", "INDEX CONCURRENTLY IF NOT EXISTS")); } catch(e){} }, 20000); }
   /* 56.33.11 : dernier lot reçu par pointeuse (supervision) — créé sans bloquer les écritures d'une file déjà volumineuse */
-  setTimeout(async ()=>{ try { await pool.query(INDEX_FILE_TERMINAL.replace("INDEX IF NOT EXISTS", "INDEX CONCURRENTLY IF NOT EXISTS")); } catch(e){} }, 15000);
+  setTimeout(async ()=>{ for (const ix of [INDEX_FILE_TERMINAL, INDEX_ENREG_DATE_ID]) try { await pool.query(ix.replace("INDEX IF NOT EXISTS", "INDEX CONCURRENTLY IF NOT EXISTS")); } catch(e){} }, 15000);
   try { await assurerPartitions(pool); } catch(e){ console.error("partitions : "+e.message); }
   const col = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name='calc_jour' AND column_name='nmv' AND table_schema=current_schema()");
   if (!col.rows.length){ await pool.query("DROP TABLE calc_jour"); for (const s of schema("pg").filter(x=>/calc_jour/.test(x))) await pool.query(s); await creerDefauts((s, p)=>pool.query(s, p)); }
