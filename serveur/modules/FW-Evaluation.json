@@ -1,0 +1,49 @@
+{
+  "id": "FW-Evaluation",
+  "nom": "Évaluations",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "evaluation"
+  ],
+  "routes": [
+    "/api/v1/evaluation"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "menu": {
+    "groupe": "talents",
+    "vue": "evaluation",
+    "libelle": {
+      "fr": "Évaluations",
+      "en": "Evaluations",
+      "ar": "التقييمات"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Evaluation/index.js",
+    "css": "modules/FW-Evaluation/index.css"
+  },
+  "serveur": "FW-Evaluation.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 32,
+    "css_ko": 4
+  },
+  "depsFacultatives": [
+    "FW-Competences"
+  ],
+  "integrite": {
+    "js": "sha384-ceCdu42f4LZUpMYIbd0rsoag99H9YIHe5UOMm81/7VijHm+WMQ8k7xaUvY/v7kV5",
+    "css": "sha384-iAjwt0+vaJ4ZPa4sLTnNnPIUA0xMHRPCjcCFg3cGVBMZg3IshwmM25CI62+HLpQm"
+  }
+}

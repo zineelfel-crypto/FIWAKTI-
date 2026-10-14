@@ -1,0 +1,6 @@
+/* FW-Formation — styles du module */
+.fwf-form{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:10px;}
+.fwf-c{display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-2); min-width:130px;}
+.fwf-chk{display:flex; align-items:center; gap:6px; font-size:13px; min-height:36px;}
+.fwf-e{font-size:12px; font-weight:600; border-radius:6px; padding:3px 8px; background:#E3F0EE; color:#0A4743;}
+.fwf-j90{background:#FBEFDF; color:#7A3E0B;} .fwf-j30{background:#FDE2C8; color:#7A3E0B;} .fwf-expiree{background:#FDE2E1; color:#8A1C14;}

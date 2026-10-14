@@ -1,0 +1,23 @@
+/* FW-Visiteurs — styles du module */
+.fwv-filtres, .fwv-modes{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px;}
+.fwv-f{border:1px solid var(--line, #DCE3E1); background:var(--surface, #fff); border-radius:999px; padding:7px 14px; min-height:36px; font:inherit; cursor:pointer;}
+.fwv-f.on{background:#047857; border-color:#047857; color:#fff;} .fwv-f b{margin-inline-start:4px;}
+.fwv-maj{margin-inline-start:auto;}
+.fwv-st{font-size:12px; font-weight:600; border-radius:6px; padding:3px 8px; background:#EEF2F0; color:#33443F; white-space:nowrap;}
+.fwv-ANNONCEE{background:#E8EEF7; color:#1E3A6B;} .fwv-ARRIVEE, .fwv-EN_VISITE{background:#E3F0EE; color:#0A4743;} .fwv-PARTIE{background:#EEF2F0; color:#55615D;}
+.fwv-ANNULEE{background:#F3F3F3; color:#777;} .fwv-NO_SHOW{background:#FDE2E1; color:#8A1C14;}
+.fwv-loge td{vertical-align:middle;} .fwv-inter td:first-child{box-shadow:inset 3px 0 0 #B45309;}
+.fwv-act{display:flex; gap:6px; flex-wrap:wrap;} .fwv-act .fw-btn{min-height:36px;}
+.fwv-form section{margin:0 0 16px;} .fwv-form h2{font-size:15px; margin:0 0 8px;}
+.fwv-form input#fwvEnt, .fwv-form input#fwvHote{width:min(460px, 100%); min-height:40px; font-size:15px;}
+.fwv-sugs{display:flex; flex-direction:column; gap:4px; max-width:460px; margin-top:4px;}
+.fwv-sug{text-align:start; border:1px solid var(--line, #DCE3E1); background:var(--surface, #fff); border-radius:8px; padding:9px 12px; min-height:40px; font:inherit; cursor:pointer;}
+.fwv-sug:hover, .fwv-sug:focus{border-color:#047857; outline:none;} .fwv-creer{border-style:dashed; color:#047857;}
+.fwv-chips{display:flex; flex-wrap:wrap; gap:6px;}
+.fwv-chip{border:1px solid var(--line, #DCE3E1); background:var(--surface, #fff); border-radius:999px; padding:8px 14px; min-height:38px; font:inherit; cursor:pointer;}
+.fwv-chip.on{background:#E3F0EE; border-color:#047857; color:#0A4743; font-weight:600;}
+.fwv-choix{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+.fwv-ligne{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin:6px 0;} .fwv-ligne label{display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-2);}
+.fwv-grand{flex:1; min-width:260px;} .fwv-chk{flex-direction:row !important; align-items:center; gap:6px !important; font-size:13px !important; color:inherit !important;}
+.fwv-jours td{padding:3px 8px 3px 0;} .fwv-nouveau{margin-top:8px;}
+@media (max-width:600px){ .fwv-loge th:nth-child(4), .fwv-loge td:nth-child(4), .fwv-loge th:nth-child(5), .fwv-loge td:nth-child(5){display:none;} }

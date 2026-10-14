@@ -1,0 +1,50 @@
+{
+  "id": "FW-HSE",
+  "nom": "Santé, sécurité, environnement",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "hse"
+  ],
+  "routes": [
+    "/api/v1/hse"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "niveauMenu": "avance",
+  "menu": {
+    "groupe": "hse",
+    "vue": "hse",
+    "libelle": {
+      "fr": "Santé et sécurité",
+      "en": "Health and safety",
+      "ar": "الصحة والسلامة"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-HSE/index.js",
+    "css": "modules/FW-HSE/index.css"
+  },
+  "serveur": "FW-HSE.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 38,
+    "css_ko": 4
+  },
+  "depsFacultatives": [
+    "FW-Time"
+  ],
+  "integrite": {
+    "js": "sha384-EL8kQ4k+kZ3HHzcs0WXA3mCqGAfMVAftuxbxEXZg7d4/aJWAjQvg8gALPJMK0eZY",
+    "css": "sha384-lNsjU3hHntOjN4GsTADfrwK/Ui8yIPnR+C19aUg5THVNJmYiWqvTj8lcHNozgVjG"
+  }
+}

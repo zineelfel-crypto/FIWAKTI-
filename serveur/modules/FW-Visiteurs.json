@@ -1,0 +1,46 @@
+{
+  "id": "FW-Visiteurs",
+  "nom": "Visiteurs et interventions",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "visiteurs"
+  ],
+  "routes": [
+    "/api/v1/visiteurs"
+  ],
+  "donnees": [],
+  "colls": [],
+  "niveauMenu": "simple",
+  "menu": {
+    "groupe": "ctrl",
+    "vue": "visiteurs",
+    "libelle": {
+      "fr": "Visiteurs",
+      "en": "Visitors",
+      "ar": "الزوار"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Visiteurs/index.js",
+    "css": "modules/FW-Visiteurs/index.css"
+  },
+  "serveur": "FW-Visiteurs.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 40,
+    "css_ko": 4
+  },
+  "integrite": {
+    "js": "sha384-FDUxXpAbwoV8frfWztRLJTncyicezVgkhX5t9VFQwro1GfQIa3x9PDW1vIgGdtw2",
+    "css": "sha384-/jNwWYXiRrssol4CoZW5WKO3f43K4RriVHModkIPwYSV/WC6J2xBF6zhMZE0HRqD"
+  }
+}

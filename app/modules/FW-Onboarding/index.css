@@ -1,0 +1,11 @@
+/* FW-Onboarding — styles du module */
+.fwo-form{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:10px;}
+.fwo-c{display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-2); min-width:150px;}
+.fwo-barre{display:inline-block; width:120px; height:8px; border-radius:4px; background:#E3E9E7; vertical-align:middle; overflow:hidden;}
+.fwo-barre span{display:block; height:100%; background:#0F6E68;}
+.fwo-ko{color:#B45309; font-weight:600;}
+.fwo-liste{display:flex; flex-direction:column; gap:6px;}
+.fwo-t{display:flex; gap:12px; align-items:flex-start; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--paper); cursor:pointer;}
+.fwo-t input{width:20px; height:20px; margin-top:2px;}
+.fwo-tt{display:flex; flex-direction:column; gap:2px;}
+.fwo-retard{border-color:#E8B07A; background:#FFF8EF;}

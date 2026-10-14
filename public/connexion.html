@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connexion — FIWAKTI</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 40 40%27%3E%3Crect width=%2740%27 height=%2740%27 rx=%2711%27 fill=%27%23047857%27/%3E%3Cpath d=%27M13 29V11h13M13 20h9%27 stroke=%27%23fff%27 stroke-width=%273.6%27 stroke-linecap=%27round%27 fill=%27none%27/%3E%3C/svg%3E"><link rel="stylesheet" href="/public.css"></head>
+<body class="cnx">
+<div class="cnx-cadre">
+<aside class="vitrine" aria-hidden="true">
+  <p class="vit-sur">FIWAKTI</p>
+  <h2>Temps, RH et sécurité,<br>au même endroit.</h2>
+  <ul>
+    <li><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span><b>Pointage fiable</b>Badgeages, anomalies et validations en temps réel.</span></li>
+    <li><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span><b>Accès maîtrisés</b>Zones, droits et pointeuses synchronisés.</span></li>
+    <li><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.6c1.4.6 2.3 1.9 2.7 4.4"/></svg><span><b>Équipes suivies</b>Absences, compétences, formation et santé.</span></li>
+  </ul>
+  <p class="vit-pied">Vos données restent sur votre serveur, chiffrées et sauvegardées chaque nuit.</p>
+</aside>
+<main class="boite etroite">
+  <div class="tete"><svg class="mono" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#047857"/><path d="M13 29V11h13M13 20h9" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="28.5" cy="26.5" r="5.2" fill="none" stroke="#A7F3D0" stroke-width="2"/></svg><div><div class="logo">FIWAKTI</div><div class="sous" id="entreprise">Temps · RH · Sécurité</div></div></div>
+  <div class="corps">
+    <form id="fConnexion" autocomplete="on">
+      <h1>Connexion</h1>
+      <label for="login">Identifiant ou matricule</label><input id="login" autocomplete="username" required>
+      <label for="mdp">Mot de passe</label><div class="mdp-z"><input id="mdp" type="password" autocomplete="current-password" required><button type="button" class="voir" id="voirMdp" aria-pressed="false" aria-controls="mdp">Afficher</button></div>
+      <div class="aide">Première connexion : identifiant et mot de passe = votre matricule.</div>
+      <label id="memoriserBloc" hidden style="font-weight:400;display:flex;gap:8px;align-items:center"><input type="checkbox" id="memoriser" style="width:auto"> Rester connecté sur ce poste</label>
+      <div id="msg"></div>
+      <div class="actions"><span class="aide">Mot de passe oublié ? Adressez-vous au service RH.</span><button class="pri" type="submit">Se connecter</button></div>
+      <p class="aide" style="margin-top:14px"><a href="#" id="lienJeton">Intervention du fournisseur</a></p>
+    </form>
+    <form id="fJeton" hidden>
+      <p>Collez le jeton d'intervention remis par votre fournisseur. Valable une heure, pour ce serveur seulement, il n'ouvre que l'écran de licence.</p>
+      <label for="jetonF">Jeton d'intervention</label><textarea id="jetonF" rows="4" spellcheck="false" autocomplete="off" style="width:100%;box-sizing:border-box;font-family:monospace"></textarea>
+      <div id="msg4"></div>
+      <div class="actions"><button type="button" id="jetonAnnuler">Retour</button><button class="pri" type="submit">Ouvrir l'écran de licence</button></div>
+    </form>
+    <form id="fA2f" hidden>
+      <h1>Vérification en deux étapes</h1>
+      <div id="a2fEnrol" hidden>
+        <p>Votre profil exige un code de vérification. Dans votre application d'authentification (Google Authenticator, Microsoft Authenticator, FreeOTP…), ajoutez un compte avec cette clé :</p>
+        <p class="mono" id="a2fCle" style="font-size:18px;letter-spacing:1px;word-break:break-all"></p>
+        <p class="aide">Ou ouvrez ce lien sur le téléphone : <a id="a2fUri" href="#">ajouter à l'application</a>. Gardez cette clé confidentielle.</p>
+      </div>
+      <label for="a2fCode">Code à 6 chiffres affiché par l'application</label><input id="a2fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+      <div id="msg3"></div>
+      <div class="actions"><button type="button" id="a2fAnnuler">Annuler</button><button class="pri" type="submit">Vérifier</button></div>
+    </form>
+    <form id="fChanger" hidden>
+      <h1>Changement de mot de passe</h1>
+      <p id="raison">Première connexion : choisissez votre mot de passe personnel. L'accès à l'application s'ouvre ensuite.</p>
+      <label for="actuel">Mot de passe actuel</label><input id="actuel" type="password" autocomplete="current-password">
+      <div class="aide">À la première connexion, c'est votre matricule.</div>
+      <label for="nouveau">Nouveau mot de passe</label><input id="nouveau" type="password" autocomplete="new-password">
+      <label for="conf">Confirmation</label><input id="conf" type="password" autocomplete="new-password">
+      <ul class="regles" id="regles"></ul>
+      <div id="msg2"></div>
+      <div class="actions"><button type="button" id="annuler">Annuler</button><button class="pri" type="submit" id="valider" disabled>Valider et accéder</button></div>
+    </form>
+  </div>
+</main>
+</div>
+<script src="/connexion.js"></script>
+</body></html>

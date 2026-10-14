@@ -1,0 +1,8 @@
+/* FW-Recrutement — styles du module (chargés avec lui, retirés à sa fermeture) */
+.fwr-form{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:12px;}
+.fwr-c{display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-2); min-width:140px;}
+.fwr-pipe{display:grid; grid-template-columns:repeat(6, minmax(170px, 1fr)); gap:8px; overflow-x:auto;}
+.fwr-col{background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:8px; min-height:120px;}
+.fwr-tete{font-weight:600; font-size:13px; margin-bottom:6px;}
+.fwr-carte{border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-bottom:6px; background:#fbfdfc; font-size:13px;}
+.fwr-act{display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;}

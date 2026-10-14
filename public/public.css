@@ -1,0 +1,74 @@
+:root{--vert:#047857;--vert-f:#0b4f49;--fond:#f3f6f5;--ligne:#dbe4e1;--texte:#14312c;--doux:#5f716d;--orange:#b45309;--rouge:#b42318}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:linear-gradient(160deg,#062E2A 0,#047857 55%,#dff1ec 55%);min-height:100vh;color:var(--texte)}
+.boite{max-width:720px;margin:40px auto;background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.18);overflow:hidden}
+.boite.etroite{max-width:420px}
+.tete{padding:22px 28px;border-bottom:1px solid var(--ligne);display:flex;align-items:center;gap:14px}
+.logo{font-weight:800;letter-spacing:.18em;color:var(--vert-f);font-size:18px}
+.sous{color:var(--doux);font-size:13px}
+.corps{padding:24px 28px}
+h1{font-size:22px;margin:0 0 6px}
+p{line-height:1.55}
+.etapes{display:flex;gap:6px;padding:0 28px;margin-top:18px}
+.etapes span{flex:1;height:5px;border-radius:3px;background:var(--ligne)}
+.etapes span.fait{background:var(--vert)}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+input,textarea,select{width:100%;padding:10px 12px;border:1px solid #c9d6d2;border-radius:10px;font:inherit;background:#fff}
+textarea{font-family:ui-monospace,monospace;font-size:12px}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--vert);box-shadow:0 0 0 3px rgba(15,118,110,.18)}
+.aide{font-size:12px;color:var(--doux);margin-top:5px}
+.actions{display:flex;justify-content:space-between;gap:10px;margin-top:22px}
+button,.bouton{appearance:none;border:1px solid #c9d6d2;background:#fff;color:var(--texte);padding:10px 16px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+button.pri,.bouton.pri{background:var(--vert);border-color:var(--vert);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+.choix{display:grid;gap:10px}
+.choix label{margin:0;display:flex;gap:12px;align-items:flex-start;border:1px solid var(--ligne);border-radius:12px;padding:14px;cursor:pointer;font-weight:400}
+.choix label:has(input:checked){border-color:var(--vert);background:#f0f8f6}
+.choix input{width:auto;margin-top:3px}
+.choix strong{display:block}
+.reco{font-size:11px;font-weight:700;color:var(--vert);background:#e3f3ef;border-radius:6px;padding:1px 6px;margin-inline-start:6px}
+.ctl{list-style:none;padding:0;margin:14px 0}
+.ctl li{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f1}
+.ctl .ic{font-size:16px;flex:none}
+.ctl .d{font-size:12px;color:var(--doux)}
+.ctl .s{font-size:12px;color:var(--orange)}
+.msg{padding:10px 12px;border-radius:10px;margin:12px 0;font-size:14px}
+.msg.err{background:#fdecea;color:var(--rouge)}
+.msg.ok{background:#e6f4f1;color:var(--vert-f)}
+.msg.info{background:#eef5f3;color:var(--texte)}
+.regles{list-style:none;padding:0;margin:8px 0;font-size:12.5px}
+.regles li{color:var(--orange)} .regles li.ok{color:var(--vert)}
+.fin{text-align:center;padding:10px 0}
+.fin .grand{font-size:44px}
+.mono{font-family:ui-monospace,monospace}
+.pied{padding:12px 28px;border-top:1px solid var(--ligne);font-size:12px;color:var(--doux);display:flex;justify-content:space-between}
+[hidden]{display:none!important}
+
+/* v56.27 : identité FIWAKTI (monogramme, fond vert nuit sobre) */
+body{background:linear-gradient(160deg,#062E2A 0,#065F46 52%,#F8FAFC 52%) !important;}
+.tete .mono{width:42px;height:42px;flex:0 0 auto;filter:drop-shadow(0 4px 10px rgba(5,150,105,.35))}
+.logo{font-size:22px !important;letter-spacing:.18em !important;color:#062E2A !important}
+.sous{letter-spacing:.06em}
+
+/* v56.31 : page de connexion — vitrine sur grand écran, carte centrée, mot de passe affichable */
+body.cnx{display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(1200px 600px at 15% 10%,rgba(52,211,153,.18),transparent 60%),linear-gradient(150deg,#04211E 0,#063B35 45%,#065F46 100%) !important}
+.cnx-cadre{display:grid;grid-template-columns:1fr;gap:40px;align-items:center;width:100%;max-width:1040px}
+.cnx .boite{margin:0 auto;width:100%;animation:cnx-entree .35s ease-out}
+@keyframes cnx-entree{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.cnx .boite{animation:none}}
+.vitrine{display:none;color:#E6F7F2}
+.vitrine .vit-sur{letter-spacing:.3em;font-weight:800;font-size:13px;color:#6EE7B7;margin:0 0 14px}
+.vitrine h2{font-size:34px;line-height:1.18;margin:0 0 28px;font-weight:750;color:#fff}
+.vitrine ul{list-style:none;padding:0;margin:0;display:grid;gap:18px}
+.vitrine li{display:flex;gap:14px;align-items:flex-start}
+.vitrine svg{width:40px;height:40px;flex:none;padding:9px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);fill:none;stroke:#6EE7B7;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.vitrine b{display:block;color:#fff;font-size:15px;margin-bottom:2px}
+.vitrine span{font-size:14px;color:#B9DCD3;line-height:1.45}
+.vitrine .vit-pied{margin:30px 0 0;font-size:12.5px;color:#8FC3B6}
+@media (min-width:900px){.cnx-cadre{grid-template-columns:1.1fr 420px}.vitrine{display:block}}
+.cnx button.pri{white-space:nowrap;padding:11px 22px}
+.cnx .actions{align-items:center}
+.cnx #lienJeton{color:var(--doux);font-size:12.5px;text-decoration:underline;text-underline-offset:3px}
+.cnx #lienJeton:hover{color:var(--vert)}
+.mdp-z{position:relative}.mdp-z input{padding-right:84px}
+.mdp-z .voir{position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:5px 10px;font-size:12px;border-radius:8px;background:#f1f5f4;border-color:transparent;color:var(--vert-f)}

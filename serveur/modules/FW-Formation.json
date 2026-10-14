@@ -1,0 +1,50 @@
+{
+  "id": "FW-Formation",
+  "nom": "Formation et habilitations",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "formation"
+  ],
+  "routes": [
+    "/api/v1/formation"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "niveauMenu": "avance",
+  "menu": {
+    "groupe": "talents",
+    "vue": "formation",
+    "libelle": {
+      "fr": "Formation",
+      "en": "Training",
+      "ar": "التكوين"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Formation/index.js",
+    "css": "modules/FW-Formation/index.css"
+  },
+  "serveur": "FW-Formation.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 36,
+    "css_ko": 4
+  },
+  "depsFacultatives": [
+    "FW-Competences"
+  ],
+  "integrite": {
+    "js": "sha384-6scXAVe25iGIIrijejP72uoh4mouBXObAaBFo5ICw2blTs+CYtJ7l5pKp66tLedN",
+    "css": "sha384-HDdk6JjJa8kfGODLMGx8v93XdRtJLKPoOAjVGs636fCXwkA+36Sc6VSLhCJTADxB"
+  }
+}

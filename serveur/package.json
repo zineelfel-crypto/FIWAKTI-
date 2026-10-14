@@ -1,0 +1,18 @@
+{
+  "name": "fiwakti-serveur",
+  "version": "56.33.10",
+  "description": "FIWAKTI — serveur (socle FW-Core, FW-Licence, modules FW-)",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "principal.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "mysql2": "^3.11.3",
+    "pdf-lib": "^1.17.1",
+    "pg": "8.23.0",
+    "xlsx": "^0.18.5"
+  }
+}

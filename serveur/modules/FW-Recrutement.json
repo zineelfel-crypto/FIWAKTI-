@@ -1,0 +1,46 @@
+{
+  "id": "FW-Recrutement",
+  "nom": "Recrutement",
+  "categorie": "metier",
+  "version": "1.1",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "recrutement"
+  ],
+  "routes": [
+    "/api/v1/recrutement"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "menu": {
+    "groupe": "talents",
+    "vue": "recrutement",
+    "libelle": {
+      "fr": "Recrutement",
+      "en": "Recruitment",
+      "ar": "الانتداب"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Recrutement/index.js",
+    "css": "modules/FW-Recrutement/index.css"
+  },
+  "serveur": "FW-Recrutement.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 40,
+    "css_ko": 6
+  },
+  "integrite": {
+    "js": "sha384-eY4xxrE8OHLhCyzonvVw8siTti5WAPl6AzVyKhwh5XjQYFNAbdshvCDfNTVCTuZR",
+    "css": "sha384-uaZnyEZaIsgGyiX4wPrgJ+C9XDFuBpBsmvYYv+upQHZKaiQdE0kR682a6PWDqM6r"
+  }
+}

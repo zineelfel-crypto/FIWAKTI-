@@ -1,0 +1,46 @@
+{
+  "id": "FW-Onboarding",
+  "nom": "Intégration des nouveaux collaborateurs",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "onboarding"
+  ],
+  "routes": [
+    "/api/v1/onboarding"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "menu": {
+    "groupe": "talents",
+    "vue": "onboarding",
+    "libelle": {
+      "fr": "Intégration",
+      "en": "Onboarding",
+      "ar": "الإدماج"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Onboarding/index.js",
+    "css": "modules/FW-Onboarding/index.css"
+  },
+  "serveur": "FW-Onboarding.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 30,
+    "css_ko": 4
+  },
+  "integrite": {
+    "js": "sha384-FYM5fkj19/mkEUbLMumF+MmL28FO4Pskr1JTSSYeayWlzzQnc+Sv36qDRkleMLCl",
+    "css": "sha384-jFTUO3Vve1GKCnvc6y0YbQIKYLcsYtrWtoM6x1syO49UEykhBtkpQzKszFpIgRw8"
+  }
+}

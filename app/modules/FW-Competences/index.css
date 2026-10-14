@@ -1,0 +1,17 @@
+/* FW-Competences — styles du module (chargés avec le module, retirés quand on le quitte) */
+.fwc-tete, .fwc-l{display:grid; grid-template-columns:minmax(160px,1.6fr) minmax(110px,1fr) 64px repeat(var(--fwc-n,30), 44px); align-items:center; gap:2px;}
+.fwc-tete{position:sticky; top:0; z-index:2; width:max-content; min-width:100%; font-size:12px; font-weight:600; color:var(--text-2); padding:6px 6px; border-bottom:1px solid var(--line); background:var(--paper); box-sizing:border-box;}
+.fwc-grille{position:relative; height:min(62vh, 640px); overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--paper);}
+.fwc-zone{position:relative; width:max-content; min-width:100%;}
+.fwc-l{position:absolute; left:0; width:max-content; min-width:100%; box-sizing:border-box; height:36px; padding:0 6px; border-bottom:1px solid var(--line); font-size:13px;}
+.fwc-nom{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.fwc-f{color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.fwc-att{color:var(--text-3);}
+.fwc-e{text-align:center;}
+.fwc-ko{color:#b91c1c; font-weight:600;}
+.fwc-c{text-align:center; overflow:hidden; text-overflow:ellipsis;}
+.fwc-n{height:28px; border:1px solid var(--line); border-radius:6px; background:#f4f7f6; font:inherit; font-size:12px; cursor:pointer; padding:0;}
+.fwc-n small{color:var(--text-3); font-size:10px;}
+.fwc-n1{background:#e8f3f1;} .fwc-n2{background:#cfe8e3;} .fwc-n3{background:#9fd3c9;} .fwc-n4{background:#5fb3a5; color:#fff;}
+.fwc-n.fwc-ecart{outline:2px solid #dc2626; outline-offset:-2px;}
+.fwc-n:focus-visible{outline:2px solid #047857; outline-offset:1px;}

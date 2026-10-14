@@ -1,0 +1,49 @@
+{
+  "id": "FW-Migration",
+  "nom": "Assistant de migration",
+  "categorie": "socle",
+  "version": "1.1.11",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "migration"
+  ],
+  "routes": [
+    "/api/v1/migration"
+  ],
+  "donnees": [],
+  "colls": [],
+  "niveauMenu": "admin",
+  "menu": {
+    "groupe": "adm",
+    "vue": "migration",
+    "libelle": {
+      "fr": "Migration des données",
+      "en": "Data migration",
+      "ar": "ترحيل البيانات"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Migration/index.js",
+    "css": "modules/FW-Migration/index.css"
+  },
+  "serveur": "FW-Migration.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 46,
+    "css_ko": 4
+  },
+  "annexes": {
+    "FW-Migration.formules.js": "formules.js"
+  },
+  "integrite": {
+    "js": "sha384-tVZ9+0uYEEQe/8lpOquJOEB8XZLCen5/6WG78uBSZMxCmIHwHTdN9ymstbKbpuDp",
+    "css": "sha384-c816Ii4IPSrZYCHc3lmVLFC+Yup7dkCwicpAqhVnbxuJff0ozH3voOEzLZZthPb/"
+  }
+}

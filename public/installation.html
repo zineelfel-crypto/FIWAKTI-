@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Installation de FIWAKTI</title><link rel="stylesheet" href="/public.css"></head>
+<body>
+<main class="boite">
+  <div class="tete"><div class="logo">FIWAKTI</div><div class="sous">Installation — <span id="version"></span></div></div>
+  <div class="etapes" id="barre"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+  <div class="corps">
+
+    <div id="jetonBloc" class="msg info" hidden>
+      <strong>Code d'installation</strong><br>Vous installez FIWAKTI depuis un autre poste que le serveur. Saisissez le code affiché par l'installateur
+      (ou lisez-le dans <span class="mono">donnees/jeton-installation.txt</span> sur le serveur).
+      <input id="jetonSaisie" autocomplete="off" style="margin-top:8px"><button class="pri" id="jetonOk" style="margin-top:8px">Valider</button>
+    </div>
+    <section data-etape="1">
+      <h1>Bienvenue</h1>
+      <p>Nous allons préparer votre installation de FIWAKTI en quelques étapes : vérification de la machine, licence, compte administrateur. Aucune donnée n'est modifiée avant la dernière étape.</p>
+      <div class="actions"><span></span><button class="pri" data-suivant>Commencer</button></div>
+    </section>
+
+    <section data-etape="2" hidden>
+      <h1>Type d'installation</h1>
+      <div class="choix">
+        <label><input type="radio" name="mode" value="entreprise" checked><span><strong>Serveur d'entreprise <span class="reco">Recommandé</span></strong>Plusieurs utilisateurs sur plusieurs postes du réseau. Les données restent sur ce serveur.</span></label>
+        <label><input type="radio" name="mode" value="local"><span><strong>Poste unique</strong>FIWAKTI n'est accessible que depuis cette machine.</span></label>
+        <label><input type="radio" name="mode" value="reprise"><span><strong>Reprise après sinistre</strong>Reconstruire FIWAKTI sur cette machine à partir d'une sauvegarde et de la clé des sauvegardes conservées hors du serveur perdu.</span></label>
+        <label><input type="radio" name="mode" value="demo"><span><strong>Démonstration</strong>Découvrir FIWAKTI avec des données fictives, sans rien installer. Aucune donnée n'est enregistrée.</span></label>
+      </div>
+      <div class="actions"><button data-precedent>Précédent</button><button class="pri" data-suivant>Continuer</button></div>
+    </section>
+
+    <section data-etape="3" hidden>
+      <h1>Vérification de la machine</h1>
+      <p>FIWAKTI contrôle que tout est prêt. Seuls les points <strong>🔴 bloquants</strong> empêchent l'installation.</p>
+      <ul class="ctl" id="controles"><li>Vérification en cours…</li></ul>
+      <div class="actions"><button data-precedent>Précédent</button><span><button id="relancer">Relancer les contrôles</button> <button class="pri" data-suivant id="apresCtl" disabled>Continuer</button></span></div>
+    </section>
+
+    <section data-etape="4" hidden>
+      <h1>Licence</h1>
+      <p>Collez la clé de licence reçue de l'éditeur. Elle indique le nom de votre entreprise et les modules ouverts.</p>
+      <label for="licence">Clé de licence</label>
+      <textarea id="licence" rows="4" placeholder="FWK1.…" spellcheck="false"></textarea>
+      <div class="aide">Licence liée à ce serveur ? Communiquez à l'éditeur l'empreinte de cette machine : <span class="mono" id="empreinte"></span></div>
+      <div id="licMsg"></div>
+      <div class="actions"><button data-precedent>Précédent</button><button class="pri" data-suivant id="apresLic" disabled>Continuer</button></div>
+    </section>
+
+    <section data-etape="5" hidden>
+      <h1>Base de données</h1>
+      <div class="choix">
+        <label><input type="radio" name="base" value="pg" checked><span><strong>PostgreSQL <span class="reco">Recommandé</span></strong>Pour un réseau d'entreprise et les grands effectifs (plus de 500 employés). La base peut être sur ce serveur ou sur un serveur dédié.</span></label>
+        <label><input type="radio" name="base" value="sqlite"><span><strong>Base intégrée</strong>Rien à installer. Pour un poste unique ou un petit effectif. Le passage à PostgreSQL reste possible plus tard, sans perte.</span></label>
+      </div>
+      <div id="pgChamps">
+        <div id="pgPre" class="msg ok" hidden>PostgreSQL déjà configuré pour ce serveur.</div>
+        <div id="pgForm">
+          <label for="pgHote">Serveur PostgreSQL</label><input id="pgHote" value="localhost">
+          <label for="pgPort">Port</label><input id="pgPort" value="5432" inputmode="numeric">
+          <label for="pgNom">Nom de la base</label><input id="pgNom" value="fiwakti">
+          <label for="pgUtil">Utilisateur</label><input id="pgUtil" value="fiwakti" autocomplete="off">
+          <label for="pgMdp">Mot de passe</label><input id="pgMdp" type="password" autocomplete="new-password">
+          <div class="aide">L'installateur Linux et Docker créent cette base automatiquement ; sinon, demandez ces informations à votre service informatique.</div>
+          <div class="actions" style="justify-content:flex-start"><button id="pgTester">Tester la connexion</button></div>
+        </div>
+      </div>
+      <div id="pgMsg"></div>
+      <div class="actions"><button data-precedent>Précédent</button><button class="pri" data-suivant id="apresBase" disabled>Continuer</button></div>
+    </section>
+
+    <section data-etape="6" hidden>
+      <h1>Compte administrateur</h1>
+      <p>Ce compte gère l'installation. Vous choisissez son mot de passe : il n'est jamais transmis à l'éditeur.</p>
+      <label for="entreprise">Nom de l'entreprise</label><input id="entreprise" autocomplete="organization">
+      <label for="nom">Nom de l'administrateur</label><input id="nom" value="Administrateur" autocomplete="name">
+      <label for="login">Identifiant</label><input id="login" value="admin" autocomplete="username">
+      <label for="mdp">Mot de passe</label><input id="mdp" type="password" autocomplete="new-password">
+      <label for="confirmation">Confirmation</label><input id="confirmation" type="password" autocomplete="new-password">
+      <ul class="regles" id="regles"></ul>
+      <label for="heure">Heure de la sauvegarde quotidienne</label>
+      <select id="heure"><option value="1">01:00</option><option value="2" selected>02:00</option><option value="3">03:00</option><option value="4">04:00</option><option value="22">22:00</option><option value="23">23:00</option></select>
+      <div id="instMsg"></div>
+      <div class="actions"><button data-precedent>Précédent</button><button class="pri" id="installer" disabled>Installer</button></div>
+    </section>
+
+    <section data-etape="8" hidden>
+      <h1>Reprise après sinistre</h1>
+      <p>Choisissez le trousseau de clés (fichier <span class="mono">.key</span> téléchargé depuis État du système) puis la sauvegarde à restaurer (<span class="mono">fiwakti-….chiffre</span>). Les comptes, le paramétrage, les badgeages, les clôtures et l'audit sont rétablis.</p>
+      <label for="repCle">Trousseau de clés (fichier .key)</label><input id="repCle" type="file" accept=".key,.txt">
+      <label for="repFichier">Sauvegarde</label><input id="repFichier" type="file">
+      <div id="repMsg"></div>
+      <div class="actions"><button data-precedent>Précédent</button><button class="pri" id="repGo">Restaurer</button></div>
+    </section>
+
+    <section data-etape="7" hidden>
+      <div class="fin"><div class="grand">✅</div><h1>Installation terminée</h1>
+      <p id="finTexte">FIWAKTI est prêt. Une première sauvegarde a été faite et vérifiée.</p>
+      <p class="aide">Adresse à communiquer aux utilisateurs : <span class="mono" id="adresse"></span></p>
+      <a class="bouton pri" href="/connexion.html">Se connecter</a></div>
+    </section>
+  </div>
+  <div class="pied"><span>FIWAKTI — gestion du temps de travail</span><span id="pied"></span></div>
+</main>
+<script src="/installation.js"></script>
+</body></html>

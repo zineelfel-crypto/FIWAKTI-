@@ -1,0 +1,47 @@
+{
+  "id": "FW-Medicale",
+  "nom": "Suivi médical",
+  "categorie": "metier",
+  "version": "1.0",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "medical"
+  ],
+  "routes": [
+    "/api/v1/medical"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "EMP",
+  "niveauMenu": "avance",
+  "menu": {
+    "groupe": "hse",
+    "vue": "medical",
+    "libelle": {
+      "fr": "Suivi médical",
+      "en": "Medical follow-up",
+      "ar": "المتابعة الطبية"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-Medicale/index.js",
+    "css": "modules/FW-Medicale/index.css"
+  },
+  "serveur": "FW-Medicale.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 30,
+    "css_ko": 3
+  },
+  "integrite": {
+    "js": "sha384-LCzmwTJW9rQw1S7hrbejzokS+mr/rw42tDYX+XA5kD09g0yWM+cflUIKho7YkNaw",
+    "css": "sha384-6geXXqR35LR1BapII5aCeb4N3WJJwsll1CWpXBby3KKg5aX9vHbEyTLRpzOTxrSe"
+  }
+}
