@@ -31,14 +31,27 @@ function creer(B, PERIM){
   }
   /* v56.24 : changement d'un salarié (site, rattachements, sortie) signalé à la synchronisation biométrique */
   let SUR_EMP = null;
-  async function ecrire(coll, x){
+  /* ancien : fiche actuelle déjà lue par l'appelant (évite une seconde lecture) */
+  async function ecrire(coll, x, ancien){
     let ancienEmp;
-    if (coll === "emps" && SUR_EMP){ try { const r = await B.get("SELECT data FROM enreg WHERE coll='emps' AND id=?", String(x.id)); ancienEmp = r ? JSON.parse(r.data) : null; } catch(e){ ancienEmp = undefined; } }
-    if (coll === "emps") CACHE_EMPS = null;
-    const d = dateDe(coll, x);
+    if (coll === "emps" && SUR_EMP){ if (ancien !== undefined) ancienEmp = ancien; else try { const r = await B.get("SELECT data FROM enreg WHERE coll='emps' AND id=?", String(x.id)); ancienEmp = r ? JSON.parse(r.data) : null; } catch(e){ ancienEmp = undefined; } }
+    const d = dateDe(coll, x), texte = JSON.stringify(x);
     await B.run("INSERT INTO enreg(coll,id,mat,d,mois,data) VALUES(?,?,?,?,?,?) ON CONFLICT(coll,id) DO UPDATE SET mat=excluded.mat, d=excluded.d, mois=excluded.mois, data=excluded.data",
-      coll, String(x.id), x.mat != null ? String(x.mat) : null, d, d ? d.slice(0,7) : null, JSON.stringify(x));
+      coll, String(x.id), x.mat != null ? String(x.mat) : null, d, d ? d.slice(0,7) : null, texte);
+    if (coll === "emps"){ majCacheEmp(String(x.id), texte); if (B.siAnnulation) B.siAnnulation(()=>{ CACHE_EMPS = null; }); }
     if (coll === "emps" && SUR_EMP && ancienEmp !== undefined){ const a = ancienEmp; setImmediate(()=>{ try { SUR_EMP(a, x); } catch(e){} }); }
+  }
+  /* 56.33.11 : écriture groupée (requêtes multi-lignes) — ingestion des pointeuses et import en masse.
+     Hors « emps » (dont chaque changement est signalé un par un à la synchronisation biométrique). Les identifiants
+     d'un même appel doivent être distincts. */
+  async function ecrireLot(coll, liste){
+    if (coll === "emps") throw new Error("ecrireLot : utiliser ecrire() pour les salariés");
+    const n = 100;
+    for (let i = 0; i < liste.length; i += n){
+      const part = liste.slice(i, i + n), vals = [];
+      part.forEach(x=>{ const d = dateDe(coll, x); vals.push(coll, String(x.id), x.mat != null ? String(x.mat) : null, d, d ? d.slice(0,7) : null, JSON.stringify(x)); });
+      await B.run("INSERT INTO enreg(coll,id,mat,d,mois,data) VALUES"+part.map(()=>"(?,?,?,?,?,?)").join(",")+" ON CONFLICT(coll,id) DO UPDATE SET mat=excluded.mat, d=excluded.d, mois=excluded.mois, data=excluded.data", ...vals);
+    }
   }
   async function migrer(sauvegarder){
     const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP);
@@ -59,20 +72,56 @@ function creer(B, PERIM){
     return n;
   }
   async function referentiel(){ const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP); return r ? JSON.parse(r.valeur) : null; }
-  /* v45 : la liste des employés est gardée en mémoire et relue seulement après une modification */
-  let CACHE_EMPS = null;
+  /* 56.33.11 : paramétrage en lecture seule, partagé et gelé, relu seulement quand sa version change en base (une
+     petite requête par appel). Avec un portail de 50 000 comptes le paramétrage pèse ~8 Mo : le relire et le décoder
+     (60 à 80 ms) plusieurs fois par requête ralentissait tous les écrans. Gelé : une modification accidentelle lève
+     une erreur au lieu de corrompre la copie partagée. Pour modifier le paramétrage : referentiel() (copie neuve). */
+  let REF_LECTURE = null;
+  function geler(o){ if (o && typeof o === "object" && !Object.isFrozen(o)){ Object.freeze(o); for (const k of Object.keys(o)) geler(o[k]); } return o; }
+  async function referentielLecture(){
+    const r = await B.get("SELECT version, maj FROM kv WHERE cle=?", CLE_APP);
+    if (!r) return null;
+    const cle = r.version+"|"+r.maj;
+    if (REF_LECTURE && REF_LECTURE.cle === cle) return REF_LECTURE.ref;
+    const ref = geler(await referentiel());
+    REF_LECTURE = {cle, ref};
+    return ref;
+  }
+  /* v45 : la liste des employés est gardée en mémoire et relue seulement après une modification.
+     56.33.11 : une fiche écrite est remplacée dans la liste au lieu de la faire relire en entier (50 000 fiches
+     relues et décodées après chaque modification auparavant : ~300 ms par fiche modifiée, 1,5 s par lot d'import).
+     La liste change d'identité à chaque modification : les caches dérivés (annuaire, correspondance des pointeuses,
+     moteur) se reconstruisent comme avant. */
+  let CACHE_EMPS = null, CACHE_POS = null, CACHE_MAJ = null;
+  function majCacheEmp(id, texte){
+    if (!CACHE_EMPS) return;
+    if (!CACHE_MAJ) CACHE_MAJ = new Map();
+    CACHE_MAJ.set(id, texte);
+  }
   async function employes(){
-    if (!CACHE_EMPS) CACHE_EMPS = (await B.all("SELECT data FROM enreg WHERE coll='emps'")).map(r=>JSON.parse(r.data));
+    if (!CACHE_EMPS){
+      const l = (await B.all("SELECT id, data FROM enreg WHERE coll='emps'"));
+      CACHE_EMPS = l.map(r=>JSON.parse(r.data)); CACHE_POS = new Map(l.map((r, i)=>[String(r.id), i])); CACHE_MAJ = null;
+    } else if (CACHE_MAJ){
+      const copie = CACHE_EMPS.slice();
+      CACHE_MAJ.forEach((texte, id)=>{ const i = CACHE_POS.get(id), e = JSON.parse(texte); if (i === undefined){ CACHE_POS.set(id, copie.length); copie.push(e); } else copie[i] = e; });
+      CACHE_EMPS = copie; CACHE_MAJ = null;
+    }
     return CACHE_EMPS;
   }
+  /* 56.33.11 : périmètre mémorisé pour un même paramétrage partagé, une même liste de salariés et un même jour */
+  const MEMO_PERIM = new WeakMap();
   async function perimetreDe(ref, login){
     const emps = await employes();
+    const gele = ref && Object.isFrozen(ref), cle = String(login).toLowerCase()+"|"+new Date().toDateString();
+    if (gele){ const m = MEMO_PERIM.get(ref), x = m && m.get(cle); if (x && x.emps === emps) return {P:x.P, emps}; }
     const P = PERIM.perimetre(Object.assign({}, ref, {emps}), login);
+    if (gele){ let m = MEMO_PERIM.get(ref); if (!m){ m = new Map(); MEMO_PERIM.set(ref, m); } if (m.size > 2000) m.clear(); m.set(cle, {P, emps}); }
     return {P, emps};
   }
   async function charger(login, depuis, opts){
     opts = opts || {};
-    const ref = await referentiel() || {};
+    const ref = await referentielLecture() || {};
     const {P, emps} = await perimetreDe(ref, login);
     const vue = PERIM.vue(Object.assign({}, ref, {emps}), login).doc;
     const nb = P.set === null ? emps.length : P.set.size;
@@ -121,8 +170,12 @@ function creer(B, PERIM){
     return '{"colls":{'+parties.join(",")+'},"du":'+JSON.stringify(du)+',"au":'+JSON.stringify(au)+'}';
   }
   async function synchroniser(login, paquet){
-    const ref = await referentiel() || {};
-    const {P} = await perimetreDe(ref, login);
+    /* 56.33.11 : envoi sans paramétrage (salariés, badgeages…) → paramétrage partagé en lecture (copie de surface ; le
+       document n'est pas réécrit) au lieu d'une relecture complète (~8 Mo avec 50 000 comptes) */
+    const sansRef = !paquet.ref || !Object.keys(paquet.ref).length;
+    const refL = sansRef ? await referentielLecture() : null;
+    const ref = refL ? Object.assign({}, refL, {__versions:Object.assign({}, refL.__versions || {})}) : await referentiel() || {};
+    const {P} = await perimetreDe(refL || ref, login);
     const admin = !!P.u && (!P.profil || PERIM.niveauProfil(P.profil) === "admin");
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
@@ -208,7 +261,7 @@ function creer(B, PERIM){
           }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
-          await ecrire(c, v); nbEcrits++;
+          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++;
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
           if (!immuable) (nouvellesVersions.colls[c] = nouvellesVersions.colls[c] || {})[String(x.id)] = v.__v;
           [avant, v].forEach(o=>joursDe(c, o).forEach(d=>touches.add(o.mat+"|"+d)));
@@ -232,7 +285,14 @@ function creer(B, PERIM){
     });
     return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions};
   }
+  /* 56.33.11 : comptages mémorisés 5 min (écran État du système) : un COUNT(*) sur plusieurs millions de badgeages
+     prend plus d'une seconde à chaque ouverture */
+  let STATS = null;
   async function statistiques(){
+    if (STATS && Date.now() - STATS.t < 300000) return Object.assign({}, STATS.o);
+    const o = await statistiquesCalcul(); STATS = {t:Date.now(), o}; return Object.assign({}, o);
+  }
+  async function statistiquesCalcul(){
     const o = {}; (await B.all("SELECT coll, COUNT(*) n FROM enreg GROUP BY coll")).forEach(r=>{ o[r.coll] = Number(r.n); });
     const m = await B.get("SELECT MIN(d) a, MAX(d) b FROM enreg WHERE coll='ptg'");
     o.ptgDu = m && m.a; o.ptgAu = m && m.b;
@@ -255,7 +315,7 @@ function creer(B, PERIM){
       return n;
     });
   }
-  const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, filtreMat};
+  const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
 }
 function controleReglesV(avant, apres, ref){

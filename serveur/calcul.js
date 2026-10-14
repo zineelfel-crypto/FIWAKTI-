@@ -3,6 +3,9 @@
 "use strict";
 const { Worker } = require("worker_threads");
 const path = require("path");
+/* 56.33.11 : comparateur créé une fois (même ordre que localeCompare sans paramètre, ~10 fois plus rapide sur 50 000
+   salariés) */
+const COLL = new Intl.Collator();
 const REF_GLOBALES = ["cals","jours","tt","arits","convs","sites","depts","champs","clotures","params","secu","regles","circuits","reglesV","etablissements"];
 function creer(B, D, opts){
   let GENERATION = 0;
@@ -12,21 +15,40 @@ function creer(B, D, opts){
   function fil(i){
     if (fils[i] && fils[i].w) return fils[i];
     const w = new Worker(path.join(__dirname, "moteur.js"), {workerData:{base:opts.base, dossier:opts.dossier, app:opts.app}});
-    const f = {w, charge:0};
+    const f = {w, charge:0, fond:0};
     w.on("message", m=>{ const p = attente.get(m.id); if (!p) return;
       if (m.progression){ if (p.avancement) p.avancement(m.progression); return; }
-      attente.delete(m.id); f.charge--; m.ok ? p.ok(m.r) : p.ko(new Error(m.erreur)); });
-    w.on("error", e=>{ opts.journal("moteur : "+e.message); attente.forEach((p, id)=>{ if (p.f === f){ attente.delete(id); p.ko(e); } }); f.w = null; });
-    w.on("exit", ()=>{ f.w = null; });
+      attente.delete(m.id); f.charge--; if (p.fond) f.fond--; m.ok ? p.ok(m.r) : p.ko(new Error(m.erreur)); pomper(); });
+    w.on("error", e=>{ opts.journal("moteur : "+e.message); attente.forEach((p, id)=>{ if (p.f === f){ attente.delete(id); p.ko(e); } }); f.w = null; pomper(); });
+    w.on("exit", ()=>{ f.w = null; pomper(); });
     fils[i] = f; return f;
   }
-  function tache(m, avancement){
-    let meilleur = 0;
-    for (let i = 0; i < NB; i++){ const f = fils[i]; if (!f || !f.w){ meilleur = i; break; } if (f.charge < fils[meilleur].charge) meilleur = i; }
-    const f = fil(meilleur);
+  /* 56.33.11 : deux priorités. Une demande d'écran part tout de suite vers le fil le moins chargé ; un calcul de fond
+     (rattrapage après un import de badgeages, rafraîchissement d'hier et d'aujourd'hui) attend en file et n'occupe
+     jamais plus d'une place par fil. Auparavant les deux se mélangeaient : à 50 000 salariés, pendant l'arrivée des
+     badgeages, une synthèse de 100 salariés attendait derrière des centaines de milliers de journées (30 s, délai
+     dépassé). */
+  const FILE_FOND = [];
+  function envoyer(i, m, ok, ko, avancement, fond){
+    const f = fil(i);
     /* v53 : source des badgeages du moteur (projection de compatibilité ou événements normalisés) */
     const source = (opts.config && (opts.config().moteurSource === "normalise")) ? "normalise" : "compat";
-    return new Promise((ok, ko)=>{ const id = ++seq; attente.set(id, {ok, ko, f, avancement}); f.charge++; f.w.postMessage(Object.assign({id, source}, m)); });
+    const id = ++seq; attente.set(id, {ok, ko, f, avancement, fond}); f.charge++; if (fond) f.fond++;
+    f.w.postMessage(Object.assign({id, source}, m));
+  }
+  function pomper(){
+    while (FILE_FOND.length){
+      let libre = -1;
+      for (let i = 0; i < NB; i++){ const f = fils[i]; if (!f || !f.w || !f.fond){ libre = i; break; } }
+      if (libre < 0) return;
+      const t = FILE_FOND.shift(); envoyer(libre, t.m, t.ok, t.ko, t.avancement, true);
+    }
+  }
+  function tache(m, avancement, fond){
+    if (fond) return new Promise((ok, ko)=>{ FILE_FOND.push({m, ok, ko, avancement}); pomper(); });
+    let meilleur = 0;
+    for (let i = 0; i < NB; i++){ const f = fils[i]; if (!f || !f.w){ meilleur = i; break; } if (f.charge - f.fond < fils[meilleur].charge - fils[meilleur].fond) meilleur = i; }
+    return new Promise((ok, ko)=>envoyer(meilleur, m, ok, ko, avancement, false));
   }
   const auj = () => { const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); };
   const ajout = (k, j) => { const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+j); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
@@ -77,14 +99,14 @@ function creer(B, D, opts){
         }
         const lots = [];
         for (let i = 0; i < manque.length; i += 400) lots.push(manque.slice(i, i+400));
-        const calculer = () => Promise.all(lots.map(l=>tache({type:"calculer", mats:l, du, au:auPasse, horodatage:new Date().toISOString()})));
+        const calculer = fond => Promise.all(lots.map(l=>tache({type:"calculer", mats:l, du, au:auPasse, horodatage:new Date().toISOString()}, null, fond)));
         /* v56.30 : après un changement de paramétrage qui efface tous les résultats, des centaines de milliers de journées
            manquent : on ne fait plus attendre l'écran (92 s mesurées à 60 000 salariés) — calcul en arrière-plan, la réponse
            signale « recalcul en cours » et l'écran se met à jour seul */
         if (manque.length > 3000){
           if (!EN_FOND.actif){ EN_FOND.actif = true; EN_FOND.depuis = Date.now(); EN_FOND.salaries = manque.length;
             /* base intégrée occupée (calcul d'avance, synchronisation) : nouvel essai, jusqu'à 6 fois */
-            const essayer = n => calculer().catch(e=>{ if (/database is locked|SQLITE_BUSY/i.test(String(e && e.message)) && n < 6) return new Promise(ok=>setTimeout(ok, 3000*(n+1))).then(()=>essayer(n+1)); throw e; });
+            const essayer = n => calculer(true).catch(e=>{ if (/database is locked|SQLITE_BUSY/i.test(String(e && e.message)) && n < 6) return new Promise(ok=>setTimeout(ok, 3000*(n+1))).then(()=>essayer(n+1)); throw e; });
             essayer(0).then(res=>{ if (res.reduce((x, y)=>x + y, 0)){ GENERATION++; return suivre(manque, du, auPasse); } })
               .catch(e=>opts.journal("recalcul en arrière-plan : "+e.message)).then(()=>{ EN_FOND.actif = false; }); }
         } else {
@@ -108,7 +130,7 @@ function creer(B, D, opts){
           RAFRAICHISSEMENT = true;
           const l = Array.from(new Set(vieux.map(x=>x.mat))), lots2 = [];
           for (let i = 0; i < l.length; i += 400) lots2.push(l.slice(i, i+400));
-          Promise.all(lots2.map(x=>tache({type:"calculer", mats:x, du:r0, au:r1, horodatage:new Date().toISOString()})))
+          Promise.all(lots2.map(x=>tache({type:"calculer", mats:x, du:r0, au:r1, horodatage:new Date().toISOString()}, null, true)))
             .then(()=>{ GENERATION++; return suivre(l, r0, r1); }).catch(e=>opts.journal("rafraîchissement : "+e.message)).finally(()=>{ RAFRAICHISSEMENT = false; });
         }
       }
@@ -130,7 +152,7 @@ function creer(B, D, opts){
   }
   /* ensemble d'employés : périmètre ∩ filtres (département avec sous-départements, équipe, recherche) */
   async function selection(login, q){
-    const ref = await D.referentiel() || {};
+    const ref = await (D.referentielLecture || D.referentiel)() || {};
     const {P, emps} = await D.perimetreDe(ref, login);
     let l = emps.filter(e=>P.set === null || P.set.has(String(e.mat)));
     const actifs = e => !(e.sortie && e.sortie < (q.du || auj()));
@@ -144,7 +166,9 @@ function creer(B, D, opts){
     if (q.chef) l = l.filter(e=>String(e.chefMat) === String(q.chef));
     if (q.equipe){
       const eq = new Set(), file = [String(q.equipe)];
-      while (file.length){ const m = file.shift(); emps.forEach(e=>{ if (String(e.chefMat) === m && !eq.has(String(e.mat))){ eq.add(String(e.mat)); file.push(String(e.mat)); } }); }
+      /* 56.33.11 : index chef → équipe (un parcours de tout le personnel par membre de l'équipe auparavant) */
+      const parChef = new Map(); emps.forEach(e=>{ const c = String(e.chefMat); if (!parChef.has(c)) parChef.set(c, []); parChef.get(c).push(e); });
+      while (file.length){ const m = file.shift(); (parChef.get(m) || []).forEach(e=>{ if (!eq.has(String(e.mat))){ eq.add(String(e.mat)); file.push(String(e.mat)); } }); }
       l = l.filter(e=>eq.has(String(e.mat)));
     }
     if (q.q && q.q.length >= 2){
@@ -221,7 +245,7 @@ function creer(B, D, opts){
   }
   async function syntheseCalcul(login, q){
     const {emps, global} = await selection(login, q);
-    emps.sort((a,b)=>String(a.mat).localeCompare(String(b.mat)));
+    emps.sort((a,b)=>COLL.compare(String(a.mat), String(b.mat)));
     const off = Math.max(0, +q.offset||0), lim = Math.min(300, Math.max(1, +q.limit||50));
     const page = emps.slice(off, off+lim), mats = page.map(e=>String(e.mat));
     await assurer(mats, q.du, q.au);
@@ -239,7 +263,7 @@ function creer(B, D, opts){
     });
     const parMat = new Map(page.map(e=>[String(e.mat), e]));
     const items = Array.from(grp.values()).map(o=>Object.assign(o, {ecart:o.fait - (o.prevu - o.absH), taux:o.prevu > 0 ? Math.round(100*o.fait/o.prevu) : null, e:ident(parMat.get(o.mat))}))
-      .sort((a,b)=>a.du === b.du ? String(a.mat).localeCompare(String(b.mat)) : (a.du < b.du ? 1 : -1));
+      .sort((a,b)=>a.du === b.du ? COLL.compare(String(a.mat), String(b.mat)) : (a.du < b.du ? 1 : -1));
     return {total:emps.length, offset:off, limit:lim, items};
   }
   async function accueil(login){
@@ -296,7 +320,7 @@ function creer(B, D, opts){
     return tache({type:"etat", def, mats:emps.map(e=>String(e.mat)), du, au}, avancement);
   }
   /* file d'attente des calculs (observabilité) */
-  function charge(){ return {fils:fils.filter(f=>f && f.w).length, enCours:fils.reduce((s, f)=>s + ((f && f.charge) || 0), 0)}; }
+  function charge(){ return {fils:fils.filter(f=>f && f.w).length, enCours:fils.reduce((s, f)=>s + ((f && f.charge) || 0), 0), fondEnFile:FILE_FOND.length}; }
   /* précalcul en tâche de fond : les 45 derniers jours de tout le personnel */
   async function precalculer(){
     const emps = await D.employes(); if (!emps.length) return 0;

@@ -97,6 +97,8 @@ function schemaBase(type){
     "CREATE INDEX IF NOT EXISTS calc_jour_dept ON calc_jour(dept, d)"
   ];
 }
+const INDEX_FILE_TERMINAL = "CREATE INDEX IF NOT EXISTS ingestion_queue_term ON ingestion_queue(terminal_id, recu_utc)";
+function annuler(ctx){ (ctx.annul || []).forEach(f=>{ try { f(); } catch(e){} }); }
 const enPg = sql => { let i = 0; return sql.replace(/\?/g, ()=>"$"+(++i)); };
 
 async function ouvrir(cfg, dossier){
@@ -113,6 +115,7 @@ function ouvrirSqlite(fichier, dossier){
   /* v56.2 : colonne « mois » des événements normalisés (installations antérieures) */
   if (!d.prepare("PRAGMA table_info(normalized_events)").all().some(c=>c.name === "mois")) d.exec("ALTER TABLE normalized_events ADD COLUMN mois TEXT");
   if (!d.prepare("PRAGMA table_info(calc_jour)").all().some(c=>c.name === "nmv")){ d.exec("DROP TABLE calc_jour"); schema("sqlite").filter(s=>/calc_jour/.test(s)).forEach(s=>d.exec(s)); }
+  try { d.exec(INDEX_FILE_TERMINAL); } catch(e){}
   const prep = new Map();
   const st = sql => { let p = prep.get(sql); if (!p){ p = d.prepare(sql); prep.set(sql, p); } return p; };
   const als = new AsyncLocalStorage();
@@ -130,10 +133,13 @@ function ouvrirSqlite(fichier, dossier){
       await attendre();
       let lib; verrou = new Promise(r=>lib = r);
       d.exec("BEGIN");
-      try { const r = await als.run(true, ()=>fn(B)); d.exec("COMMIT"); return r; }
-      catch(e){ try { d.exec("ROLLBACK"); } catch(x){} throw e; }
+      const ctx = {annul:[]};
+      try { const r = await als.run(ctx, ()=>fn(B)); d.exec("COMMIT"); return r; }
+      catch(e){ try { d.exec("ROLLBACK"); } catch(x){} annuler(ctx); throw e; }
       finally { verrou = null; lib(); }
     },
+    /* 56.33.11 : action à exécuter si la transaction en cours est annulée (ex. cache mémoire à oublier) */
+    siAnnulation(f){ const c = als.getStore(); if (c && c.annul) c.annul.push(f); },
     async fermer(){ try { d.close(); } catch(e){} },
     async taille(){ return ["", "-wal"].reduce((s, x)=>{ try { return s + fs.statSync(fichier+x).size; } catch(e){ return s; } }, 0); },
     /* sauvegarde : copie cohérente de la base */
@@ -228,10 +234,12 @@ async function ouvrirPg(cfg, dossier){
     const idx = ["CREATE INDEX IF NOT EXISTS normalized_events_cle2 ON normalized_events(idempotency_key)", "CREATE INDEX IF NOT EXISTS normalized_events_ptg ON normalized_events(ptg_id)"];
     if (part) for (const s of idx) await pool.query(s);                                  /* tables neuves : instantané */
     else setTimeout(async ()=>{ for (const s of idx.slice(1)) try { await pool.query(s.replace("INDEX IF NOT EXISTS", "INDEX CONCURRENTLY IF NOT EXISTS")); } catch(e){} }, 20000); }
+  /* 56.33.11 : dernier lot reçu par pointeuse (supervision) — créé sans bloquer les écritures d'une file déjà volumineuse */
+  setTimeout(async ()=>{ try { await pool.query(INDEX_FILE_TERMINAL.replace("INDEX IF NOT EXISTS", "INDEX CONCURRENTLY IF NOT EXISTS")); } catch(e){} }, 15000);
   try { await assurerPartitions(pool); } catch(e){ console.error("partitions : "+e.message); }
   const col = await pool.query("SELECT 1 FROM information_schema.columns WHERE table_name='calc_jour' AND column_name='nmv' AND table_schema=current_schema()");
   if (!col.rows.length){ await pool.query("DROP TABLE calc_jour"); for (const s of schema("pg").filter(x=>/calc_jour/.test(x))) await pool.query(s); await creerDefauts((s, p)=>pool.query(s, p)); }
-  const als = new AsyncLocalStorage(), travail = new AsyncLocalStorage();
+  const als = new AsyncLocalStorage(), travail = new AsyncLocalStorage(), annulations = new AsyncLocalStorage();
   const reserve = () => travail.getStore() ? poolTravaux : pool;
   const cible = () => als.getStore() || reserve();
   const B = {
@@ -246,11 +254,13 @@ async function ouvrirPg(cfg, dossier){
     /* une transaction à la fois : les écritures FIWAKTI sont brèves, et l'ordre reste simple à suivre */
     async transaction(fn){
       if (als.getStore()) return fn(B);
-      const c = await reserve().connect();
-      try { await c.query("BEGIN"); const r = await als.run(c, ()=>fn(B)); await c.query("COMMIT"); return r; }
-      catch(e){ try { await c.query("ROLLBACK"); } catch(x){} throw e; }
+      const c = await reserve().connect(), ctx = {annul:[]};
+      try { await c.query("BEGIN"); const r = await als.run(c, ()=>annulations.run(ctx, ()=>fn(B))); await c.query("COMMIT"); return r; }
+      catch(e){ try { await c.query("ROLLBACK"); } catch(x){} annuler(ctx); throw e; }
       finally { c.release(); }
     },
+    /* 56.33.11 : action à exécuter si la transaction en cours est annulée (ex. cache mémoire à oublier) */
+    siAnnulation(f){ const c = annulations.getStore(); if (c && als.getStore()) c.annul.push(f); },
     async fermer(){ await pool.end(); try { await poolTravaux.end(); } catch(e){} },
     async taille(){ const r = await pool.query("SELECT pg_database_size(current_database()) t"); return Number(r.rows[0].t); },
     /* sauvegarde logique : chaque table en lignes JSON compressées ; indépendante de pg_dump */

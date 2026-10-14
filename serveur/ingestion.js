@@ -19,10 +19,24 @@ function partiesDans(tz, ms){
 }
 /* heure locale « AAAA-MM-JJ HH:MM:SS » dans le fuseau tz → instant UTC (ISO).
    Heure inexistante (passage à l'heure d'été) : décalée vers l'avant ; heure ambiguë : première occurrence. */
+/* 56.33.11 : décalage mémorisé par fuseau et par minute locale (les changements d'heure tombent sur une minute
+   ronde) : 2 à 4 formatages Intl par badgeage auparavant, soit ~10 % du temps d'ingestion */
+const DECALAGES = new Map();
 function localVersUtc(local, tz){
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(local));
   if (!m) return null;
-  const naif = Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0));
+  const cle = tz+"|"+m[1]+m[2]+m[3]+m[4]+m[5];
+  let dec = DECALAGES.get(cle);
+  if (dec === undefined){
+    const minute = Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], 0);
+    dec = new Date(localVersUtcCalcule(m, tz, 0)).getTime() - minute;
+    if (DECALAGES.size > 200000) DECALAGES.clear();
+    DECALAGES.set(cle, dec);
+  }
+  return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0)) + dec).toISOString();
+}
+function localVersUtcCalcule(m, tz, sec){
+  const naif = Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], sec);
   /* décalages en vigueur 12 h avant et 12 h après : couvrent tout changement d'heure */
   const offAvant = partiesDans(tz, naif - 43200000) - (naif - 43200000), offApres = partiesDans(tz, naif + 43200000) - (naif + 43200000);
   const ok = [offAvant, offApres].map(o=>naif - o).filter(t=>partiesDans(tz, t) === naif).sort((x, y)=>x - y);
@@ -36,7 +50,9 @@ function utcVersLocal(iso, tz){
   const p = n => String(n).padStart(2, "0");
   return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate())+" "+p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":"+p(d.getUTCSeconds());
 }
-function fuseauValide(tz){ try { new Intl.DateTimeFormat("en-GB", {timeZone:tz}); return true; } catch(e){ return false; } }
+/* 56.33.11 : résultat mémorisé (21 % du temps d'ingestion : un formateur Intl créé à chaque badgeage) */
+const FUSEAUX_OK = new Map();
+function fuseauValide(tz){ let v = FUSEAUX_OK.get(tz); if (v === undefined){ try { new Intl.DateTimeFormat("en-GB", {timeZone:tz}); v = true; } catch(e){ v = false; } if (FUSEAUX_OK.size < 1000) FUSEAUX_OK.set(tz, v); } return v; }
 
 /* v56.2 : mois de rangement (clé de partition) : date de travail, sinon heure locale, sinon réception — jamais vide */
 function moisDe(d, secours){ const s = String(d || secours || "").slice(0, 7); return /^\d{4}-\d{2}$/.test(s) ? s : "0000-00"; }
@@ -51,10 +67,12 @@ function creer(o){
   /* ---------- moteur léger (date de travail selon le planning) ---------- */
   let moteur = null, cleMoteur = "";
   async function moteurPret(){
-    const ref = await D.referentiel() || {}, emps = await D.employes();
+    /* 56.33.11 : paramétrage partagé (lecture) pour la clé et les lectures du lot ; copie neuve pour le moteur, qui peut
+       compléter ses objets */
+    const ref = await D.referentielLecture() || {}, emps = await D.employes();
     const cle = (ref.__versions ? JSON.stringify(ref.__versions) : "") + "|" + emps.length + "|" + (emps === moteur_emps ? "=" : "≠");
     if (!moteur){ moteur = require("./moteur.js").chargerMoteur(o.appJs); }
-    if (cle !== cleMoteur){ moteur.M.db = Object.assign({}, ref, {emps, ptg:[], abs:[], corrections:[], dmd:[], audit:[], notifs:[], journal:[], exemple:false}); moteur.M.reinit(); cleMoteur = cle; moteur_emps = emps; }
+    if (cle !== cleMoteur){ moteur.M.db = Object.assign({}, await D.referentiel() || {}, {emps, ptg:[], abs:[], corrections:[], dmd:[], audit:[], notifs:[], journal:[], exemple:false}); moteur.M.reinit(); cleMoteur = cle; moteur_emps = emps; }
     return {ref, emps};
   }
   let moteur_emps = null;
@@ -70,20 +88,31 @@ function creer(o){
 
   /* ---------- file persistante ---------- */
   const capacite = () => Math.max(1000, Number((config().ingestion||{}).capacite) || 100000);
-  async function enAttente(){ const r = await B.get("SELECT COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE statut IN ('attente','erreur')"); return Number(r.n); }
+  async function enAttente(){ const r = await B.get("SELECT COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE statut IN ('attente','erreur','en_cours')"); return Number(r.n); }
+  /* 56.33.11 : un lot n'est traité que par celui qui l'a pris (statut « en_cours », heure de prise dans traite_utc).
+     Auparavant la reprise automatique (toutes les 30 s) reprenait aussi un lot en cours de traitement par sa
+     réception : double traitement, « duplicate key raw_events » et tentatives gaspillées. Un lot « en_cours »
+     depuis plus de 10 min (arrêt du serveur pendant le traitement) redevient disponible. */
+  const PRISE_MAX_MS = 10 * 60000;
+  async function prendre(id){
+    const r = await B.run("UPDATE ingestion_queue SET statut='en_cours', traite_utc=? WHERE id=? AND (statut IN ('attente','erreur') OR (statut='en_cours' AND traite_utc < ?))",
+      maintenant(), id, new Date(Date.now() - PRISE_MAX_MS).toISOString());
+    return r.n > 0;
+  }
   /* lot : [{terminal (objet), utilisateur, horodatage (heure locale de l'appareil), sens, payload, source_event_id}] */
   async function recevoir(source, T, lot, auteur){
     const n = lot.length; if (!n) return {ok:true, lus:0, integres:0, doublons:0, inconnus:0, invalides:0, rejetes:0};
     if (await enAttente() + n > capacite()) throw Object.assign(new Error("File d'ingestion pleine ("+capacite()+" événements) : l'appareil conserve ses badgeages et les renverra."), {code:503});
     const id = crypto.randomBytes(12).toString("hex"), correlation = "ing-"+id.slice(0, 12), recu = maintenant();
-    await B.run("INSERT INTO ingestion_queue(id,recu_utc,source,terminal_id,nb,payload,statut,tentatives,correlation) VALUES(?,?,?,?,?,?,?,?,?)",
-      id, recu, source, T ? T.id : null, n, JSON.stringify({terminal:T ? {id:T.id, nom:T.nom, siteId:T.siteId, identifiantAppareil:T.identifiantAppareil, fuseau:T.fuseau} : null, auteur:auteur||"", lot}), "attente", 0, correlation);
+    await B.run("INSERT INTO ingestion_queue(id,recu_utc,source,terminal_id,nb,payload,statut,tentatives,correlation,traite_utc) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      id, recu, source, T ? T.id : null, n, JSON.stringify({terminal:T ? {id:T.id, nom:T.nom, siteId:T.siteId, identifiantAppareil:T.identifiantAppareil, fuseau:T.fuseau} : null, auteur:auteur||"", lot}), "en_cours", 0, correlation, recu);
     /* une fois le lot écrit dans la file, il ne peut plus être perdu : un échec de normalisation est repris
        automatiquement et l'appareil n'a pas à renvoyer (réponse positive) */
-    try { return await traiter(id); }
+    try { return await traiter(id, true); }
     catch(e){ return {ok:true, enFile:true, lus:n, integres:0, doublons:0, inconnus:0, invalides:0, rejetes:0, motif:e.message, correlation}; }
   }
-  async function traiter(id){
+  async function traiter(id, pris){
+    if (!pris && !await prendre(id)) return null;
     const q = await B.get("SELECT * FROM ingestion_queue WHERE id=?", id);
     if (!q || q.statut === "traite") return null;
     try {
@@ -102,17 +131,42 @@ function creer(o){
   async function reprendre(){
     if (reprise || (config().ingestion||{}).pause) return 0; reprise = true; let n = 0;
     try {
-      const l = await B.all("SELECT id FROM ingestion_queue WHERE statut IN ('attente','erreur') AND tentatives < 20 ORDER BY recu_utc LIMIT 200");
-      for (const x of l){ try { await traiter(x.id); n++; } catch(e){} }
+      const l = await B.all("SELECT id FROM ingestion_queue WHERE (statut IN ('attente','erreur') OR (statut='en_cours' AND traite_utc < ?)) AND tentatives < 20 ORDER BY recu_utc LIMIT 200", new Date(Date.now() - PRISE_MAX_MS).toISOString());
+      for (const x of l){ try { if (await traiter(x.id)) n++; } catch(e){} }
     } finally { reprise = false; }
     return n;
   }
 
   /* ---------- normalisation ---------- */
+  const CORR = new Map();
   async function correspondance(T){
-    const emps = await D.employes(), mode = (T && T.identifiantAppareil) || "mat", m = new Map();
+    const emps = await D.employes(), mode = (T && T.identifiantAppareil) || "mat";
+    const c = CORR.get(mode); if (c && c.emps === emps) return c.m;          /* 56.33.11 : 50 000 salariés → reconstruite à chaque lot auparavant */
+    const m = new Map(); CORR.set(mode, {emps, m});
     emps.forEach(e=>{ const k = String(mode === "badge" ? (e.badge||"") : mode === "pin" ? (e.pin||"") : e.mat).trim(); if (k) m.set(k, e); if (mode !== "mat") m.set("mat:"+e.mat, e); });
     return m;
+  }
+  /* 56.33.11 : normalisation par lot. Mêmes règles que l'ancienne boucle événement par événement (doublons, clôture,
+     alternance, date de travail, projection) mais les doublons sont recherchés en une requête pour tout le lot et les
+     écritures partent en requêtes multi-lignes : 7 à 8 allers-retours SQL par badgeage → quelques-uns par centaine.
+     Un événement sans sens (alternance) lit l'événement précédent après écriture de ce qui précède dans le lot. */
+  const COLS_RAW = "raw_event_id,device_id,terminal_code,raw_badge_code,raw_employee_id,event_ts_utc,event_ts_local,reception_ts_utc,ingestion_source,payload_raw,source_event_id,timezone_source,ingestion_status,auteur,correlation,created_at";
+  const COLS_NORM = "id,mois,raw_event_id,idempotency_key,employee_mat,type,methode_type,event_ts_utc,ts_local,work_date,site_id,statut,motif,ptg_id,created_at";
+  async function insererLignes(table, cols, lignes){
+    if (!lignes.length) return;
+    const nc = cols.split(",").length, n = Math.max(1, Math.floor(1600 / nc)), ph = "("+new Array(nc).fill("?").join(",")+")";
+    for (let i = 0; i < lignes.length; i += n){
+      const part = lignes.slice(i, i + n);
+      await B.run("INSERT INTO "+table+"("+cols+") VALUES"+part.map(()=>ph).join(","), ...[].concat(...part));
+    }
+  }
+  async function existants(sql, cles){
+    const out = new Set(), l = Array.from(new Set(cles.filter(Boolean)));
+    for (let i = 0; i < l.length; i += 500){
+      const part = l.slice(i, i + 500);
+      (await B.all(sql.replace("(?)", "("+part.map(()=>"?").join(",")+")"), ...part)).forEach(r=>out.add(r.k));
+    }
+    return out;
   }
   async function normaliserLot(q, p){
     if ((config().ingestion||{}).pause) throw new Error("normalisation suspendue par l'administrateur");
@@ -123,59 +177,76 @@ function creer(o){
     const corr = await correspondance(T);
     const res = {ok:true, lus:p.lot.length, integres:0, doublons:0, inconnus:0, invalides:0, rejetes:0, horsPeriode:0, correlation:q.correlation};
     const touches = new Set(), inconnus = new Set();
-    const debut = Date.now();
+    const debut = Date.now(), cree = maintenant();
+    /* 1. lecture de chaque ligne (sans accès à la base) */
+    const evs = p.lot.map((b, i)=>{
+      const rawId = q.id+"-"+i;
+      const util = String(b.utilisateur == null ? "" : b.utilisateur).trim();
+      const e = util ? corr.get(util) : null;
+      const tz = (T && T.fuseau) || (site && site.tz) || (e && (ref.sites||[]).find(s=>s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
+      const local = String(b.horodatage||"").replace("T", " ").slice(0, 19);
+      const localOk = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(local);
+      const tsLocal = localOk ? (local.length === 16 ? local+":00" : local) : null;
+      const tsUtc = tsLocal && fuseauValide(tz) ? localVersUtc(tsLocal, tz) : null;
+      let statut = "ACCEPTED", motif = "";
+      if (!tsUtc){ statut = "INVALID"; motif = "horodatage illisible ou fuseau inconnu"; }
+      else if (new Date(tsUtc).getTime() > Date.now() + 5*60000){ statut = "INVALID"; motif = "horodatage dans le futur"; }
+      else if (!util){ statut = "INVALID"; motif = "identifiant absent"; }
+      else if (!e){ statut = "PENDING_REVIEW"; motif = "identifiant inconnu : « "+util+" »"; inconnus.add(util); }
+      const cle = "k-"+hex([T ? T.id : "saisie:"+auteur, util, tsUtc, b.source_event_id||""].join("|"), 40);
+      const ptgId = e && T ? "t"+crypto.createHash("sha1").update(T.id+"|"+e.mat+"|"+tsLocal).digest("hex").slice(0, 16) : (b.ptgId || null);
+      return {b, rawId, util, e, tz, tsLocal, tsUtc, statut, motif, cle, ptgId};
+    });
+    /* 2. doublons déjà enregistrés : trois requêtes pour tout le lot */
+    const aVerifier = evs.filter(x=>x.statut === "ACCEPTED" || x.statut === "PENDING_REVIEW");
     await B.transaction(async ()=>{
-      for (let i = 0; i < p.lot.length; i++){
-        const b = p.lot[i], rawId = q.id+"-"+i;
-        const util = String(b.utilisateur == null ? "" : b.utilisateur).trim();
-        const e = util ? corr.get(util) : null;
-        const tz = (T && T.fuseau) || (site && site.tz) || (e && (ref.sites||[]).find(s=>s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
-        const local = String(b.horodatage||"").replace("T", " ").slice(0, 19);
-        const localOk = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(local);
-        const tsLocal = localOk ? (local.length === 16 ? local+":00" : local) : null;
-        const tsUtc = tsLocal && fuseauValide(tz) ? localVersUtc(tsLocal, tz) : null;
-        /* statut d'ingestion (décidé avant l'écriture : l'événement brut n'est plus jamais modifié) */
-        let statut = "ACCEPTED", motif = "";
-        if (!tsUtc){ statut = "INVALID"; motif = "horodatage illisible ou fuseau inconnu"; }
-        else if (new Date(tsUtc).getTime() > Date.now() + 5*60000){ statut = "INVALID"; motif = "horodatage dans le futur"; }
-        else if (!util){ statut = "INVALID"; motif = "identifiant absent"; }
-        else if (!e){ statut = "PENDING_REVIEW"; motif = "identifiant inconnu : « "+util+" »"; inconnus.add(util); }
-        const cle = "k-"+hex([T ? T.id : "saisie:"+auteur, util, tsUtc, b.source_event_id||""].join("|"), 40);
-        const ptgId = e && T ? "t"+crypto.createHash("sha1").update(T.id+"|"+e.mat+"|"+tsLocal).digest("hex").slice(0, 16) : (b.ptgId || null);
+      const clesConnues = await existants("SELECT idempotency_key k FROM event_keys WHERE idempotency_key IN (?)", aVerifier.map(x=>x.cle));
+      (await existants("SELECT idempotency_key k FROM normalized_events WHERE idempotency_key IN (?)", aVerifier.map(x=>x.cle).filter(k=>!clesConnues.has(k)))).forEach(k=>clesConnues.add(k));
+      const ptgConnus = await existants("SELECT id k FROM enreg WHERE coll='ptg' AND id IN (?)", aVerifier.map(x=>x.ptgId));
+      const W = {raw:[], retr:[], cles:[], norm:[], ptg:[]};
+      const vider = async () => {
+        await insererLignes("raw_events", COLS_RAW, W.raw); await insererLignes("event_retransmissions", "id,idempotency_key,raw_event_id,recu_utc", W.retr);
+        await insererLignes("event_keys", "idempotency_key,mois,normalized_id,cree", W.cles); await insererLignes("normalized_events", COLS_NORM, W.norm);
+        if (W.ptg.length) await D.ecrireLot("ptg", W.ptg);
+        W.raw = []; W.retr = []; W.cles = []; W.norm = []; W.ptg = [];
+      };
+      for (const x of evs){
+        const {b, rawId, util, e, tz, tsLocal, tsUtc, cle, ptgId} = x;
+        let {statut, motif} = x;
         if (statut === "ACCEPTED" || statut === "PENDING_REVIEW"){
-          const dejaN = await B.get("SELECT normalized_id id FROM event_keys WHERE idempotency_key=?", cle) || await B.get("SELECT id FROM normalized_events WHERE idempotency_key=?", cle);
-          const dejaP = !dejaN && ptgId ? await B.get("SELECT id FROM enreg WHERE coll='ptg' AND id=?", ptgId) : null;
+          /* doublon : déjà en base, ou déjà vu plus haut dans ce lot (mêmes règles que la lecture une à une) */
+          const dejaN = clesConnues.has(cle), dejaP = !dejaN && ptgId && ptgConnus.has(ptgId);
           if (dejaN || dejaP){ statut = "DUPLICATE_IGNORED"; motif = "déjà reçu"; }
         }
         if (statut === "ACCEPTED" && e && clot && tsLocal.slice(0, 10) <= clot){ statut = "REJECTED"; motif = "période clôturée jusqu'au "+clot+" : ajustement de période antérieure requis"; res.horsPeriode++; }
         /* niveau 1 : toute réception est conservée, avec le message d'origine */
-        await B.run("INSERT INTO raw_events(raw_event_id,device_id,terminal_code,raw_badge_code,raw_employee_id,event_ts_utc,event_ts_local,reception_ts_utc,ingestion_source,payload_raw,source_event_id,timezone_source,ingestion_status,auteur,correlation,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          rawId, T ? T.id : null, T ? (T.nom||T.id) : null, b.badge != null ? String(b.badge) : ((T && T.identifiantAppareil === "badge") ? util : null), util || null, tsUtc, tsLocal, q.recu_utc, source,
+        W.raw.push([rawId, T ? T.id : null, T ? (T.nom||T.id) : null, b.badge != null ? String(b.badge) : ((T && T.identifiantAppareil === "badge") ? util : null), util || null, tsUtc, tsLocal, q.recu_utc, source,
           typeof b.payload === "string" ? b.payload : JSON.stringify(b.payload != null ? b.payload : {utilisateur:b.utilisateur, horodatage:b.horodatage, sens:b.sens}),
-          b.source_event_id || null, tz, statut, auteur || null, q.correlation, maintenant());
+          b.source_event_id || null, tz, statut, auteur || null, q.correlation, cree]);
         CPT[statut] = (CPT[statut]||0) + 1;
-        if (statut === "DUPLICATE_IGNORED"){ res.doublons++; await B.run("INSERT INTO event_retransmissions(id,idempotency_key,raw_event_id,recu_utc) VALUES(?,?,?,?)", "r-"+rawId, cle, rawId, q.recu_utc); continue; }
-        if (statut === "INVALID"){ res.invalides++; await B.run("INSERT INTO normalized_events(id,mois,raw_event_id,idempotency_key,employee_mat,type,methode_type,event_ts_utc,ts_local,statut,motif,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", "n-"+rawId, moisDe(tsLocal, q.recu_utc), rawId, "inv-"+rawId, e ? String(e.mat) : null, "UNKNOWN", "aucune", tsUtc, tsLocal, statut, motif, maintenant()); continue; }
-        if (statut === "REJECTED"){ res.rejetes++; await B.run("INSERT INTO normalized_events(id,mois,raw_event_id,idempotency_key,employee_mat,type,methode_type,event_ts_utc,ts_local,statut,motif,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", "n-"+rawId, moisDe(tsLocal, q.recu_utc), rawId, "rej-"+rawId, String(e.mat), "UNKNOWN", "aucune", tsUtc, tsLocal, statut, motif, maintenant()); continue; }
+        if (statut === "DUPLICATE_IGNORED"){ res.doublons++; W.retr.push(["r-"+rawId, cle, rawId, q.recu_utc]); continue; }
+        if (statut === "INVALID"){ res.invalides++; W.norm.push(["n-"+rawId, moisDe(tsLocal, q.recu_utc), rawId, "inv-"+rawId, e ? String(e.mat) : null, "UNKNOWN", "aucune", tsUtc, tsLocal, null, null, statut, motif, null, cree]); continue; }
+        if (statut === "REJECTED"){ res.rejetes++; W.norm.push(["n-"+rawId, moisDe(tsLocal, q.recu_utc), rawId, "rej-"+rawId, String(e.mat), "UNKNOWN", "aucune", tsUtc, tsLocal, null, null, statut, motif, null, cree]); continue; }
         /* type : fourni par l'appareil, sinon déterminé par alternance à partir de l'événement précédent
            de la même journée de travail (les événements déjà enregistrés ne sont jamais réécrits) */
         let type = b.sens === "E" ? "IN" : b.sens === "S" ? "OUT" : null, methode = type ? "appareil" : "";
         let wd = {work_date:tsLocal.slice(0, 10), regle:"date civile"};
         if (e) wd = dateDeTravail(e, tsLocal);
         if (!type && e){
+          await vider();
           const prec = await B.get("SELECT type FROM normalized_events WHERE employee_mat=? AND work_date=? AND statut='ACCEPTED' AND ts_local < ? ORDER BY ts_local DESC LIMIT 1", String(e.mat), wd.work_date, tsLocal);
           type = prec && (prec.type === "IN" || prec.type === "AUTO_IN") ? "AUTO_OUT" : "AUTO_IN"; methode = "alternance (événement précédent : "+(prec ? prec.type : "aucun")+")";
         }
-        await B.run("INSERT INTO event_keys(idempotency_key,mois,normalized_id,cree) VALUES(?,?,?,?)", cle, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), "n-"+rawId, maintenant());
-        await B.run("INSERT INTO normalized_events(id,mois,raw_event_id,idempotency_key,employee_mat,type,methode_type,event_ts_utc,ts_local,work_date,site_id,statut,motif,ptg_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          "n-"+rawId, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), rawId, cle, e ? String(e.mat) : null, type || "UNKNOWN", methode+" ; date de travail : "+wd.regle, tsUtc, tsLocal, e ? wd.work_date : null, (T && T.siteId) || (e && e.siteId) || null, statut, motif, e ? ptgId : null, maintenant());
+        W.cles.push([cle, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), "n-"+rawId, cree]); clesConnues.add(cle);
+        W.norm.push(["n-"+rawId, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), rawId, cle, e ? String(e.mat) : null, type || "UNKNOWN", methode+" ; date de travail : "+wd.regle, tsUtc, tsLocal, e ? wd.work_date : null, (T && T.siteId) || (e && e.siteId) || null, statut, motif, e ? ptgId : null, cree]);
         if (statut === "PENDING_REVIEW"){ res.inconnus++; continue; }
         /* projection de compatibilité : le moteur de calcul actuel lit ces badgeages (résultats inchangés) */
         const sens = type === "IN" || type === "AUTO_IN" ? "E" : "S";
-        const x = {id:ptgId || ("s"+hex(rawId, 16)), mat:String(e.mat), ts:tsLocal, sens, dev:T ? (T.nom||"") : (b.dev||""), src:T ? "badge" : (b.src||"saisie"), term:T ? T.id : undefined, raw:rawId, sensAuto:methode.indexOf("alternance") === 0 ? true : undefined};
-        await D.ecrire("ptg", x);
-        res.integres++; touches.add(x.mat+"|"+tsLocal.slice(0, 10)); if (wd.work_date !== tsLocal.slice(0, 10)) touches.add(x.mat+"|"+wd.work_date);
+        const pt = {id:ptgId || ("s"+hex(rawId, 16)), mat:String(e.mat), ts:tsLocal, sens, dev:T ? (T.nom||"") : (b.dev||""), src:T ? "badge" : (b.src||"saisie"), term:T ? T.id : undefined, raw:rawId, sensAuto:methode.indexOf("alternance") === 0 ? true : undefined};
+        W.ptg.push(pt); ptgConnus.add(pt.id);
+        res.integres++; touches.add(pt.mat+"|"+tsLocal.slice(0, 10)); if (wd.work_date !== tsLocal.slice(0, 10)) touches.add(pt.mat+"|"+wd.work_date);
       }
+      await vider();
     });
     const lat = Date.now() - new Date(q.recu_utc).getTime();
     for (let i = 0; i < Math.min(p.lot.length, 50); i++) LAT.push(lat); while (LAT.length > 2000) LAT.shift();
@@ -188,7 +259,7 @@ function creer(o){
   /* ---------- rejeu des événements en attente de revue (ex. badge rattaché ensuite à un employé) ---------- */
   async function rejouer(login){
     const l = await B.all("SELECT n.id, n.raw_event_id, r.payload_raw, r.device_id, r.raw_employee_id, r.event_ts_local, r.ingestion_source FROM normalized_events n JOIN raw_events r ON r.raw_event_id = n.raw_event_id WHERE n.statut='PENDING_REVIEW' LIMIT 5000");
-    const ref = await D.referentiel() || {}; let n = 0;
+    const ref = await D.referentielLecture() || {}; let n = 0;
     const parTerm = new Map();
     l.forEach(x=>{ const k = x.device_id || ""; if (!parTerm.has(k)) parTerm.set(k, []); parTerm.get(k).push(x); });
     for (const [tid, xs] of parTerm){
@@ -213,7 +284,7 @@ function creer(o){
   async function migrer(){
     const deja = await meta("migration_v50");
     if (deja && deja.fin){ MIG = deja; return; }
-    const ref = await D.referentiel() || {};
+    const ref = await D.referentielLecture() || {};
     const tzSite = new Map((ref.sites||[]).map(s=>[s.id, s.tz || FUSEAU_DEFAUT])), emps = new Map((await D.employes()).map(e=>[String(e.mat), e]));
     MIG = Object.assign({etat:"en_cours", debut:maintenant(), faits:0}, deja || {});
     const total = Number((await B.get("SELECT COUNT(*) n FROM enreg WHERE coll='ptg'")).n); MIG.total = total;
@@ -256,7 +327,7 @@ function creer(o){
     const x = apres || avant; if (!x) return;
     const nature = !avant ? "saisie" : !apres ? "annulation" : "correction";
     const rawId = "app-"+crypto.randomBytes(10).toString("hex"), recu = maintenant();
-    const ref = await D.referentiel() || {};
+    const ref = await D.referentielLecture() || {};
     const e = (await D.employes()).find(y=>String(y.mat) === String(x.mat));
     const tz = ((ref.sites||[]).find(s=>e && s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
     const utc = x.ts ? localVersUtc(x.ts, tz) : null;

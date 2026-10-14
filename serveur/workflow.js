@@ -25,7 +25,7 @@ function creer(o){
   const mode = async (mat, d) => { const v = o.regle ? await o.regle("VALIDATION_JOURNEES", mat, d) : null; return ["aucune","responsable","responsable_rh"].indexOf(v) >= 0 ? v : "responsable"; };
   const final = m => m === "responsable_rh" ? "APPROUVEE_RH" : "VALIDEE";
   async function rangPtg(login){
-    const ref = await D.referentiel() || {}, u = (ref.users||[]).find(x=>x.login === login);
+    const ref = await D.referentielLecture() || {}, u = (ref.users||[]).find(x=>x.login === login);
     if (!u) return 0; const p = (ref.profils||[]).find(x=>x.id === u.profilId) || {};
     if (p.admin || u.admin) return 4;
     return {aucun:0, lecture:1, saisie:2, validation:3, config:4}[(p.droits||{}).PTG] || 0;
@@ -34,7 +34,7 @@ function creer(o){
   async function correcteur(mat, d, depuis){
     const r = await B.get("SELECT auteur, created_at FROM raw_events WHERE raw_employee_id=? AND ingestion_source IN ('saisie','correction','annulation') AND substr(event_ts_local,1,10) IN (?,?) AND created_at > ? ORDER BY created_at DESC LIMIT 1", String(mat), d, plus1(d), depuis || "");
     let best = r && r.auteur ? {login:r.auteur, le:r.created_at} : null;
-    const ref = await D.referentiel() || {};
+    const ref = await D.referentielLecture() || {};
     Object.entries(ref.anoDec||{}).forEach(([id, x])=>{ if (!x || !x.par) return; const p = id.split("|"); if (p[1] !== String(mat) || p[2] !== d) return;
       const le = String(x.le||"").replace(" ", "T"); if (le > String(depuis||"").slice(0, 19) && (!best || le > best.le)) best = {login:x.par, le}; });
     return best;
@@ -42,7 +42,7 @@ function creer(o){
   const maintenant = () => new Date().toISOString();
   const auj = () => { const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); };
   const plus1 = k => { const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
-  async function clotureJusqu(){ const ref = await D.referentiel() || {}; return (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, ""); }
+  async function clotureJusqu(){ const ref = await D.referentielLecture() || {}; return (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, ""); }
   async function transition(mat, d, de, vers, auteur, motif){
     const ts = maintenant();
     await B.run("INSERT INTO day_transitions(id,mat,d,de,vers,auteur,motif,ts) VALUES(?,?,?,?,?,?,?,?)", "tr-"+crypto.randomBytes(9).toString("hex"), String(mat), d, de || null, vers, auteur || "systeme", motif || "", ts);
@@ -50,7 +50,7 @@ function creer(o){
   }
   /* responsable d'une anomalie : le compte applicatif du responsable hiérarchique */
   async function responsables(){
-    const ref = await D.referentiel() || {}, emps = await D.employes();
+    const ref = await D.referentielLecture() || {}, emps = await D.employes();
     const empParId = new Map(emps.map(e=>[e.id, e])), loginParMat = new Map();
     (ref.users||[]).forEach(u=>{ const e = empParId.get(u.empId); if (e) loginParMat.set(String(e.mat), u.login); });
     return {parMat:new Map(emps.map(e=>[String(e.mat), e])), loginParMat};

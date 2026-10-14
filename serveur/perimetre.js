@@ -47,11 +47,19 @@ function profilEff(C, u){
   const id = dl ? dl.profilId : u.profilId;
   return (C.doc.profils||[]).find(p=>p.id === id) || null;
 }
+/* 56.33.11 : sous-arbre calculé une fois par service et par requête (index des enfants), au lieu d'un parcours
+   quadratique de tous les services pour chaque salarié examiné (profil défini par services, 50 000 salariés) */
 function sousArbre(C, id){
-  const out = [id];
-  for (let i=0; i<out.length; i++) C.depts.forEach(d=>{ if (d.parent === out[i] && out.indexOf(d.id) < 0) out.push(d.id); });
+  if (!C.enfants){ C.enfants = new Map(); C.depts.forEach(d=>{ if (!C.enfants.has(d.parent)) C.enfants.set(d.parent, []); C.enfants.get(d.parent).push(d.id); }); C.arbres = new Map(); }
+  let out = C.arbres.get(id);
+  if (!out){
+    out = [id]; const vu = new Set(out);
+    for (let i = 0; i < out.length; i++) (C.enfants.get(out[i]) || []).forEach(x=>{ if (!vu.has(x)){ vu.add(x); out.push(x); } });
+    C.arbres.set(id, out);
+  }
   return out;
 }
+function sousArbreSet(C, id){ if (!C.arbresSet) C.arbresSet = new Map(); let s = C.arbresSet.get(id); if (!s){ s = new Set(sousArbre(C, id)); C.arbresSet.set(id, s); } return s; }
 function equipeDe(C, mat, directe){
   const out = new Set(), file = [mat];
   while (file.length){ const m = file.shift(); (C.parChef[m]||[]).forEach(x=>{ if (x !== mat && !out.has(x)){ out.add(x); if (!directe) file.push(x); } }); }
@@ -68,7 +76,7 @@ function scopeEmps(C, pr){
     if (inclus.indexOf(e.id) >= 0) return true;
     if (pr.mode === "liste") return false;
     if ((pr.sites||[]).length && pr.sites.indexOf(e.siteId) < 0) return false;
-    if ((pr.depts||[]).length && !pr.depts.some(id=>sousArbre(C, id).indexOf(e.deptId) >= 0)) return false;
+    if ((pr.depts||[]).length && !pr.depts.some(id=>sousArbreSet(C, id).has(e.deptId))) return false;
     const f = pr.filtres || {};
     for (const code in f){ if (f[code] && valAt(e, code, C.jour) !== f[code]) return false; }
     return true;

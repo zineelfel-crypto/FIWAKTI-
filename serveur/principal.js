@@ -90,11 +90,11 @@ if (!CONFIG.base && process.env.FIWAKTI_PG_MDP_FILE){
 let B = null, D = null, K = null, PT = null, ING = null, WF = null, RC = null, MOD = null;
 /* v56.3 : préchauffage pour les comptes qui consultent tout le personnel (administrateurs, RH) */
 async function prechauffer(){
-  try { const ref = await D.referentiel() || {}, prof = id => (ref.profils||[]).find(x=>x.id === id) || {};
+  try { const ref = await D.referentielLecture() || {}, prof = id => (ref.profils||[]).find(x=>x.id === id) || {};
     const logins = (ref.users||[]).filter(u=>u.actif !== false && (u.admin || prof(u.profilId).admin || ["validation","config"].indexOf((prof(u.profilId).droits||{}).PTG) >= 0)).map(u=>u.login);
     const r = await K.prechauffer(logins); if (r.requetes) journal("préchauffage : "+r.requetes+" écran(s) en "+r.ms+" ms"); } catch(e){ journal("préchauffage : "+e.message); }
 }
-let VIS_I = null;
+let VIS_I = null, AN_I = null, NB_CALC = null;
 function VIS(){ if (!VIS_I || VIS_I.B !== B){ VIS_I = VISAGES.creer({B, coffre:CF, audit}); VIS_I.B = B; } return VIS_I; }
 /* v56.24 : moteur de synchronisation biométrique, lié à la base en service (recréé après une restauration) */
 let BS_I = null;
@@ -233,7 +233,7 @@ async function verifier(mdp, stocke){
   } catch(e){ return false; }
 }
 function egalConstant(a, b){ const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
-async function appSecu(){ try { const d = await D.referentiel(); return (d && d.secu) || {}; } catch(e){ return {}; } }
+async function appSecu(){ try { const d = await D.referentielLecture(); return (d && d.secu) || {}; } catch(e){ return {}; } }
 /* v46 : politique appliquée par le serveur, d'après l'écran Sécurité de l'application
    (longueur, mélange de caractères, mots de passe courants, historique, expiration) */
 const COURANTS = ["password","motdepasse","azerty","azertyuiop","qwerty","qwertyuiop","123456","12345678","123456789","abc123","admin","administrateur","bonjour",
@@ -243,7 +243,7 @@ const COURANTS = ["password","motdepasse","azerty","azertyuiop","qwerty","qwerty
 function secuDe(ref){ return Object.assign({minLen:12, exigerMix:false, interdireCourants:true, historique:5, expirationJours:0, tentatives:5, verrouillageMin:15,
   sessionInactivite:30, sessionMax:12, memoriser:false, resetValiditeMin:60}, (ref && ref.secu) || {}); }
 async function politique(mdp, compte, secu){
-  secu = secu || secuDe(await D.referentiel());
+  secu = secu || secuDe(await D.referentielLecture());
   const v = String(mdp||"");
   const min = Math.max(8, Number(secu.minLen) || 12);
   if (v.length < min) return "Au moins "+min+" caractères.";
@@ -270,7 +270,7 @@ async function definirMdp(c, nouveau, secu){
 }
 /* la double authentification est exigée par le profil (écran Profils) ou pour le compte */
 async function a2fRequise(login){
-  const ref = await D.referentiel() || {};
+  const ref = await D.referentielLecture() || {};
   const u = (ref.users||[]).find(x=>String(x.login).toLowerCase() === String(login).toLowerCase());
   if (!u) return false;
   const j = new Date().toISOString().slice(0,10);
@@ -281,12 +281,21 @@ async function a2fRequise(login){
 const compteDe = login => B.get("SELECT * FROM comptes WHERE lower(login)=lower(?)", String(login||"").trim());
 
 /* comptes de l'application reflétés côté serveur (seul juge des mots de passe) */
-async function synchroniserComptes(doc, par){
+/* empIds (facultatif) : seuls les comptes rattachés à ces salariés sont examinés — cas d'un enregistrement de salariés
+   sans changement de la liste des comptes (aucun compte ne peut alors disparaître) */
+async function synchroniserComptes(doc, par, empIds){
   if (!doc || !Array.isArray(doc.users)) return;
+  const partiel = empIds instanceof Set, usersVus = partiel ? doc.users.filter(u=>u && empIds.has(String(u.empId))) : doc.users;
   const profils = {}; (doc.profils||[]).forEach(p=>{ profils[p.id] = p; });
   const emps = {}; (doc.emps||[]).forEach(e=>{ emps[e.id] = e; });
   const vus = new Set();
-  for (const u of doc.users){
+  /* 56.33.11 : tous les comptes lus en une requête, et seuls ceux qui changent sont réécrits. Auparavant chaque
+     enregistrement d'un salarié (import, modification d'une fiche) relisait et réécrivait chaque compte un par un :
+     avec un portail de 50 000 comptes, ~100 000 requêtes par modification. */
+  const champsC = "login, uid, nom, matricule, role, actif, etat, temp_le";
+  const lus = !partiel ? await B.all("SELECT "+champsC+" FROM comptes") : usersVus.length ? await B.all("SELECT "+champsC+" FROM comptes WHERE lower(login) IN ("+usersVus.map(()=>"lower(?)").join(",")+")", ...usersVus.map(u=>String(u.login||"").trim())) : [];
+  const existants = new Map(lus.map(c=>[String(c.login).toLowerCase(), c]));
+  for (const u of usersVus){
     if (!u || !u.login) continue;
     const login = String(u.login).trim(); vus.add(login.toLowerCase());
     const pr = profils[u.profilId] || {}, d = pr.droits || {};
@@ -294,22 +303,28 @@ async function synchroniserComptes(doc, par){
     const role = niveau === "admin" || login.toLowerCase() === String(CONFIG.adminInitial||"").toLowerCase() ? "admin" : "utilisateur";
     const emp = emps[u.empId]; const mat = emp ? String(emp.mat||"") : "";
     const actif = u.actif !== false && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
-    const c = await compteDe(login);
+    const c = existants.get(login.toLowerCase());
     if (!c){
       const temp = !!u.mdpTemp && !!mat;
       await B.run("INSERT INTO comptes(login,uid,nom,matricule,role,actif,etat,temp_le,changer,raison,maj) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         login, u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, 1, temp ? "premiere" : "invitation", maintenant());
       await audit(par, "compte.cree", login+" ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
+      existants.set(login.toLowerCase(), {login, uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null});
     } else {
-      await B.run("UPDATE comptes SET uid=?, nom=?, matricule=?, role=?, actif=?, maj=? WHERE login=?", u.id||c.uid, u.nom||c.nom, mat, role, actif, maintenant(), c.login);
+      const nv = {uid:u.id||c.uid, nom:u.nom||c.nom, matricule:mat, role, actif};
+      if (Object.keys(nv).some(k=>String(nv[k] == null ? "" : nv[k]) !== String(c[k] == null ? "" : c[k]))){
+        await B.run("UPDATE comptes SET uid=?, nom=?, matricule=?, role=?, actif=?, maj=? WHERE login=?", nv.uid, nv.nom, mat, role, actif, maintenant(), c.login);
+        Object.assign(c, nv);
+      }
       if (u.mdpTemp && mat && c.etat !== "temp_matricule" && u.mdpChangeRaison === "reinit" && (u.mdpTempLe||"") > (c.temp_le||"")){
         await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", u.mdpTempLe, c.login);
+        c.etat = "temp_matricule"; c.temp_le = u.mdpTempLe;
         await audit(par, "compte.reinitialise", login+" (matricule)");
       }
     }
     delete u.mdp; delete u.mdpHisto; delete u.codeReset;
   }
-  for (const c of await B.all("SELECT login FROM comptes WHERE actif=1")){
+  if (!partiel) for (const c of await B.all("SELECT login FROM comptes WHERE actif=1")){
     if (!vus.has(c.login.toLowerCase()) && c.login.toLowerCase() !== String(CONFIG.adminInitial||"").toLowerCase()){
       await B.run("UPDATE comptes SET actif=0 WHERE login=?", c.login); await audit(par, "compte.desactive", c.login+" (retiré de l'application)");
     }
@@ -415,7 +430,7 @@ async function sessionDe(req){
   const s = await B.get("SELECT * FROM sessions WHERE id=?", hid(id));
   if (!s) return null;
   if (!s.csrf){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
-  const secu = secuDe(await D.referentiel());
+  const secu = secuDe(await D.referentielLecture());
   const n = Date.now(), inactif = Math.max(1, Number(secu.sessionInactivite)||30)*60000, max = Math.max(1, Number(secu.sessionMax)||12)*3600000;
   if (n - Number(s.vu) > inactif || n - Number(s.cree) > max){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
   if (n - Number(s.vu) > 15000) await B.run("UPDATE sessions SET vu=? WHERE id=?", n, s.id);
@@ -715,7 +730,7 @@ let AUDIT_CACHE = null;
 async function auditEtat(){ if (!AUDIT_CACHE || Date.now() - AUDIT_CACHE.t > 600000) AUDIT_CACHE = {t:Date.now(), v:await verifierAudit()}; return AUDIT_CACHE.v; }
 /* conservation : purge des données anciennes, jamais sur une période non clôturée */
 async function conservation(simuler){
-  const cfg = CONFIG.conservation || {}, ref = await D.referentiel() || {};
+  const cfg = CONFIG.conservation || {}, ref = await D.referentielLecture() || {};
   const clot = (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, "");
   const limite = ans => { const d = new Date(); d.setFullYear(d.getFullYear() - (Number(ans)||5)); return d.toISOString().slice(0,10); };
   const lb = [limite(cfg.badgeagesAns), clot].filter(Boolean).sort()[0] || "0000", la = limite(cfg.auditAns);
@@ -742,7 +757,9 @@ async function etatSysteme(){
   const sauv = listeSauvegardes(), der = sauv[0];
   const lic = await licenceActive(), d = espaceDisque(), ci = infoCertificat(); await licenceEtat();
   const st = await D.statistiques(), taille = await B.taille();
-  const nbCalc = Number((await B.get("SELECT COUNT(*) n FROM calc_jour")).n);
+  /* 56.33.11 : comptage mémorisé 5 min (plusieurs millions de journées calculées) */
+  if (!NB_CALC || NB_CALC.B !== B || Date.now() - NB_CALC.t > 300000) NB_CALC = {B, t:Date.now(), n:Number((await B.get("SELECT COUNT(*) n FROM calc_jour")).n)};
+  const nbCalc = NB_CALC.n;
   const it = (id, etat, titre, detail) => ({id, etat, titre, detail:detail||""});
   const lire = f => { try { return fs.readFileSync(path.join(RACINE, "versions", f), "utf8").trim(); } catch(e){ return ""; } };
   return {
@@ -754,7 +771,7 @@ async function etatSysteme(){
         (B.type === "pg" ? "PostgreSQL" : "SQLite intégré")+" — "+(taille/1e6).toFixed(0)+" Mo — "+(st.emps||0)+" employés, "+(st.ptg||0)+" badgeages"+(st.ptgDu ? " ("+st.ptgDu+" → "+st.ptgAu+")" : "")+
         (B.type !== "pg" && (st.emps||0) > 500 ? " — PostgreSQL recommandé pour cet effectif : bouton « Passer à PostgreSQL » ci-dessous (copie contrôlée, sans perte)" : "")),
       it("calcul", "ok", "Calculs du serveur", nbCalc+" journées calculées d'avance"),
-      await (async ()=>{ const refA = await D.referentiel() || {};
+      await (async ()=>{ const refA = await D.referentielLecture() || {};
         const sans = (refA.profils||[]).filter(pr=>((pr.droits||{}).SYS === "config" || pr.admin) && !pr.a2f).map(pr=>pr.nom || pr.id);
         return it("a2f-admin", sans.length ? "verifier" : "ok", "Double authentification des administrateurs",
           sans.length ? "Non exigée pour : "+sans.join(", ")+". Recommandé : Profils → cocher « Double authentification »." : "Exigée pour tous les profils d'administration."); })(),
@@ -1111,7 +1128,7 @@ async function traiter(req, res){
           const manquantes = Object.keys(attendu).filter(n=>n !== "sauvegarde" && CF.empreinteSiExiste(n) !== attendu[n]);
           if (manquantes.length) throw Object.assign(new Error("Clé(s) de chiffrement absente(s) ou différente(s) : "+manquantes.join(", ")+". Importez d'abord le trousseau complet de l'installation d'origine, puis relancez la restauration."), {cles:manquantes}); }
         const nb = async (sql, ...a) => Number((await B.get("SELECT COUNT(*) n FROM "+sql, ...a)).n);
-        const ref = await D.referentiel() || {};
+        const ref = await D.referentielLecture() || {};
         const bilan = {comptes:await nb("comptes"), employes:await nb("enreg WHERE coll='emps'"), badgeages:await nb("enreg WHERE coll='ptg'"), demandes:await nb("enreg WHERE coll='dmd'"),
           audit:await nb("audit"), clotures:(ref.clotures||[]).length, profils:(ref.profils||[]).length, parametres:Object.keys(ref).length};
         const adm = await B.get("SELECT login FROM comptes WHERE role='admin' AND actif=1 ORDER BY login LIMIT 1");
@@ -1135,7 +1152,7 @@ async function traiter(req, res){
 
   /* ---- connexion ---- */
   if (p === "/connexion" || p === "/connexion.html") return fichierStatique(res, PUBLIC, "connexion.html");
-  if (p === "/api/v1/connexion/options"){ const s = secuDe(await D.referentiel()); return json(res, 200, {memoriser:!!s.memoriser, minLen:Math.max(8, Number(s.minLen)||12), exigerMix:!!s.exigerMix, entreprise:CONFIG.entreprise||""}); }
+  if (p === "/api/v1/connexion/options"){ const s = secuDe(await D.referentielLecture()); return json(res, 200, {memoriser:!!s.memoriser, minLen:Math.max(8, Number(s.minLen)||12), exigerMix:!!s.exigerMix, entreprise:CONFIG.entreprise||""}); }
   if (p === "/api/v1/connexion" && req.method === "POST"){
     const e = ESSAIS_IP.get(ip) || {n:0, t:Date.now()};
     if (Date.now() - e.t > 15*60000){ e.n = 0; e.t = Date.now(); }
@@ -1149,7 +1166,7 @@ async function traiter(req, res){
       return erreur(res, 403, "Compte administrateur provisoire : première connexion uniquement depuis le serveur FIWAKTI lui-même (https://localhost), le temps de choisir un vrai mot de passe.");
     if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(c.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
     let ok = false;
-    const secu = secuDe(await D.referentiel());
+    const secu = secuDe(await D.referentielLecture());
     if (c.etat === "temp_matricule"){
       const validite = Number((secu.premiere||{}).validiteJours) || 30;
       if (c.temp_le && validite > 0 && new Date(c.temp_le).getTime() + validite*86400000 < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez une réinitialisation au service RH.");
@@ -1204,7 +1221,7 @@ async function traiter(req, res){
       return erreur(res, 403, "L'intervention du fournisseur ne donne accès qu'à l'écran de licence.");
   }
   if (!sess.a2fOk){
-    const secuA = await D.referentiel();
+    const secuA = await D.referentielLecture();
     if (p === "/api/v1/a2f/etat") return json(res, 200, {a2f:Number(C.a2f_actif) ? "code" : "enrolement", csrf:sess.csrf});
     if (p === "/api/v1/a2f/enrolement" && req.method === "POST"){
       if (Number(C.a2f_actif)) return erreur(res, 400, "Double authentification déjà configurée.");
@@ -1246,7 +1263,7 @@ async function traiter(req, res){
     const actuelOk = C.etat === "temp_matricule" ? egalConstant(String(b.actuel||""), C.matricule||"\u0000") : await verifier(b.actuel, C.hash);
     if (!actuelOk) return erreur(res, 400, "Mot de passe actuel incorrect.");
     if (b.nouveau === b.actuel) return erreur(res, 400, "Le nouveau mot de passe doit être différent de l'actuel.");
-    const secuM = secuDe(await D.referentiel());
+    const secuM = secuDe(await D.referentielLecture());
     const pol = await politique(b.nouveau, C, secuM); if (pol) return erreur(res, 400, pol);
     await definirMdp(C, b.nouveau, secuM);
     const nouveauJeton = crypto.randomBytes(24).toString("base64url");
@@ -1291,7 +1308,7 @@ async function traiter(req, res){
   /* v56.2 : API des modules livrés (partie serveur du module) */
   for (const x of MODS_SERVEUR){
     if (!x.inst || !x.routes.some(r=>p === r || p.startsWith(r+"/"))) continue;
-    const refM = await D.referentiel() || {}, {P} = await D.perimetreDe(refM, C.login);
+    const refM = await D.referentielLecture() || {}, {P} = await D.perimetreDe(refM, C.login);
     /* v56.17 : toute écriture dans un module rafraîchit « À traiter » (cache de 30 s) */
     if (req.method !== "GET") CACHE_AT.clear();
     return x.inst.traiter(req, res, {p, C, admin, P, u, json, erreur, corpsJson, ip});
@@ -1333,7 +1350,7 @@ async function traiter(req, res){
     const n = new Date(), mois = Math.max(1, Number(CONFIG.fenetreMois) || 2);
     const def = new Date(n.getFullYear(), n.getMonth() - (mois - 1), 1);
     const depuis = dateOk(u.searchParams.get("depuis")) ? u.searchParams.get("depuis") : def.getFullYear()+"-"+String(def.getMonth()+1).padStart(2,"0")+"-01";
-    if (!await D.referentiel()) return texteJson(res, JSON.stringify({ref:null, colls:{}, fenetre:{du:depuis}, mode:"normal"}));
+    if (!await D.referentielLecture()) return texteJson(res, JSON.stringify({ref:null, colls:{}, fenetre:{du:depuis}, mode:"normal"}));
     const t0 = Date.now();
     /* v49 : grand effectif — réponse (déjà compressée) gardée tant qu'aucune donnée n'a changé (5 min au plus) */
     const cleD = C.login+"|"+depuis+"|"+K.generation()+"|"+aujourdhui();
@@ -1365,7 +1382,7 @@ async function traiter(req, res){
   }
   if (p === "/api/v1/donnees/sync" && req.method === "POST"){
     let paquet; try { paquet = JSON.parse(await corps(req, 200e6)); } catch(e){ return erreur(res, 400, "JSON invalide"); }
-    if (!await D.referentiel()){
+    if (!await D.referentielLecture()){
       if (!admin) return erreur(res, 403, "Réservé aux administrateurs.");
       const ref = paquet.ref || {}; DONNEES_MOD.COLLS.forEach(c=>{ delete ref[c]; });
       /* le premier référentiel doit être complet : jamais un paramétrage partiel */
@@ -1377,10 +1394,14 @@ async function traiter(req, res){
     const r = await D.synchroniser(C.login, paquet);
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
     if ((paquet.ref && paquet.ref.users) || (paquet.colls && paquet.colls.emps)){
+      /* 56.33.11 : enregistrement de salariés seul → comptes de ces salariés seulement (50 000 comptes examinés et deux
+         copies de 8 Mo comparées à chaque fiche modifiée auparavant) */
+      const ids = !(paquet.ref && paquet.ref.users) ? new Set([].concat((paquet.colls.emps.put||[]).map(x=>x && String(x.id)), (paquet.colls.emps.del||[]).map(String))) : null;
       const docC = {users:r.ref.users, profils:r.ref.profils, emps:await D.employes(), secu:r.ref.secu};
-      const avant = JSON.stringify(docC.users);
-      await synchroniserComptes(docC, C.login);
-      if (JSON.stringify(docC.users) !== avant){ r.ref.users = docC.users; await B.run("UPDATE kv SET valeur=? WHERE cle=?", JSON.stringify(r.ref), CLE_APP); }
+      const vus = ids ? (docC.users||[]).filter(x=>x && ids.has(String(x.empId))) : docC.users;
+      const avant = JSON.stringify(vus);
+      await synchroniserComptes(docC, C.login, ids || undefined);
+      if (JSON.stringify(vus) !== avant){ r.ref.users = docC.users; await B.run("UPDATE kv SET valeur=?, version=version+1 WHERE cle=?", JSON.stringify(r.ref), CLE_APP); }
     }
     try { await K.invalider(r.touches, r.refCles); } catch(e){ journal("invalidation : "+e.message); }
     if ((r.refCles||[]).indexOf("terms") >= 0) try { await GERER_PUSH(); } catch(e){}
@@ -1422,7 +1443,7 @@ async function traiter(req, res){
   /* ---- v56.27 : anniversaire de l'utilisateur connecté — lu dans SA fiche salarié (date de naissance), jamais
      celles des autres ; la réponse ne contient ni la date ni l'année ---- */
   if (p === "/api/v1/anniversaire" && req.method === "GET"){
-    const ref = await D.referentiel() || {}, u = (ref.users||[]).find(z=>z.login === C.login), e = u && u.empId ? (await D.employes()).find(z=>z.id === u.empId) : null;
+    const ref = await D.referentielLecture() || {}, u = (ref.users||[]).find(z=>z.login === C.login), e = u && u.empId ? (await D.employes()).find(z=>z.id === u.empId) : null;
     let dn = e && /^\d{4}-\d{2}-\d{2}$/.test(e.naissance || "") ? e.naissance : null;
     if (!dn && e && e.cf){ const ch = (ref.champs||[]).find(c=>/naiss|birth|ddn/i.test((c.code||"")+" "+(c.nom||""))); const v = ch ? String(e.cf[ch.code]||"") : "";
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v) || /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v); if (m) dn = m[0].indexOf("/") > 0 ? m[3]+"-"+m[2]+"-"+m[1] : m[0]; }
@@ -1432,7 +1453,7 @@ async function traiter(req, res){
   }
   /* ---- v56.14 : journal des badgeages servi par page (grand effectif) ---- */
   if (p === "/api/v1/pointages" && req.method === "GET"){
-    const q = Object.fromEntries(u.searchParams.entries()), ref = await D.referentiel() || {}, {P} = await D.perimetreDe(ref, C.login);
+    const q = Object.fromEntries(u.searchParams.entries()), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const au = /^\d{4}-\d{2}-\d{2}$/.test(q.au||"") ? q.au : aujourdhui(), du = /^\d{4}-\d{2}-\d{2}$/.test(q.du||"") ? q.du : ajoutJours(au, -1);
     const lim = Math.min(200, Math.max(1, +q.limit||100)), off = Math.max(0, +q.offset||0);
     const emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
@@ -1453,7 +1474,7 @@ async function traiter(req, res){
   if (p === "/api/v1/a-traiter" && req.method === "GET" && CACHE_AT.has(C.login) && Date.now() - CACHE_AT.get(C.login).t < 30000 && CACHE_AT.get(C.login).g === (K.generation ? K.generation() : 0))
     return json(res, 200, CACHE_AT.get(C.login).r);
   if (p === "/api/v1/a-traiter" && req.method === "GET"){
-    const ref = await D.referentiel() || {}, {P} = await D.perimetreDe(ref, C.login);
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(y=>y.login === C.login)||{}).profilId) || {};
     const rang = c => admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[(pr.droits||{})[c]] || 0);
     const dans = m => P.set === null || P.set.has(String(m));
@@ -1499,7 +1520,9 @@ async function traiter(req, res){
   }
   /* ---- v56.3 : annuaire paginé (liste, fiche, lot de matricules, valeurs des filtres), périmètre appliqué ---- */
   if (p === "/api/v1/employes" || p.startsWith("/api/v1/employes/")){
-    const AN = ANNUAIRE.creer({D}), q = Object.fromEntries(u.searchParams.entries());
+    /* 56.33.11 : annuaire conservé tant que la couche de données est la même (ordres de tri préparés réutilisés) */
+    if (!AN_I || AN_I.D !== D) AN_I = {D, an:ANNUAIRE.creer({D})};
+    const AN = AN_I.an, q = Object.fromEntries(u.searchParams.entries());
     if (p === "/api/v1/employes" && req.method === "GET") return json(res, 200, await AN.liste(C.login, q));
     if (p === "/api/v1/employes/valeurs" && req.method === "GET") return json(res, 200, await AN.valeurs(C.login));
     if (p === "/api/v1/employes/compter" && req.method === "GET") return json(res, 200, await AN.compter(q));
@@ -1510,7 +1533,7 @@ async function traiter(req, res){
     if (m360 && req.method === "GET"){
       const mat = decodeURIComponent(m360[1]), e = await AN.fiche(C.login, mat);
       if (!e) return erreur(res, 404, "Salarié introuvable ou hors périmètre.");
-      const ref = await D.referentiel() || {}, {P} = await D.perimetreDe(ref, C.login);
+      const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
       const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(y=>y.login === C.login)||{}).profilId) || {};
       const rang = c => admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[(pr.droits||{})[c]] || 0);
       const rubriques = [];
@@ -1551,7 +1574,7 @@ async function traiter(req, res){
 
   /* ---- v53 : recalculs demandés (rapport avant/après) et source du moteur ---- */
   if (p.startsWith("/api/v1/recalculs")){
-    const ref = await D.referentiel() || {}, {P} = await D.perimetreDe(ref, C.login);
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const dansPerim = mm => admin || P.set === null || (P.set && P.set.has(String(mm)));
     const rangPtg = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PTG] || 0);
     if (rangPtg < 3) return erreur(res, 403, "Recalcul réservé aux profils ayant le droit « validation » sur le pointage.");
@@ -1587,7 +1610,7 @@ async function traiter(req, res){
 
   /* ---- v52 : cycle de vie des journées, anomalies, ajustements ---- */
   if (p.startsWith("/api/v1/journees") || p.startsWith("/api/v1/registre-anomalies") || p.startsWith("/api/v1/ajustements")){
-    const ref = await D.referentiel() || {}, {P} = await D.perimetreDe(ref, C.login);
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
     const rangPtg = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PTG] || 0);
     const clot = await WF.clotureJusqu(), a = aujourdhui();
@@ -1667,7 +1690,7 @@ async function traiter(req, res){
   if (p === "/api/v1/evenements"){
     const mat = String(u.searchParams.get("mat")||""), du = u.searchParams.get("du"), au = u.searchParams.get("au");
     if (!mat || !dateOk(du) || !dateOk(au)) return erreur(res, 400, "Paramètres : mat, du, au.");
-    const ref = await D.referentiel() || {}; const {P} = await D.perimetreDe(ref, C.login);
+    const ref = await D.referentielLecture() || {}; const {P} = await D.perimetreDe(ref, C.login);
     if (!admin && P.set !== null && !(P.set && P.set.has(mat))) return erreur(res, 404, "Introuvable.");
     return json(res, 200, {evenements:await ING.historique(mat, du, au)});
   }
@@ -1697,11 +1720,11 @@ async function traiter(req, res){
     else if (p === "/api/v1/calcul/preaudit") r = await K.preaudit(C.login, q);
     else if (p === "/api/v1/calcul/contenu"){
       /* empreinte de clôture : sur toute l'entreprise, jamais sur un périmètre */
-      const ref = await D.referentiel() || {}; const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(u=>String(u.login).toLowerCase() === C.login.toLowerCase())||{}).profilId);
+      const ref = await D.referentielLecture() || {}; const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(u=>String(u.login).toLowerCase() === C.login.toLowerCase())||{}).profilId);
       if (!admin && !(pr && (pr.cloture || pr.reouverture))) return erreur(res, 403, "Réservé aux profils autorisés à clôturer.");
       const c = await K.contenuPeriode(q.du, q.au);
       /* v52 : sceau v2 — la période scellée inclut aussi les versions de règles applicables et le périmètre */
-      if (q.v === "2"){ const refS = await D.referentiel() || {};
+      if (q.v === "2"){ const refS = await D.referentielLecture() || {};
         c.regles = (refS.reglesV||[]).filter(x=>x && x.statut === "publiee" && x.valid_from <= q.au && (!x.valid_to || x.valid_to >= q.du)).map(x=>[x.id, x.code, x.niveau, String(x.cible), JSON.stringify(x.valeur), x.valid_from, x.valid_to||"", x.version]).sort();
         c.perimetre = "entreprise"; c.version = 2; }
       const hash = crypto.createHash("sha256").update(JSON.stringify(c), "utf8").digest("hex");
@@ -1920,7 +1943,7 @@ async function traiter(req, res){
 
   /* ---- terminaux : pilotes intégrés ou déposés dans donnees/pilotes ---- */
   if (p.startsWith("/api/v1/pointeuses/")){
-    const ref = await D.referentiel() || {};
+    const ref = await D.referentielLecture() || {};
     const moiU = (ref.users||[]).find(x=>String(x.login).toLowerCase() === C.login.toLowerCase());
     const pr = moiU ? (ref.profils||[]).find(x=>x.id === moiU.profilId) : null;
     const rang = {aucun:0, lecture:1, saisie:2, validation:3, config:4}[((pr||{}).droits||{}).TER] || 0;
@@ -2068,7 +2091,7 @@ async function demarrer(){
   let SP = null;
   async function gererPortPush(){
     let besoin = false;
-    try { const ref = CONFIG.installe ? await D.referentiel() : null; besoin = CONFIG.pushActif !== false && !!(ref && (ref.terms||[]).some(t=>t.pilote === "zk-push" && t.actif !== false)); } catch(e){}
+    try { const ref = CONFIG.installe ? await D.referentielLecture() : null; besoin = CONFIG.pushActif !== false && !!(ref && (ref.terms||[]).some(t=>t.pilote === "zk-push" && t.actif !== false)); } catch(e){}
     if (besoin && !SP){
       SP = http.createServer((req, res)=>{
         const u = new URL(req.url, "http://x");

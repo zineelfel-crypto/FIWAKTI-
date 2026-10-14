@@ -121,7 +121,7 @@ function creer(o){
   }
 
   /* ---------- appareils et secrets ---------- */
-  async function terminal(id){ const ref = await D.referentiel() || {}; return (ref.terms||[]).find(x=>x.id === id) || null; }
+  async function terminal(id){ const ref = await D.referentielLecture() || {}; return (ref.terms||[]).find(x=>x.id === id) || null; }
   /* v45 : les accès (mots de passe, clés) sont chiffrés avec une clé conservée hors de la base :
      une sauvegarde volée ne les livre pas */
   async function secrets(){
@@ -246,7 +246,7 @@ function creer(o){
       const r = (await meta("pointeuses_push_refus")) || []; r.unshift({le:horo(new Date()), sn, ip, motif}); await meta("pointeuses_push_refus", r.slice(0, 50));
     }
   }
-  async function termParSn(sn){ const ref = await D.referentiel() || {}; return (ref.terms||[]).find(x=>x.sn && String(x.sn) === String(sn) && x.actif !== false) || null; }
+  async function termParSn(sn){ const ref = await (D.referentielLecture || D.referentiel)() || {}; return (ref.terms||[]).find(x=>x.sn && String(x.sn) === String(sn) && x.actif !== false) || null; }
   /* requêtes émises par l'appareil : /iclock/cdata, /iclock/getrequest, /iclock/devicecmd */
   async function iclock(req, res, u, corps){
     const sn = u.searchParams.get("SN") || "";
@@ -400,10 +400,13 @@ function creer(o){
   /* ---------- v54 : supervision (cahier des charges §27, REC-21) ----------
      ONLINE : communication réussie récente ; DEGRADED : dernier essai en échec mais succès récent ;
      OFFLINE : aucune communication réussie dans le délai (ou jamais). */
+  const DERNIER_BRUT = new Map();
   async function supervision(seuilMin){
-    const ref = await D.referentiel() || {}, et = (await meta("pointeuses_etat")) || {}, seuil = Math.max(1, Number(seuilMin) || 10) * 60000, n = Date.now();
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, et = (await meta("pointeuses_etat")) || {}, seuil = Math.max(1, Number(seuilMin) || 10) * 60000, n = Date.now();
     const t = s => s ? new Date(String(s).replace(" ", "T")).getTime() : 0;
     const out = [];
+    /* 56.33.11 : événements en attente de toutes les pointeuses en une requête (index de la file par statut) */
+    const enFile = new Map(); try { (await B.all("SELECT terminal_id t, COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE statut IN ('attente','erreur','en_cours') GROUP BY terminal_id")).forEach(r=>enFile.set(r.t, Number(r.n))); } catch(x){}
     for (const T of (ref.terms||[])){
       if (T.actif === false) continue;
       const P = piloteDe(T), e = et[T.id] || {}, push = !!(P && P.push);
@@ -415,8 +418,15 @@ function creer(o){
         statut = e.ok === false ? (recent ? "DEGRADED" : "OFFLINE") : (recent ? "ONLINE" : "OFFLINE");
         if (e.ok === false) motif = e.motif || ""; else if (!derCom) motif = "aucune communication"; }
       let dernierEvt = null, attente = 0;
-      try { const r = await B.get("SELECT MAX(reception_ts_utc) m FROM raw_events WHERE device_id=?", T.id); dernierEvt = r && r.m || null;
-            const q = await B.get("SELECT COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE terminal_id=? AND statut IN ('attente','erreur')", T.id); attente = Number(q.n); } catch(x){}
+      /* 56.33.11 : dernier événement = dernier lot reçu de l'appareil (file indexée par pointeuse) ; auparavant un
+         MAX() sur tous les événements bruts sans index par appareil, pour chaque pointeuse (424 ms à 1,5 million de
+         badgeages, et de plus en plus lent). Repli sur les événements bruts pour un appareil sans lot dans la file
+         (badgeages repris d'une version antérieure), mémorisé 10 min. */
+      try { const r = await B.get("SELECT MAX(recu_utc) m FROM ingestion_queue WHERE terminal_id=?", T.id); dernierEvt = r && r.m || null;
+            if (!dernierEvt){ const c = DERNIER_BRUT.get(T.id);
+              if (c && n - c.t < 600000) dernierEvt = c.m;
+              else { const r2 = await B.get("SELECT MAX(reception_ts_utc) m FROM raw_events WHERE device_id=?", T.id); dernierEvt = r2 && r2.m || null; DERNIER_BRUT.set(T.id, {t:n, m:dernierEvt}); } }
+            attente = enFile.get(T.id) || 0; } catch(x){}
       out.push({id:T.id, nom:T.nom, site:T.siteId, pilote:P ? P.id : T.pilote, versionConnecteur:P ? ((P.version || "") + (P.empreinte ? " "+String(P.empreinte).slice(0, 12) : "")) || P.origine || "" : "",
         mode:push ? "push" : "collecte", statut, motif, derniereCommunication:derCom, derniereSynchroReussie:e.collecte || (push ? derCom : null), dernierEvenement:dernierEvt,
         evenementsEnAttente:attente, erreurs:Number(e.echecs)||0, latenceMs:e.tempsMs == null ? null : e.tempsMs});
@@ -428,7 +438,7 @@ function creer(o){
   async function collecteAuto(){
     if (enCours) return; enCours = true;
     try {
-      const ref = await D.referentiel() || {};
+      const ref = await D.referentielLecture() || {};
       const et = (await meta("pointeuses_etat")) || {};
       for (const T of (ref.terms||[])){
         const min = Number(T.collecteMinutes) || 0;

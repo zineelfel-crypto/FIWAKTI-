@@ -55,7 +55,7 @@ function creer(o){
   }
   /* ---------- appareils concernés (pointage et accès : même règle) ---------- */
   async function appareils(cfg){
-    const ref = await D.referentiel() || {}, acces = !!(o.moduleActif && o.moduleActif("FW-Acces"));
+    const ref = await D.referentielLecture() || {}, acces = !!(o.moduleActif && o.moduleActif("FW-Acces"));
     return (ref.terms||[]).filter(T=>T.actif !== false && PT().piloteDe(T) && !(T.usage === "door" && !(cfg.inclureTerminauxAcces && acces)));
   }
   /* périmètre d'un salarié : appareils auxquels il est rattaché (rds) ; sinon ceux de son site — exactement la règle
@@ -131,7 +131,7 @@ function creer(o){
     const tous = new Set([].concat(cfg.typesBlocageAuto, cfg.typesBlocageFinAuto, cfg.typesBlocageValidationRH));
     const res = {nouveaux:0, leves:0};
     if (tous.size){
-      const ref = await D.referentiel() || {}, codeDe = new Map((ref.tts||[]).map(t=>[t.id, String(t.code||"").toUpperCase()])), a = auj();
+      const ref = await D.referentielLecture() || {}, codeDe = new Map((ref.tts||[]).map(t=>[t.id, String(t.code||"").toUpperCase()])), a = auj();
       const absAuj = (await B.all("SELECT mat, data FROM enreg WHERE coll='abs' AND d=?", a)).map(r=>{ let x = {}; try { x = JSON.parse(r.data); } catch(e){} return {mat:String(r.mat), code:codeDe.get(x.tt) || String(x.tt||"").toUpperCase()}; })
         .filter(x=>tous.has(x.code));
       if (absAuj.length){
@@ -304,7 +304,7 @@ function creer(o){
     const ancien = await B.get("SELECT MIN(cree) m FROM bio_sync_queue WHERE statut IN ('attente','echec')");
     const parT = {}; (await B.all("SELECT terminal_id, COUNT(*) n FROM bio_sync_queue WHERE statut IN ('attente','echec','en_cours') GROUP BY terminal_id")).forEach(r=>{ parT[r.terminal_id] = Number(r.n); });
     const et = (await meta("biometrie_sync_terminaux")) || {}, cycles = (await meta("biometrie_sync_cycles")) || [];
-    const terms = await appareils(cfg), ref = await D.referentiel() || {};
+    const terms = await appareils(cfg), ref = await D.referentielLecture() || {};
     const evenements = await B.all("SELECT mat, terminal_id, action, statut, essais, finished_at, detail FROM bio_sync_queue WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 20");
     return {config:cfg, compteurs:c, plusAncienAttente:ancien && ancien.m || null, cycles, dernierReussi:(cycles.find(x=>x.resultat === "réussi")||{}).debut || null,
       dernierEchec:(cycles.find(x=>x.resultat === "échec" || x.resultat === "avec échecs")||{}).debut || null, bloques:Number((await B.get("SELECT COUNT(*) n FROM bio_blocages WHERE statut='actif'")).n),

@@ -10,9 +10,9 @@ function creer(o){
   const maintenant = () => new Date().toISOString();
   const plage = (du, au) => { const l = []; let d = new Date(du+"T12:00:00Z"); const f = new Date(au+"T12:00:00Z"); while (d <= f && l.length < 400){ l.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + 86400000); } return l; };
   const fichier = id => path.join(dossier, "recalcul-"+id+".json");
-  async function clot(){ const ref = await D.referentiel() || {}; return (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, ""); }
+  async function clot(){ const ref = await D.referentielLecture() || {}; return (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, ""); }
   async function salaries(portee, cible, dansPerim){
-    const ref = await D.referentiel() || {}, emps = (await D.employes()).filter(e=>dansPerim(e.mat));
+    const ref = await D.referentielLecture() || {}, emps = (await D.employes()).filter(e=>dansPerim(e.mat));
     const desc = id => { const s = new Set([id]); let n = -1; while (s.size !== n){ n = s.size; (ref.depts||[]).forEach(d=>{ if (d.parent && s.has(d.parent)) s.add(d.id); }); } return s; };
     switch (portee){
       case "salarie": return emps.filter(e=>String(e.mat) === String(cible));
