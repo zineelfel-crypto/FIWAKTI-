@@ -327,3 +327,33 @@ pagination, serveur Suprema BioStar 2 (heures en UTC), dossier d'export Sagem/Mo
 Mesure : 120 badgeages pour 120 salariés s'intègrent en 0,3 à 0,5 s une fois le serveur démarré (3,5 s pour le premier
 lot après redémarrage). 120 badgeages d'un même salarié le même jour prennent 1,5 s, sans conséquence en pratique :
 on compte 2 à 8 badgeages par jour.
+
+## 14. Module BI « Pilotage transverse » (cinquième série)
+
+Testé sur le banc (50 000 salariés, 2,26 millions de journées calculées), dans le navigateur en français et en arabe.
+
+Ce qui existait : indicateurs agrégés de RH, Temps, Compétences, Formation, Évaluations, HSE, Suivi médical et
+Recrutement ; filtres site / service / fonction ; périmètre de l'utilisateur respecté ; tendances ; personnalisation ;
+cache serveur.
+
+Ajouté :
+- **Couverture** : jours fériés et jours de repos travaillés (jours et heures), oublis de badgeage, journées en anomalie,
+  **absences par type** (jours et part de chaque type), **Visiteurs** (prévues, réalisées, annulées, entreprises),
+  **Intégration** (parcours en cours, tâches en retard, tâches faites à temps), **règles biométriques** (salariés
+  bloqués pendant une absence, retraits en attente ou en échec). Chaque domaine n'apparaît que si son module est actif.
+- **Comparer par site, service ou fonction** : tableau des indicateurs principaux par groupe (effectif, présence,
+  absentéisme, heures supplémentaires, retards, accidents), triable par colonne, exporté avec le reste.
+- **Périodes** : mois en cours, mois précédent, année en cours, dates choisies (en plus de 30 jours, 3 mois, 12 mois) ;
+  la tendance compare toujours à la période précédente de même durée.
+- **Paramétrage partagé** : avec le droit de paramétrage des états, « Enregistrer pour tous les utilisateurs » fixe les
+  objectifs et les indicateurs affichés par défaut ; chacun peut encore les ajuster pour lui-même.
+- Export CSV : cellules neutralisées (pas de formule exécutée par le tableur). Libellé du cache corrigé (30 min, et non 5).
+
+Temps de réponse (banc) :
+- tableau complet : 5,6 s au premier calcul, puis servi par le cache ; préchauffé en tâche de fond 90 s après le
+  démarrage et toutes les 30 min ;
+- ventilation : 0,7 à 1 s (296 services), préchauffée pour la vue par site ;
+- affichage complet de l'écran depuis le cache : 0,8 s.
+
+Non couvert : le détail par compteur (heures de nuit, majorations par taux) n'est pas conservé dans les journées
+calculées. Il reste disponible dans les États, calculés à la demande.

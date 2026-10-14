@@ -10,3 +10,10 @@
 .fwb-barre{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 4px;}
 .fwb-perso{margin:10px 0 16px;} .fwb-pl{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid var(--line);}
 .fwb-pl.off{opacity:.65;} .fwb-pl label{display:flex; gap:8px; align-items:center; cursor:pointer;} .fwb-pa{display:flex; gap:4px; align-items:center;} .fwb-pa input{width:110px;}
+/* 56.33.11 : ventilation */
+.fwb-vent th button.fwb-tri{background:none;border:0;font:inherit;color:inherit;cursor:pointer;padding:0;font-weight:600}
+.fwb-vent th button.fwb-tri.on{color:var(--accent);text-decoration:underline}
+.fwb-filtres input[type=date]{padding:7px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:var(--paper)}
+.fwb-filtres input[type=date],.fwb-pa input{min-height:38px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:var(--paper);color:var(--text)}
+.fwb-pa input{min-height:32px;width:110px}.fwb-obje{white-space:nowrap;margin-inline-end:6px}
+.fwb-filtres input[type=date]:focus,.fwb-pa input:focus{outline:none;border-color:var(--accent);box-shadow:var(--shadow-glow)}

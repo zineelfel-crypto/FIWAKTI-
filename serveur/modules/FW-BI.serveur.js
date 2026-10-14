@@ -23,12 +23,16 @@ function creer(o){
       /* journées terminées seulement (la journée en cours fausserait la présence) ; heures supplémentaires = écarts
          positifs (la colonne hs est l'écart présence − théorique, en minutes) */
       const hier = ajoutJours(new Date().toISOString().slice(0, 10), -1), auT = au < hier ? au : hier;
-      const sel = "SELECT substr(d,1,7) m, COUNT(*) j, SUM(hp) hp, SUM(ht) ht, SUM(CASE WHEN hs > 0 THEN hs ELSE 0 END) / 60.0 hs, SUM(CASE WHEN types LIKE '%absence%' THEN 1 ELSE 0 END) abs, SUM(CASE WHEN ret > 0 THEN 1 ELSE 0 END) ret FROM calc_jour WHERE d>=? AND d<=?";
+      const sel = "SELECT substr(d,1,7) m, COUNT(*) j, SUM(hp) hp, SUM(ht) ht, SUM(CASE WHEN hs > 0 THEN hs ELSE 0 END) / 60.0 hs, SUM(CASE WHEN types LIKE '%absence%' THEN 1 ELSE 0 END) abs, SUM(CASE WHEN ret > 0 THEN 1 ELSE 0 END) ret, "+
+        "SUM(CASE WHEN jid='ferie' AND hp > 0 THEN 1 ELSE 0 END) fer, SUM(CASE WHEN jid='ferie' THEN hp ELSE 0 END) hfer, SUM(CASE WHEN jid='repos' AND hp > 0 THEN 1 ELSE 0 END) rep, "+
+        "SUM(CASE WHEN jid='repos' THEN hp ELSE 0 END) hrep, SUM(CASE WHEN types LIKE '%oubli%' THEN 1 ELSE 0 END) oub, SUM(CASE WHEN nano > 0 THEN 1 ELSE 0 END) ano FROM calc_jour WHERE d>=? AND d<=?";
       const lignes = du > auT ? [] : global ? await B.all(sel+" GROUP BY substr(d,1,7)", du, auT) : await enLots(mats, l=>B.all(sel+" AND mat IN ("+ph(l)+") GROUP BY substr(d,1,7)", du, auT, ...l));
-      const mois = {}; lignes.forEach(r=>{ const x = mois[r.m] || (mois[r.m] = {mois:r.m, jours:0, hp:0, ht:0, hs:0, abs:0, ret:0}); x.jours += +r.j||0; x.hp += +r.hp||0; x.ht += +r.ht||0; x.hs += +r.hs||0; x.abs += +r.abs||0; x.ret += +r.ret||0; });
-      const t = Object.values(mois).reduce((s, x)=>({jours:s.jours + x.jours, hp:s.hp + x.hp, ht:s.ht + x.ht, hs:s.hs + x.hs, abs:s.abs + x.abs, ret:s.ret + x.ret}), {jours:0, hp:0, ht:0, hs:0, abs:0, ret:0});
+      const K = ["jours", "hp", "ht", "hs", "abs", "ret", "fer", "hfer", "rep", "hrep", "oub", "ano"], mois = {};
+      lignes.forEach(r=>{ const x = mois[r.m] || (mois[r.m] = Object.assign({mois:r.m}, Object.fromEntries(K.map(k=>[k, 0])))); K.forEach(k=>{ x[k] += +(k === "jours" ? r.j : r[k]) || 0; }); });
+      const t = Object.fromEntries(K.map(k=>[k, Object.values(mois).reduce((s, x)=>s + x[k], 0)]));
       out.temps = {heuresPresence:Math.round(t.hp), heuresTheoriques:Math.round(t.ht), heuresSup:r1(t.hs), tauxPresence:t.ht ? r1(100 * t.hp / t.ht) : null,
         joursAbsence:t.abs, tauxAbsenteisme:t.jours ? r1(100 * t.abs / t.jours) : null, joursRetard:t.ret,
+        joursFeriesTravailles:t.fer, heuresFeriees:Math.round(t.hfer), joursReposTravailles:t.rep, heuresRepos:Math.round(t.hrep), oublisBadgeage:t.oub, journeesAnomalie:t.ano,
         parMois:Object.values(mois).sort((a, b)=>a.mois.localeCompare(b.mois)).map(x=>({mois:x.mois, tauxPresence:x.ht ? r1(100 * x.hp / x.ht) : null, heuresSup:r1(x.hs), absenteisme:x.jours ? r1(100 * x.abs / x.jours) : null}))};
     }
     /* compétences : salariés en écart / couverts, par rapport aux niveaux requis de leur fonction */
@@ -77,8 +81,62 @@ function creer(o){
       const emb = (await B.all("SELECT mat FROM rec_embauches WHERE le>=? AND le<=?", du, au+"T23:59:59")).filter(r=>set.has(String(r.mat))).length;
       out.recrutement = {postesOuverts:Number((await B.get("SELECT COUNT(*) n FROM rec_postes WHERE statut='ouvert'")).n), candidaturesPeriode:Number((await B.get("SELECT COUNT(*) n FROM rec_candidatures WHERE cree>=? AND cree<=?", du, au+"T23:59:59")).n), embauches:emb};
     }
+    /* 56.33.11 : absences par type (fiches d'absence de la période, une ligne par jour d'absence) */
+    if (mats.length){ try {
+      const tt = o.B && B.type === "pg" ? "data::jsonb->>'tt'" : "json_extract(data, '$.tt')", global = P.set === null && !q.site && !q.dept && !q.fonction;
+      const sql = "SELECT "+tt+" tt, COUNT(*) n FROM enreg WHERE coll='abs' AND d>=? AND d<=?";
+      const l = global ? await B.all(sql+" GROUP BY "+tt, du, au) : await enLots(mats, x=>B.all(sql+" AND mat IN ("+ph(x)+") GROUP BY "+tt, du, au, ...x));
+      const ref = await (D.referentielLecture || D.referentiel)() || {}, noms = new Map((ref.tt||[]).map(t=>[t.id, t])), par = {};
+      l.forEach(r=>{ const k = String(r.tt||""); par[k] = (par[k]||0) + (+r.n||0); });
+      const lst = Object.keys(par).map(k=>({code:(noms.get(k)||{}).code||k, nom:(noms.get(k)||{}).nom||k, jours:par[k]})).sort((a, b)=>b.jours - a.jours);
+      out.absences = {total:lst.reduce((s, x)=>s + x.jours, 0), parType:lst.slice(0, 20)};
+    } catch(e){ (o.journal||console.log)("pilotage : absences par type : "+e.message); } }
+    /* 56.33.11 : visiteurs (sites du filtre ; hôtes du périmètre pour un utilisateur limité) */
+    if (actif("FW-Visiteurs")){ try {
+      const l = (await B.all("SELECT statut, site_id, hote_mat, entreprise_id, arrivee_le FROM vis_visites WHERE d>=? AND d<=?"+(q.site ? " AND site_id=?" : ""), du, au, ...(q.site ? [q.site] : [])))
+        .filter(v=>P.set === null && !q.dept && !q.fonction ? true : set.has(String(v.hote_mat)));
+      out.sources.push("FW-Visiteurs");
+      out.visiteurs = {visites:l.length, realisees:l.filter(v=>v.arrivee_le).length, annulees:l.filter(v=>String(v.statut).toUpperCase() === "ANNULEE").length, entreprises:new Set(l.map(v=>v.entreprise_id)).size};
+    } catch(e){ (o.journal||console.log)("pilotage : visiteurs : "+e.message); } }
+    /* 56.33.11 : intégration des nouveaux collaborateurs (parcours du périmètre, tâches en retard) */
+    if (actif("FW-Onboarding") && mats.length){ try {
+      const par = await enLots(mats, x=>B.all("SELECT id, statut, debut FROM onb_parcours WHERE mat IN ("+ph(x)+")", ...x)), ids = par.map(r=>r.id), auj = new Date().toISOString().slice(0, 10);
+      const tch = ids.length ? await enLots(ids, x=>B.all("SELECT echeance, faite_le FROM onb_taches WHERE parcours_id IN ("+ph(x)+")", ...x)) : [];
+      const faites = tch.filter(t=>t.faite_le), aTemps = faites.filter(t=>!t.echeance || String(t.faite_le).slice(0, 10) <= t.echeance);
+      out.sources.push("FW-Onboarding");
+      out.integration = {parcoursEnCours:par.filter(r=>r.statut === "en_cours").length, parcoursDemarres:par.filter(r=>r.debut >= du && r.debut <= au).length,
+        tachesEnRetard:tch.filter(t=>!t.faite_le && t.echeance && t.echeance < auj).length, tachesATemps:faites.length ? r1(100 * aTemps.length / faites.length) : null};
+    } catch(e){ (o.journal||console.log)("pilotage : intégration : "+e.message); } }
+    /* 56.33.11 : règles biométriques (salariés bloqués pendant une absence, retraits en attente ou en échec) */
+    if ((actif("FW-Time") || actif("FW-Acces")) && mats.length){ try {
+      const bl = await enLots(mats, x=>B.all("SELECT mat FROM bio_blocages WHERE statut='actif' AND mat IN ("+ph(x)+")", ...x));
+      const fi = await enLots(mats, x=>B.all("SELECT statut FROM bio_sync_queue WHERE action='retrait' AND statut IN ('attente','echec','en_cours') AND mat IN ("+ph(x)+")", ...x));
+      out.biometrie = {bloques:bl.length, retraitsEnAttente:fi.filter(r=>r.statut !== "echec").length, retraitsEnEchec:fi.filter(r=>r.statut === "echec").length};
+    } catch(e){ /* tables absentes : synchronisation biométrique jamais démarrée */ } }
     return out;
   }
+  /* 56.33.11 : ventilation par site, service ou fonction (indicateurs principaux par groupe, triés par effectif) */
+  async function ventilation(C, P, q){
+    const axe = ["site", "dept", "fonction"].indexOf(q.axe) >= 0 ? q.axe : "site";
+    const au = /^\d{4}-\d{2}-\d{2}$/.test(q.au||"") ? q.au : new Date().toISOString().slice(0, 10), du = /^\d{4}-\d{2}-\d{2}$/.test(q.du||"") && q.du <= au ? q.du : ajoutJours(au, -29);
+    const emps = (await D.employes()).filter(e=>(P.set === null || P.set.has(String(e.mat))) && (!q.site || e.siteId === q.site) && (!q.dept || e.deptId === q.dept) && (!q.fonction || String(e.poste||"") === q.fonction));
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, noms = new Map([].concat((ref.sites||[]).map(x=>["site|"+x.id, x.nom]), (ref.depts||[]).map(x=>["dept|"+x.id, x.nom])));
+    const cle = e => axe === "site" ? String(e.siteId||"") : axe === "dept" ? String(e.deptId||"") : String(e.poste||"").trim();
+    const G = new Map(), grp = k => G.get(k) || G.set(k, {cle:k, nom:k ? (axe === "fonction" ? k : noms.get(axe+"|"+k) || k) : "—", effectif:0, jours:0, hp:0, ht:0, hs:0, abs:0, ret:0, accidents:0}).get(k);
+    const parMat = new Map(); emps.forEach(e=>{ parMat.set(String(e.mat), cle(e)); if ((!e.entree || e.entree <= au) && (!e.sortie || e.sortie >= au)) grp(cle(e)).effectif++; });
+    if (actif("FW-Time") && emps.length){
+      const hier = ajoutJours(new Date().toISOString().slice(0, 10), -1), auT = au < hier ? au : hier, global = P.set === null && !q.site && !q.dept && !q.fonction;
+      const sel = "SELECT mat, COUNT(*) j, SUM(hp) hp, SUM(ht) ht, SUM(CASE WHEN hs > 0 THEN hs ELSE 0 END) / 60.0 hs, SUM(CASE WHEN types LIKE '%absence%' THEN 1 ELSE 0 END) abs, SUM(CASE WHEN ret > 0 THEN 1 ELSE 0 END) ret FROM calc_jour WHERE d>=? AND d<=?";
+      const l = du > auT ? [] : global ? await B.all(sel+" GROUP BY mat", du, auT) : await enLots(Array.from(parMat.keys()), x=>B.all(sel+" AND mat IN ("+ph(x)+") GROUP BY mat", du, auT, ...x));
+      l.forEach(r=>{ const k = parMat.get(String(r.mat)); if (k === undefined) return; const g = grp(k); g.jours += +r.j||0; g.hp += +r.hp||0; g.ht += +r.ht||0; g.hs += +r.hs||0; g.abs += +r.abs||0; g.ret += +r.ret||0; });
+    }
+    if (actif("FW-HSE")) (await B.all("SELECT mat FROM hse_evenements WHERE type='accident' AND d>=? AND d<=? AND mat IS NOT NULL", du, au)).forEach(r=>{ const k = parMat.get(String(r.mat)); if (k !== undefined) grp(k).accidents++; });
+    const lignes = Array.from(G.values()).map(g=>({cle:g.cle, nom:g.nom, effectif:g.effectif, tauxPresence:g.ht ? r1(100 * g.hp / g.ht) : null, absenteisme:g.jours ? r1(100 * g.abs / g.jours) : null,
+      heuresSup:r1(g.hs), joursRetard:g.ret, accidents:g.accidents})).sort((a, b)=>b.effectif - a.effectif);
+    return {axe, du, au, groupes:lignes.length, lignes:lignes.slice(0, 300)};
+  }
+  /* 56.33.11 : réglage partagé (objectifs et indicateurs par défaut pour tous) — modifiable avec le droit de paramétrage des états */
+  async function configLire(){ try { const r = await B.get("SELECT v FROM meta WHERE k='bi_config'"); return r ? JSON.parse(r.v) : {}; } catch(e){ return {}; } }
   async function traiter(req, res, x){
     const {p, C, admin, P, u, json, erreur} = x;
     const rang = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).ETA] || 0);
@@ -93,6 +151,24 @@ function creer(o){
       const t0 = Date.now(), r = await tableau(C, P, q); r.calculeEnMs = Date.now() - t0;
       CACHE.set(cle, {t:Date.now(), r}); if (CACHE.size > 300) CACHE.delete(CACHE.keys().next().value);
       return json(res, 200, r);
+    }
+    if (p === "/api/v1/bi/ventilation" && req.method === "GET"){
+      const cle = "V|"+cleCache(P, C, q)+"|"+(q.axe||""), c = CACHE.get(cle);
+      if (c && Date.now() - c.t < TTL && !q.frais) return json(res, 200, Object.assign({}, c.r, {cache:true}));
+      const t0 = Date.now(), r = await ventilation(C, P, q); r.calculeEnMs = Date.now() - t0;
+      CACHE.set(cle, {t:Date.now(), r}); if (CACHE.size > 300) CACHE.delete(CACHE.keys().next().value);
+      return json(res, 200, r);
+    }
+    if (p === "/api/v1/bi/config" && req.method === "GET") return json(res, 200, Object.assign({objectifs:{}, choix:null}, await configLire(), {modifiable:rang >= 4}));
+    if (p === "/api/v1/bi/config" && (req.method === "PUT" || req.method === "POST")){
+      if (rang < 4) return erreur(res, 403, "Réservé au paramétrage des états.");
+      const b = await x.corpsJson(req, 64e3), ob = {};
+      Object.keys(b.objectifs || {}).slice(0, 100).forEach(k=>{ const v = Number(b.objectifs[k]); if (/^[A-Za-z0-9_]{1,40}$/.test(k) && Number.isFinite(v)) ob[k] = v; });
+      const choix = Array.isArray(b.choix) ? b.choix.map(String).filter(k=>/^[A-Za-z0-9_]{1,40}$/.test(k)).slice(0, 100) : null;
+      const v = {objectifs:ob, choix, par:C.login, le:new Date().toISOString()};
+      await B.run("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", "bi_config", JSON.stringify(v));
+      if (o.audit) await o.audit(C.login, "pilotage.config", Object.keys(ob).length+" objectif(s), "+(choix ? choix.length : "tous les")+" indicateur(s) par défaut", x.ip);
+      return json(res, 200, Object.assign(v, {modifiable:true}));
     }
     if (p === "/api/v1/bi/filtres" && req.method === "GET"){
       const emps = (await D.employes()).filter(e=>P.set === null || P.set.has(String(e.mat)));
@@ -113,6 +189,9 @@ function creer(o){
       const q = {du, au}, cle = cleCache(P0, C0, q), c = CACHE.get(cle); if (c && Date.now() - c.t < TTL - 60000) continue;
       try { const t0 = Date.now(), r = await tableau(C0, P0, q); r.calculeEnMs = Date.now() - t0; CACHE.set(cle, {t:Date.now(), r}); } catch(e){ (o.journal||console.log)("pilotage : préchauffage : "+e.message); }
       await new Promise(ok=>setTimeout(ok, 500)); }
+    /* 56.33.11 : ventilation par site des 30 derniers jours (vue proposée à l'ouverture) */
+    { const q = {du:ajoutJours(auj, -29), au:auj, axe:"site"}, cle = "V|"+cleCache(P0, C0, q)+"|site", c = CACHE.get(cle);
+      if (!(c && Date.now() - c.t < TTL - 60000)) try { const t0 = Date.now(), r = await ventilation(C0, P0, q); r.calculeEnMs = Date.now() - t0; CACHE.set(cle, {t:Date.now(), r}); } catch(e){ (o.journal||console.log)("pilotage : préchauffage ventilation : "+e.message); } }
   }
   if (o.planifier) o.planifier("prechauffage", {intervalle:30 * 60000, premier:90000, delai:15 * 60000, priorite:3, fn:prechauffer});
   function surEvenement(){ CACHE.forEach(c=>{ c.t = 0; }); }

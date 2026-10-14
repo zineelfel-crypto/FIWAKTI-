@@ -3,7 +3,7 @@
   "etend": true,
   "nom": "Indicateurs, états et exports",
   "categorie": "metier",
-  "version": "56.20",
+  "version": "56.33.11",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -38,11 +38,11 @@
     "unmount": "unmount(ctx)"
   },
   "budget": {
-    "js_ko": 32,
+    "js_ko": 44,
     "css_ko": 4
   },
   "integrite": {
-    "js": "sha384-owlF2Mxy1JsyRrAqfms8uSiwcy883+FBDgdT8FWOtK0A8VcuXoLEiAMN+tEMRMIa",
-    "css": "sha384-YuPWwOTYa6oiOiwpfm8GKgLyjwJI0lS587CnY8kXzmNXXOuQv4lz4nD/uy+Zteka"
+    "js": "sha384-oKoCTNCAvVlGf3V4Jl0Ohi4hhNO/g6B/8V0ob47O/a71XmN3f01nCJqR3ay1ZGB0",
+    "css": "sha384-+yIn5y0NHxXlFKHrlWfxUfvTQiDCNoWZ+x4zxN9dbKVgN3GBVi0yjxfiMnVjbvBm"
   }
 }
