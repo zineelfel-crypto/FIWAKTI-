@@ -223,3 +223,27 @@ SHA-256 identique, `purgeInterdite:true` reçu par le pilote, purge forcée par 
 modifié refusé (403) jusqu'à nouvelle approbation, 2ᵉ collecte : 3 doublons, 0 intégré. Collecte à froid 6,5 s (premier
 chargement de l'annuaire), puis 0,25 à 0,75 s. La règle de purge du pilote ZK (`refusPurge`) est testée sur 6 cas
 (copie absente, archive en échec, enregistrement refusé, lecture tronquée, nombre annoncé inconnu, cas nominal).
+
+## 10. Module d'import des salariés (quatrième série)
+
+Parcours testé dans le navigateur (Chromium, 50 000 salariés, PostgreSQL) : dépôt du fichier, correspondance,
+contrôle, import, puis relecture en base. Fonctionnait déjà : colonnes non reconnues proposées en « Créer le champ
+personnalisé », valeurs écrites dans l'historique de la fiche, champs et fiches enregistrés sur le serveur, ré-import
+reconnu automatiquement (la colonne retrouve le champ créé).
+
+Corrigé / ajouté :
+- **Bouton « Créer toutes les colonnes non reconnues comme champs personnalisés »** : un clic au lieu d'un choix par
+  colonne ; le type est proposé d'après les valeurs et reste modifiable colonne par colonne.
+- **Type du champ** : « saisie libre » ou « liste des valeurs du fichier ». Avant, toute colonne de 30 valeurs ou moins
+  devenait une liste fermée (un fichier de 20 salariés transformait les numéros de téléphone en liste). La liste n'est
+  conseillée que si les valeurs se répètent, sont courtes et ne sont pas des numéros.
+- **Champ existant en liste** : les nouvelles valeurs du fichier complètent la liste (indiqué dans le rapport).
+- Codes de champ propres (`N_CNSS` et non `N__CNSS`), jamais un code réservé (MATRICULE, NOM…), garde si la liste des
+  champs est absente.
+- **Classeurs Excel (.xlsx, .xlsm) lus directement**, sans bibliothèque (décompression du navigateur, extension chargée
+  au dépôt d'un classeur seulement) : première feuille, dates au format date converties en JJ/MM/AAAA, nombres,
+  textes partagés, cellules contenant « ; ». Décompression plafonnée à 150 Mo (archive piégée). Les anciens `.xls`/`.ods`
+  restent refusés avec un message clair.
+- **En-têtes en arabe reconnus** : la normalisation ne gardait que A-Z/0-9, un en-tête arabe devenait vide et n'était
+  jamais associé. Ajout d'alias courants en français (« Date d'entrée », « Service », « Responsable »,
+  « Téléphone portable »…) et en arabe (« رقم التسجيل », « اللقب », « الاسم », « تاريخ الانتداب »…).

@@ -5,7 +5,7 @@ function irInit(){ if (irInit.fait) return; irInit.fait = true;
 Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synthèse avant import", irCreer:"Salariés à créer", irMaj:"Salariés à mettre à jour", irCols:"Colonnes non reconnues", irSites:"Sites inconnus",
     irDepts:"Services inconnus", irCals:"Calendriers inconnus", irProfils:"Profils inconnus", irComptes:"Comptes à créer", irErr:"Erreurs bloquantes", irRefs:"Éléments de référentiel à traiter",
     irRefsH:"Rien n'est créé sans votre choix. Un calendrier ou un profil n'est jamais créé par l'import : choisissez un élément existant ou laissez vide.",
-    irChoisir:"— à traiter —", irVide:"Ne pas renseigner", irIgnorer:"Ignorer la colonne", irCreerX:"Créer « {v} »", irCreerChamp:"Créer le champ personnalisé « {v} »",
+    irChoisir:"— à traiter —", irVide:"Ne pas renseigner", irIgnorer:"Ignorer la colonne", irCreerX:"Créer « {v} »", irCreerChamp:"Créer le champ personnalisé « {v} » — saisie libre", irCreerChampL:"Créer le champ personnalisé « {v} » — liste des valeurs du fichier", irTousChamps:"Créer toutes les colonnes non reconnues comme champs personnalisés ({n})", irTousChampsH:"Le type (saisie libre ou liste) est proposé d'après les valeurs du fichier ; il reste modifiable colonne par colonne, puis dans Paramétrage > Champs.",
     irCode:"Code", irLib:"Libellé", irParent:"Rattaché à", irRacine:"(premier niveau)", irMemo:"Retenir ces choix pour les prochains imports",
     irBloque:"{n} élément(s) à traiter avant l'import.", irHorsPerim:"Matricule existant hors de votre périmètre", irChargement:"Chargement des fiches concernées…",
     irRapport:"Rapport d'import", irRapDl:"Télécharger le rapport", irRefCrees:"Référentiels créés", irAucun:"aucun", irComptesCrees:"Comptes créés",
@@ -13,7 +13,7 @@ Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synth�
   Object.assign(T.en, {irCompteCol:"Create the account (Yes / No)", irSynth:"Summary before import", irCreer:"Employees to create", irMaj:"Employees to update", irCols:"Unrecognised columns", irSites:"Unknown sites",
     irDepts:"Unknown departments", irCals:"Unknown calendars", irProfils:"Unknown profiles", irComptes:"Accounts to create", irErr:"Blocking errors", irRefs:"Reference items to handle",
     irRefsH:"Nothing is created without your choice. The import never creates a calendar or a profile: pick an existing one or leave empty.",
-    irChoisir:"— to handle —", irVide:"Leave empty", irIgnorer:"Ignore the column", irCreerX:"Create “{v}”", irCreerChamp:"Create the custom field “{v}”",
+    irChoisir:"— to handle —", irVide:"Leave empty", irIgnorer:"Ignore the column", irCreerX:"Create “{v}”", irCreerChamp:"Create the custom field “{v}” — free text", irCreerChampL:"Create the custom field “{v}” — list of the file's values", irTousChamps:"Create every unrecognised column as a custom field ({n})", irTousChampsH:"The type (free text or list) is suggested from the file's values; it can be changed column by column, then in Settings > Fields.",
     irCode:"Code", irLib:"Label", irParent:"Attached to", irRacine:"(top level)", irMemo:"Remember these choices for future imports",
     irBloque:"{n} item(s) to handle before importing.", irHorsPerim:"Employee number exists outside your scope", irChargement:"Loading the records concerned…",
     irRapport:"Import report", irRapDl:"Download the report", irRefCrees:"Reference items created", irAucun:"none", irComptesCrees:"Accounts created",
@@ -21,7 +21,7 @@ Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synth�
   Object.assign(T.ar, {irCompteCol:"إنشاء الحساب (نعم / لا)", irSynth:"ملخص قبل الاستيراد", irCreer:"أعوان للإنشاء", irMaj:"أعوان للتحديث", irCols:"أعمدة غير معروفة", irSites:"مواقع غير معروفة",
     irDepts:"مصالح غير معروفة", irCals:"رزنامات غير معروفة", irProfils:"ملفات صلاحيات غير معروفة", irComptes:"حسابات للإنشاء", irErr:"أخطاء مانعة", irRefs:"عناصر مرجعية للمعالجة",
     irRefsH:"لا يُنشأ شيء دون اختياركم. لا ينشئ الاستيراد أبدا رزنامة أو ملف صلاحيات: اختاروا عنصرا موجودا أو اتركوه فارغا.",
-    irChoisir:"— للمعالجة —", irVide:"عدم التعبئة", irIgnorer:"تجاهل العمود", irCreerX:"إنشاء «{v}»", irCreerChamp:"إنشاء الحقل الخاص «{v}»",
+    irChoisir:"— للمعالجة —", irVide:"عدم التعبئة", irIgnorer:"تجاهل العمود", irCreerX:"إنشاء «{v}»", irCreerChamp:"إنشاء الحقل الخاص «{v}» — إدخال حر", irCreerChampL:"إنشاء الحقل الخاص «{v}» — قائمة قيم الملف", irTousChamps:"إنشاء كل الأعمدة غير المعروفة كحقول خاصة ({n})", irTousChampsH:"يُقترح النوع (إدخال حر أو قائمة) حسب قيم الملف؛ ويمكن تغييره لكل عمود ثم في الإعدادات > الحقول.",
     irCode:"الرمز", irLib:"التسمية", irParent:"تابع لـ", irRacine:"(المستوى الأول)", irMemo:"حفظ هذه الاختيارات للاستيرادات القادمة",
     irBloque:"{n} عنصر للمعالجة قبل الاستيراد.", irHorsPerim:"رقم تسجيل موجود خارج نطاقكم", irChargement:"جارٍ تحميل البطاقات المعنية…",
     irRapport:"تقرير الاستيراد", irRapDl:"تنزيل التقرير", irRefCrees:"عناصر مرجعية منشأة", irAucun:"لا شيء", irComptesCrees:"حسابات منشأة",
@@ -55,6 +55,11 @@ function irAnalyse(){
   (w.entetes||[]).forEach((h, i)=>{ if (irNorm(h) && !w.map[i]) R.cols.push({i, nom:irNorm(h)}); });
   return R;
 }
+/* valeurs distinctes d'une colonne ; liste conseillée si les valeurs se répètent, sont courtes et peu nombreuses */
+const IR_RESERVES = ["MATRICULE","NOM","PRENOM","CIN","SITE","DEPARTEMENT","CHEF","ENTREE","SORTIE","EMAIL","TELEPHONE","BADGE","CALENDRIER","PORTAIL","COMPTE","PROFIL"];
+function irValeurs(i){ return Array.from(new Set((ui.imp.lignes||[]).map(r=>irNorm(r[+i])).filter(Boolean))); }
+function irListeConseillee(i){ const v = irValeurs(i), n = (ui.imp.lignes||[]).filter(r=>irNorm(r[+i])).length;
+  return v.length >= 2 && v.length <= 30 && n >= 2 * v.length && v.every(x=>x.length <= 40 && !/\d{4,}/.test(x.replace(/[\s.\-+]/g, ""))); }
 function irATraiter(R){ let n = 0; ["site", "dept", "cal", "profil"].forEach(ty=>R[ty].forEach(v=>{ if (!irDecision(ty, v)) n++; })); return n; }
 /* grand effectif : les fiches du fichier sont chargées (complètes) avant l'analyse ; un matricule hors périmètre devient une erreur */
 async function irPreparer(){ irInit();
@@ -87,7 +92,10 @@ function htmlImpRefs(){ irInit();
   const lignes = [];
   ["site", "dept", "cal", "profil"].forEach(ty=>R[ty].forEach(v=>lignes.push('<tr><td class="fw-sm">'+esc({site:t.site, dept:t.dept, cal:t.calendar, profil:t.profil}[ty])+'</td><td class="fw-mono fw-sm">'+esc(v)+'</td><td>'+irSelect(ty, v)+'</td></tr>')));
   R.cols.forEach(x=>{ const d = ((w.dec||{}).col||{})[x.i] || {}; lignes.push('<tr><td class="fw-sm">'+esc(t.colonne||"Colonne")+'</td><td class="fw-mono fw-sm">'+esc(x.nom)+'</td><td>'+
-    '<select data-irdec="col" data-irv="'+x.i+'" aria-label="'+esc(x.nom)+'"><option value="">'+esc(t.irIgnorer)+'</option>'+(hab ? '<option value="creer"'+(d.m === "creer" ? " selected" : "")+'>'+esc(t.irCreerChamp.replace("{v}", x.nom))+'</option>' : '')+'</select></td></tr>'); });
+    '<select data-irdec="col" data-irv="'+x.i+'" aria-label="'+esc(x.nom)+'"><option value="">'+esc(t.irIgnorer)+'</option>'+(hab ? '<option value="creer"'+(d.m === "creer" ? " selected" : "")+'>'+esc(t.irCreerChamp.replace("{v}", x.nom))+'</option><option value="creerL"'+(d.m === "creerL" ? " selected" : "")+'>'+esc(t.irCreerChampL.replace("{v}", x.nom))+'</option>' : '')+'</select></td></tr>'); });
+  /* 56.33.11 : toutes les colonnes non reconnues en un clic (type proposé d'après les valeurs) */
+  const sansDec = R.cols.filter(x=>!(((w.dec||{}).col||{})[x.i]));
+  if (hab && sansDec.length) lignes.unshift('<tr><td colspan="3"><button type="button" class="fw-btn sm pri" data-irtous>'+esc(t.irTousChamps.replace("{n}", sansDec.length))+'</button> <span class="fw-hint">'+esc(t.irTousChampsH)+'</span></td></tr>');
   if (lignes.length) h += '<div class="fw-sec">'+esc(t.irRefs)+'</div><p class="fw-hint">'+esc(t.irRefsH)+(hab ? "" : " "+t.irNonHabil)+'</p><div style="overflow:auto"><table class="fw-tbl"><tbody>'+lignes.join("")+'</tbody></table></div>'+
     '<label class="fw-check" style="margin-top:8px"><input type="checkbox" data-irmemo'+(w.memo !== false ? " checked" : "")+'><span>'+esc(t.irMemo)+'</span></label>';
   if (aT) h += '<div class="fw-bad" role="status" style="margin-top:8px">'+esc(t.irBloque.replace("{n}", aT))+'</div>';
@@ -112,13 +120,19 @@ function irResoudre(type, v){ irInit();
 /* champs personnalisés créés depuis des colonnes non reconnues, avant l'écriture des lignes */
 function irCreerChamps(){ irInit();
   const w = ui.imp; if (!irHabilite()) return; w.crees = w.crees || [];
-  Object.keys((w.dec||{}).col||{}).forEach(i=>{ const d = w.dec.col[i]; if (!d || d.m !== "creer" || w.map[i]) return;
+  if (!Array.isArray(db.champs)) db.champs = [];
+  Object.keys((w.dec||{}).col||{}).forEach(i=>{ const d = w.dec.col[i]; if (!d || (d.m !== "creer" && d.m !== "creerL") || w.map[i]) return;
     const nom = irNorm((w.entetes||[])[i]); if (!nom) return;
-    let code = nom.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9_]/g, "_").replace(/^_+|_+$/g, "").slice(0, 30) || "CHAMP";
-    if ((db.champs||[]).some(c=>c.code === code)) code += "_"+String(Date.now()).slice(-4);
-    const vals = Array.from(new Set((w.lignes||[]).map(r=>irNorm(r[+i])).filter(Boolean))).slice(0, 50);
-    db.champs.push({id:uid("ch"), code, nom, options:vals.length <= 30 ? vals : [], filtre:vals.length <= 30});
+    let code = nom.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30) || "CHAMP";
+    const base = code; let k = 2; while (db.champs.some(c=>c.code === code) || IR_RESERVES.indexOf(code) >= 0) code = base+"_"+(k++);
+    /* liste seulement sur choix explicite (auparavant : liste fermée dès 30 valeurs ou moins, un téléphone devenait une liste) */
+    const vals = d.m === "creerL" ? irValeurs(i).slice(0, 200) : [];
+    db.champs.push({id:uid("ch"), code, nom, options:vals, filtre:d.m === "creerL"});
     w.map[i] = code; w.crees.push((t.champs||"Champ")+" : "+nom+" ("+code+")"); });
+  /* 56.33.11 : champ existant en liste — les nouvelles valeurs du fichier complètent la liste (sinon valeurs hors liste) */
+  Object.keys(w.map||{}).forEach(i=>{ const c = db.champs.find(x=>x.code === w.map[i]); if (!c || !Array.isArray(c.options) || !c.options.length) return;
+    const neuves = irValeurs(i).filter(v=>c.options.indexOf(v) < 0); if (!neuves.length) return;
+    c.options = c.options.concat(neuves); w.crees.push((t.champs||"Champ")+" : "+c.nom+" + "+neuves.join(", ")); });
 }
 /* comptes demandés par ligne (colonne Créer compte), profil existant seulement */
 function irComptes(e, o){
@@ -146,6 +160,12 @@ function htmlImpRapport(){ irInit();
     '<div class="fw-u-row" style="gap:8px;margin-top:8px"><button type="button" class="fw-btn sm" data-act="ir-rapport">'+esc(t.irRapDl)+'</button>'+
     '<button type="button" class="fw-iconb" data-act="ir-rapport-fermer" aria-label="'+esc(t.fermer)+'">×</button></div></div>';
 }
+document.addEventListener("click", function(ev){
+  const el = ev.target && ev.target.closest && ev.target.closest("[data-irtous]"); if (!el || !ui.imp || !irHabilite()) return;
+  const w = ui.imp; w.dec = w.dec || {}; w.dec.col = w.dec.col || {};
+  irAnalyse().cols.forEach(x=>{ if (!w.dec.col[x.i]) w.dec.col[x.i] = {m:irListeConseillee(x.i) ? "creerL" : "creer", nom:x.nom, code:""}; });
+  render();
+});
 document.addEventListener("change", function(ev){
   const el = ev.target; if (!el || !el.dataset || !ui.imp) return; const w = ui.imp;
   if (el.dataset.irdec){ const ty = el.dataset.irdec, v = el.dataset.irv, x = el.value; w.dec = w.dec || {}; w.dec[ty] = w.dec[ty] || {};
