@@ -14,3 +14,8 @@
 .fw-toolbar input[data-annu="q"]{min-width:300px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--text);font:inherit;font-size:13.5px;box-shadow:var(--shadow-sm)}
 .fw-toolbar input[data-annu="q"]:focus{border-color:var(--accent, #0f766e);box-shadow:0 0 0 3px var(--accent-soft, rgba(16,185,129,.15));outline:none}
 .fw-toolbar select[data-annu]{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);font:inherit;font-size:13.5px}
+/* 56.33.11 : import — choix des éléments à traiter alignés sur les autres listes ; choix manquant signalé */
+select[data-irdec],input[data-irc]{padding:7px 10px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;background:var(--paper);color:var(--text);max-width:100%;transition:border-color var(--t),box-shadow var(--t)}
+select[data-irdec]{min-width:260px}select[data-irdec]:focus,input[data-irc]:focus{outline:none;border-color:var(--accent);box-shadow:var(--shadow-glow)}
+select[data-irdec]:has(option[value=""]:checked):not([data-irdec="col"]){border-color:#d97706;background:#fffbeb}
+@media (max-width:700px){select[data-irdec]{min-width:0;width:100%}}

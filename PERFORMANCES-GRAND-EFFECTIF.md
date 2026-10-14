@@ -281,3 +281,15 @@ lecture est déjà isolée dans un fil séparé (mémoire 1,5 Go, 2 min au plus,
 pollution de prototype et le déni de service. Pour supprimer la dépendance, l'éditeur peut installer la version
 corrigée de cdn.sheetjs.com. L'import des salariés n'utilise pas cette bibliothèque (lecture .xlsx propre au navigateur).
 Le paquet `.fwk` livrant `node_modules`, il doit être reconstruit (`npm ci`) puis re-signé par l'éditeur.
+
+## 12. Ergonomie (quatrième série)
+
+- **Import, étape Contrôle** : listes de choix et champs alignés sur le reste de l'application (ils avaient l'aspect
+  natif du navigateur) ; un élément encore « à traiter » est surligné en orange ; bouton « tout créer » pour les colonnes.
+- **Collecte d'une pointeuse** : le message dit exactement ce qui s'est passé, dans les trois langues :
+  mémoire vidée (après copie, lecture complète et enregistrement confirmés), conservée car l'effacement n'est pas
+  demandé, ou conservée avec le motif (copie impossible, lecture incomplète, badgeages non enregistrés, refus de
+  l'appareil) ; présence de la copie de sauvegarde chiffrée. Avant : « conservée (intégration non confirmée) » même quand
+  l'effacement n'était simplement pas demandé.
+- La case « Effacer les badgeages de l'appareil » rappelle les conditions de l'effacement ; l'état de chaque pointeuse
+  garde la dernière purge, son motif de refus et le nom de la copie ; un refus est écrit au journal.

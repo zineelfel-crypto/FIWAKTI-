@@ -103,7 +103,7 @@ function creer(o){
           if (rep2.purge){ journal("pilote externe "+cfg.id+" : l'appareil "+(T.nom||T.id)+" a été effacé par le pilote lui-même, avant l'enregistrement par FIWAKTI");
             await audit("systeme", "pointeuse.purge_par_pilote", (T.nom||T.id)+" — "+rep2.pointages.length+" badgeage(s), purge faite par le pilote externe "+cfg.id); }
           const arch = ctx.archiver ? await ctx.archiver(rep2.pointages) : null;
-          return Object.assign({lus:rep2.pointages.length, purge:!!rep2.purge, archive:arch ? path.basename(arch.fichier) : null}, await ctx.integrer(rep2.pointages));
+          return Object.assign({lus:rep2.pointages.length, purge:!!rep2.purge, purgeDemandee:false, archive:arch ? path.basename(arch.fichier) : null}, await ctx.integrer(rep2.pointages));
         }
         return rep2;
       }};
@@ -413,7 +413,8 @@ function creer(o){
         r = await P.executer(action, T, S, ctx); r.reprise = true;
       }
       const et = (await meta("pointeuses_etat")) || {};
-      et[T.id] = Object.assign({}, et[T.id]||{}, {derniere:horo(new Date()), action, ok:true, motif:"", pilote:P.id, tempsMs:Date.now()-t0, succes:horo(new Date())}, action === "collecte" ? {collecte:horo(new Date()), integres:r.integres||0} : {});
+      et[T.id] = Object.assign({}, et[T.id]||{}, {derniere:horo(new Date()), action, ok:true, motif:"", pilote:P.id, tempsMs:Date.now()-t0, succes:horo(new Date())}, action === "collecte" ? {collecte:horo(new Date()), integres:r.integres||0, purge:!!r.purge, purgeNonFaite:r.purgeNonFaite||"", archive:r.archive||""} : {});
+      if (action === "collecte" && r.purgeNonFaite) journal("collecte "+(T.nom||T.id)+" : appareil non effacé — "+r.purgeNonFaite);
       await meta("pointeuses_etat", et);
       await audit(login, "pointeuse."+action, (T.nom||T.id)+" ("+P.id+") : "+JSON.stringify(Object.assign({}, r, {utilisateurs:r.utilisateurs ? r.utilisateurs.length : undefined, info:undefined})).slice(0,300));
       return Object.assign({pilote:P.id, tempsMs:Date.now()-t0, le:new Date().toISOString()}, r);

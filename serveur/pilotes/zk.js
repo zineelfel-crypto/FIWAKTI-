@@ -216,7 +216,9 @@ module.exports = {refusPurge,
             motifSansPurge = refusPurge({erreurArchive:motifSansPurge, archiveurDispo:!!ctx.archiver, archive:arch, integres, lus:bad.length, annonce:tl2 ? tl2.badgeages : null});
             if (!motifSansPurge){ const r = await L.commande(C.CLEAR_ATTLOG); purge = r.code === C.ACK_OK; if (!purge) motifSansPurge = "effacement refusé par l'appareil"; }
           }
-          return Object.assign({lus:bad.length, purge, archive:arch ? path.basename(arch.fichier) : null, purgeNonFaite:motifSansPurge || undefined}, integres);
+          /* code du motif, traduit par l'interface (le texte détaillé reste pour le journal) */
+          const purgeCode = !motifSansPurge ? undefined : /^(archive|pas de copie)/.test(motifSansPurge) ? "copie" : /^badgeages non/.test(motifSansPurge) ? "enregistrement" : /^lecture/.test(motifSansPurge) ? "lecture" : /^effacement/.test(motifSansPurge) ? "appareil" : "autre";
+          return Object.assign({lus:bad.length, purge, purgeDemandee:!!T.purgeApresCollecte, archive:arch ? path.basename(arch.fichier) : null, purgeNonFaite:motifSansPurge || undefined, purgeCode}, integres);
         } finally { await L.commande(C.ENABLE).catch(()=>{}); }
       }
       if (action === "utilisateurs-envoyer"){
