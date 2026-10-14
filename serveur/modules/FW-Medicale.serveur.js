@@ -44,7 +44,7 @@ function creer(o){
   }
   /* indicateurs pour le pilotage : par service, nombres et taux seulement, masqués sous 5 salariés */
   async function indicateurs(emps, du, au){
-    const per = await periodicite(), apt = await aptitudes(emps.map(e=>String(e.mat))), ref = await D.referentiel() || {};
+    const per = await periodicite(), apt = await aptitudes(emps.map(e=>String(e.mat))), ref = await (D.referentielLecture || D.referentiel)() || {};
     const nomDept = new Map((ref.depts||[]).map(d=>[d.id, d.nom])), parDept = {};
     const visites = []; const mats = emps.map(e=>String(e.mat));
     for (let i = 0; i < mats.length; i += 500){ const l = mats.slice(i, i+500); (await B.all("SELECT mat, type, realisee_le FROM med_visites WHERE statut='realisee' AND mat IN ("+l.map(()=>"?").join(",")+")", ...l)).forEach(v=>visites.push(v)); }

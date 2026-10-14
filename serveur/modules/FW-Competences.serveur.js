@@ -48,7 +48,7 @@ function creer(o){
   async function exigences(){ return B.all("SELECT * FROM comp_exigences"); }
   /* salariés du périmètre, filtrés côté serveur */
   async function salaries(C, q){
-    const ref = await D.referentiel() || {}, {P, emps} = await D.perimetreDe(ref, C.login);
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, {P, emps} = await D.perimetreDe(ref, C.login);
     let l = emps.filter(e=>(P.set === null || P.set.has(String(e.mat))) && !(e.sortie && e.sortie < maintenant().slice(0, 10)));
     if (q.site) l = l.filter(e=>e.siteId === q.site);
     if (q.dept) l = l.filter(e=>e.deptId === q.dept);

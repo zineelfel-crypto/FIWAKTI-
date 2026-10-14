@@ -96,7 +96,7 @@ function creer(o){
     }
     if (p === "/api/v1/bi/filtres" && req.method === "GET"){
       const emps = (await D.employes()).filter(e=>P.set === null || P.set.has(String(e.mat)));
-      const ref = await D.referentiel() || {}, sitesV = new Set(emps.map(e=>e.siteId)), deptsV = new Set(emps.map(e=>e.deptId));
+      const ref = await (D.referentielLecture || D.referentiel)() || {}, sitesV = new Set(emps.map(e=>e.siteId)), deptsV = new Set(emps.map(e=>e.deptId));
       return json(res, 200, {fonctions:Array.from(new Set(emps.map(e=>String(e.poste||"").trim()).filter(Boolean))).sort().slice(0, 300),
         sites:(ref.sites||[]).filter(x=>P.set === null || sitesV.has(x.id)).map(x=>({id:x.id, nom:x.nom})), depts:(ref.depts||[]).filter(x=>P.set === null || deptsV.has(x.id)).map(x=>({id:x.id, nom:x.nom}))});
     }

@@ -227,6 +227,23 @@ async function phaseEtat(idEtat, du, au){
   while (tr.etat === "attente" || tr.etat === "en_cours"){ await new Promise(ok=>setTimeout(ok, 1000)); tr = ((await appel("GET", "/api/v1/travaux")).j.travaux || []).find(x=>x.id === tr.id) || tr; }
   console.log("export « "+et.nom+" » "+du+" → "+au+" : "+tr.etat+", "+tr.lignes+" lignes, "+Math.round((performance.now() - t0) / 1000)+" s"+(tr.motif ? " — "+tr.motif : ""));
 }
+/* modules : toutes les routes de lecture (BI, formation, médical, HSE, recrutement, compétences, évaluation,
+   intégration, visiteurs), appel à froid puis à chaud */
+const ROUTES_MODULES = ["/api/v1/bi/filtres", "/api/v1/bi/tableau?du={d30}&au={hier}", "/api/v1/bi/tableau?du={d30}&au={hier}&site=bs1",
+  "/api/v1/formation/catalogue", "/api/v1/formation/sessions", "/api/v1/formation/besoins", "/api/v1/formation/habilitations",
+  "/api/v1/medical/visites", "/api/v1/medical/aptitudes", "/api/v1/medical/maladies-pro", "/api/v1/medical/parametres",
+  "/api/v1/hse/evenements", "/api/v1/hse/actions", "/api/v1/hse/risques", "/api/v1/hse/epi", "/api/v1/hse/indicateurs?du={d30}&au={hier}",
+  "/api/v1/recrutement/postes", "/api/v1/recrutement/candidats", "/api/v1/recrutement/candidatures",
+  "/api/v1/competences/catalogue", "/api/v1/competences/matrice", "/api/v1/competences/ecarts",
+  "/api/v1/evaluation/campagnes", "/api/v1/evaluation/evaluations", "/api/v1/onboarding/modeles", "/api/v1/onboarding/parcours",
+  "/api/v1/visiteurs/visites", "/api/v1/visiteurs/loge", "/api/v1/visiteurs/hotes"];
+async function phaseModules(){
+  const p2 = x => String(x).padStart(2, "0"), j = d => d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate());
+  const h = new Date(); h.setDate(h.getDate() - 1); const d30 = new Date(h); d30.setDate(d30.getDate() - 29);
+  for (const r of ROUTES_MODULES){ const url = r.replace("{hier}", j(h)).replace("{d30}", j(d30));
+    const froid = await appel("GET", url); const s = await mesurer(url.replace(/\?.*/, m=>m.length > 30 ? m.slice(0, 30)+"…" : m)+" [froid "+Math.round(froid.ms)+" ms]", ()=>appel("GET", url), 3);
+    if (froid.statut !== 200) console.log("   → "+froid.statut+" "+froid.texte.slice(0, 120)); }
+}
 (async ()=>{
   const [phase, a, b, c] = process.argv.slice(2);
   await connexion();
@@ -237,6 +254,8 @@ async function phaseEtat(idEtat, du, au){
   else if (phase === "mesures-chef"){ await connexionChef(); await phaseMesuresChef(); }
   else if (phase === "concurrence") await phaseConcurrence(Number(a) || 100, Number(b) || 60, Number(c) || 0);
   else if (phase === "etat") await phaseEtat(a, b || "2026-09-01", c || "2026-09-30");
+  else if (phase === "modules") await phaseModules();
+  else if (phase === "modules-chef"){ await connexionChef(); await phaseModules(); }
   else if (phase === "comptes") await phaseComptes(Number(a) || 50000);
   else console.log("phase inconnue");
 })().catch(e=>{ console.error(e); process.exit(1); });

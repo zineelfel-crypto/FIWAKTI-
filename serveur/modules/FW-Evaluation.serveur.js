@@ -22,7 +22,7 @@ function creer(o){
   const json2 = v => { try { return v ? JSON.parse(v) : []; } catch(e){ return []; } };
   /* évaluateur par défaut : le compte rattaché au responsable du salarié */
   async function evaluateurs(){
-    const ref = await D.referentiel() || {}, emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
     const loginDeEmp = new Map((ref.users||[]).filter(u=>u.actif !== false && u.empId).map(u=>[u.empId, u.login]));
     return m => { const e = parMat.get(String(m)), c = e && e.chefMat ? parMat.get(String(e.chefMat)) : null; return c ? (loginDeEmp.get(c.id) || null) : null; };
   }

@@ -45,7 +45,7 @@ function creer(o){
   /* contexte de l'utilisateur : rang, hôte (son matricule), sites visibles */
   async function contexte(x){
     const {C, admin, P} = x, rang = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).VIS] || 0);
-    const ref = await D.referentiel() || {}, emps = await D.employes(), u = (ref.users||[]).find(z=>z.login === C.login);
+    const ref = await (D.referentielLecture || D.referentiel)() || {}, emps = await D.employes(), u = (ref.users||[]).find(z=>z.login === C.login);
     /* v56.25 : seul un compte coché « Reçoit des visites » et lié à une fiche salarié est hôte */
     const moi = u && u.recoitVisites && u.actif !== false && emps.find(e=>e.id === u.empId);
     const hotesIds = new Set((ref.users||[]).filter(z=>z.recoitVisites && z.actif !== false && z.empId).map(z=>z.empId));
