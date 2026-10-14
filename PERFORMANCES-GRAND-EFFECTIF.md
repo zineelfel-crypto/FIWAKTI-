@@ -195,3 +195,31 @@ niveaux de compétences, 20 000 événements HSE, 50 000 candidatures et 100 000
 - **Limite connue** : l'export annuel des congés (49 000 salariés × 365 jours) prend 285 s sur la machine de test.
   Le recours : plus de fils de calcul sur un gros serveur, ou des cumuls mensuels arrêtés (évolution à valider, car
   elle touche au calcul des droits à congés).
+
+## 9. Purge des pointeuses après import, avec copie sur le serveur (quatrième série)
+
+Constat avant correction :
+- le pilote ZK natif effaçait l'appareil dès que l'enregistrement répondait « ok », même si la lecture avait été
+  tronquée (coupure réseau) ;
+- un pilote externe pouvait effacer l'appareil lui-même **avant** l'enregistrement par FIWAKTI ;
+- aucune copie des badgeages bruts n'était gardée sur le serveur.
+
+Règle appliquée (56.33.11), dans cet ordre :
+1. appareil verrouillé (`DISABLE`), nombre de badgeages relu, lecture ;
+2. **copie de sauvegarde** écrite dans `donnees/archives-pointeuses/<pointeuse>/<AAAA-MM>/*.fwa` : JSON compressé,
+   chiffré AES-256-GCM (clé `sauvegarde` du coffre), empreinte SHA-256 contrôlée à la relecture, fichier 0600 écrit
+   puis synchronisé sur disque (`fsync`) ;
+3. enregistrement dans FIWAKTI ;
+4. purge **seulement si** l'option « purger après collecte » est cochée, la copie est écrite, l'enregistrement est
+   confirmé et la lecture est complète (autant de badgeages lus que l'appareil en annonce). Sinon le motif est rendu
+   (`purgeNonFaite`) et l'appareil garde tout ; la collecte suivante renvoie les mêmes badgeages, écartés comme doublons.
+- Pilotes externes : l'option `purgeInterdite` leur est transmise pendant la collecte ; un pilote qui purge malgré tout
+  est tracé (`pointeuse.purge_par_pilote` dans l'audit) et la copie de sauvegarde est écrite.
+- Conservation : les archives sont supprimées par mois entiers au-delà de `conservation.badgeagesAns` (tâche nocturne
+  « purge-file-ingestion »).
+
+Vérifié sur le banc (PostgreSQL, 50 000 salariés) avec un pilote externe simulé : copie écrite (0600), déchiffrée et
+SHA-256 identique, `purgeInterdite:true` reçu par le pilote, purge forcée par le pilote tracée dans l'audit, pilote
+modifié refusé (403) jusqu'à nouvelle approbation, 2ᵉ collecte : 3 doublons, 0 intégré. Collecte à froid 6,5 s (premier
+chargement de l'annuaire), puis 0,25 à 0,75 s. La règle de purge du pilote ZK (`refusPurge`) est testée sur 6 cas
+(copie absente, archive en échec, enregistrement refusé, lecture tronquée, nombre annoncé inconnu, cas nominal).

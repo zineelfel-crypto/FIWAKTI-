@@ -2170,7 +2170,10 @@ async function demarrer(){
       await new Promise(ok=>setTimeout(ok, 200));
     }
     if (n) journal("file d'ingestion : "+n+" lot(s) traité(s) de plus de "+jours+" jours purgé(s)");
-    return n+" lot(s) purgé(s)";
+    /* archives des pointeuses : gardées aussi longtemps que les badgeages (conservation.badgeagesAns) */
+    let na = 0; try { na = PT ? PT.purgerArchives((CONFIG.conservation||{}).badgeagesAns) : 0; } catch(e){ journal("archives des pointeuses : "+e.message); }
+    if (na) journal("archives des pointeuses : "+na+" mois supprimé(s) (au-delà de la durée de conservation)");
+    return n+" lot(s) purgé(s), "+na+" mois d'archives supprimé(s)";
   }});
   /* v56.2 : partitions des mois à venir (3 mois d'avance) */
   PLAN.planifier("partitions-postgresql", {intervalle:3600000, premier:60000, priorite:2, delai:120000, actif:()=>installe() && B.type === "pg", fn:async ()=>{

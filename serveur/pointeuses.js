@@ -75,7 +75,8 @@ function creer(o){
     return {id:cfg.id, nom:cfg.nom || cfg.id, marques:cfg.marques || [], modeles:cfg.modeles || "", capacites:cfg.capacites || ACTIONS,
       champs:cfg.champs || [{k:"mdp", l:"Mot de passe / clé", secret:true}], origine:"externe ("+path.basename(rep)+")", empreinte:empreinte(path.join(rep, "pilote.json")),
       async executer(action, T, S, ctx){
-        const req = {version:1, action, terminal:T, secret:S||{}, options:ctx.options||{}, depuis:ctx.depuis(T), utilisateurs:action === "utilisateurs-envoyer" ? await ctx.utilisateursPour(T) : undefined};
+        /* 56.33.11 : le pilote externe ne doit jamais effacer l'appareil lui-même (FIWAKTI n'a pas encore enregistré) */
+        const req = {version:1, action, terminal:T, secret:S||{}, options:Object.assign({}, ctx.options||{}, action === "collecte" ? {purgeInterdite:true} : {}), depuis:ctx.depuis(T), utilisateurs:action === "utilisateurs-envoyer" ? await ctx.utilisateursPour(T) : undefined};
         const rep2 = await new Promise((ok, ko)=>{
           const decouper = t => { const o = []; String(t).replace(/"([^"]*)"|'([^']*)'|(\S+)/g, (_, a, b, c)=>{ o.push(a !== undefined ? a : b !== undefined ? b : c); }); return o; };
           let [prog, ...args] = Array.isArray(cfg.commande) ? cfg.commande.map(String) : decouper(cfg.commande);
@@ -98,7 +99,12 @@ function creer(o){
           p.stdin.end(JSON.stringify(req));
         });
         if (rep2.ok === false) throw new Error(rep2.erreur || "Échec du pilote externe.");
-        if (action === "collecte" && Array.isArray(rep2.pointages)) return Object.assign({lus:rep2.pointages.length, purge:!!rep2.purge}, await ctx.integrer(rep2.pointages));
+        if (action === "collecte" && Array.isArray(rep2.pointages)){
+          if (rep2.purge){ journal("pilote externe "+cfg.id+" : l'appareil "+(T.nom||T.id)+" a été effacé par le pilote lui-même, avant l'enregistrement par FIWAKTI");
+            await audit("systeme", "pointeuse.purge_par_pilote", (T.nom||T.id)+" — "+rep2.pointages.length+" badgeage(s), purge faite par le pilote externe "+cfg.id); }
+          const arch = ctx.archiver ? await ctx.archiver(rep2.pointages) : null;
+          return Object.assign({lus:rep2.pointages.length, purge:!!rep2.purge, archive:arch ? path.basename(arch.fichier) : null}, await ctx.integrer(rep2.pointages));
+        }
         return rep2;
       }};
   }
@@ -154,6 +160,37 @@ function creer(o){
   }
   /* v50 : badgeages reçus d'un appareil → file d'ingestion → événement brut immuable → événement normalisé.
      Plus aucun badgeage existant n'est réécrit (auparavant, le sens des badgeages de la journée était recalculé). */
+  /* 56.33.11 : copie de sauvegarde sur le serveur des badgeages lus sur un appareil, AVANT intégration et avant toute
+     purge : donnees/archives-pointeuses/<appareil>/<AAAA-MM>/<horodatage>.fwa — JSON compressé puis chiffré
+     (AES-256-GCM, clé des sauvegardes : lisible après une reprise sur une autre machine), empreinte SHA-256, écriture
+     forcée sur le disque. Un échec d'archivage interdit la purge. */
+  const D_ARCH = path.join(path.dirname(dossierPilotes), "archives-pointeuses");
+  async function archiver(T, lignes){
+    const zlib = require("zlib"), maintenant = new Date(), mois = maintenant.toISOString().slice(0, 7);
+    const dossier = path.join(D_ARCH, String(T.id).replace(/[^A-Za-z0-9_-]/g, "_"), mois);
+    fs.mkdirSync(dossier, {recursive:true, mode:0o700});
+    const json = JSON.stringify({format:"fiwakti-archive-pointeuse-1", terminal:{id:T.id, nom:T.nom, sn:T.sn || null}, lu:maintenant.toISOString(), n:lignes.length, lignes});
+    const sha256 = crypto.createHash("sha256").update(json).digest("hex");
+    const contenu = JSON.stringify({sha256, donnees:coffre.chiffrerTexte(zlib.gzipSync(json).toString("base64"), "sauvegarde")});
+    const fichier = path.join(dossier, maintenant.toISOString().replace(/[:.]/g, "-")+"-"+crypto.randomBytes(3).toString("hex")+".fwa");
+    const fd = fs.openSync(fichier, "wx", 0o600);
+    try { fs.writeSync(fd, contenu); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    return {fichier, sha256, n:lignes.length};
+  }
+  /* relecture d'une archive (contrôle, réintégration) */
+  function lireArchive(fichier){
+    const zlib = require("zlib"), o = JSON.parse(fs.readFileSync(fichier, "utf8"));
+    const json = zlib.gunzipSync(Buffer.from(coffre.dechiffrerTexte(o.donnees, "sauvegarde"), "base64")).toString("utf8");
+    if (crypto.createHash("sha256").update(json).digest("hex") !== o.sha256) throw new Error("Archive altérée : empreinte différente.");
+    return JSON.parse(json);
+  }
+  /* conservation des archives : supprimées au-delà de la durée de conservation des badgeages (mois entiers) */
+  function purgerArchives(ans){
+    const lim = new Date(); lim.setFullYear(lim.getFullYear() - Math.max(1, Number(ans) || 5)); const limMois = lim.toISOString().slice(0, 7);
+    let n = 0; if (!fs.existsSync(D_ARCH)) return 0;
+    for (const t of fs.readdirSync(D_ARCH)) for (const m of fs.readdirSync(path.join(D_ARCH, t))) if (/^\d{4}-\d{2}$/.test(m) && m < limMois){ fs.rmSync(path.join(D_ARCH, t, m), {recursive:true, force:true}); n++; }
+    return n;
+  }
   async function integrer(T, liste, source){
     if (!o.ingestion) throw new Error("ingestion indisponible");
     const src = source || (T && T.pilote === "zk-push" ? "push" : "collecte");
@@ -359,7 +396,7 @@ function creer(o){
     let libere; const verrou = new Promise(x=>{ libere = x; }); OCCUPE.set(String(id), verrou);
     try {
     const mats = options && Array.isArray(options.mats) ? options.mats : null;
-    const ctx = {options:options||{}, integrer:l=>integrer(T, l), utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush,
+    const ctx = {options:options||{}, integrer:l=>integrer(T, l), archiver:l=>archiver(T, l), utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush,
       /* v56.5 : visages — enregistrement (identifiant de l'appareil → salarié) et visages à envoyer à cet appareil */
       visageRecu:(utilisateur, format, octets, indice)=>visageRecu(T, utilisateur, format, octets, indice),
       visagesPour:(formats)=>visagesPour(T, formats, mats),
@@ -452,7 +489,7 @@ function creer(o){
   }
   /* dernière action automatique sensible sur un appareil (le moteur attend le délai minimal au lieu de reporter) */
   const derniereAuto = id => { let m = 0; for (const [k, v] of DERNIERE_AUTO) if (k.startsWith(String(id)+"|") && v > m) m = v; return m; };
-  return {verifierIdentifiants, supervision, charger:()=>chargerApprobations().then(()=>charger()), approuver, attente:()=>ATTENTE, executer, AUTO, occupe, manuelRecent, idSurAppareil, derniereAuto,
+  return {lireArchive, purgerArchives, archiver, verifierIdentifiants, supervision, charger:()=>chargerApprobations().then(()=>charger()), approuver, attente:()=>ATTENTE, executer, AUTO, occupe, manuelRecent, idSurAppareil, derniereAuto,
     terminal, piloteDe, correspondance, iclock, collecteAuto, etatPushCharger, enregistrerSecret, secrets, pushRestreint:()=>true,
     liste:()=>Object.values(pilotes).map(p=>({id:p.id, nom:p.nom, marques:p.marques||[], modeles:p.modeles||"", capacites:p.capacites||ACTIONS, champs:p.champs||[], origine:p.origine, empreinte:p.empreinte||"", push:!!p.push})),
     async etat(){ return {etat:(await meta("pointeuses_etat")) || {}, inconnus:(await meta("pointeuses_inconnus")) || {}, refusPush:(await meta("pointeuses_push_refus")) || [], push:Object.fromEntries(Object.entries(PUSH).map(([k, v])=>[k, {vu:v.vu, ip:v.ip, attente:(v.cmds||[]).length}]))}; }};

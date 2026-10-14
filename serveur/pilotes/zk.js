@@ -4,6 +4,7 @@
    effacements, redémarrage. Implémentation du protocole public « ZK » (format des
    paquets, clé de communication, lecture par tampon), sans DLL constructeur. */
 "use strict";
+const path = require("path");
 const net = require("net");
 const C = {CONNECT:1000, EXIT:1001, ENABLE:1002, DISABLE:1003, RESTART:1004, ACK_OK:2000, ACK_ERROR:2001, ACK_DATA:2002, ACK_UNAUTH:2005,
   AUTH:1102, OPTIONS_RRQ:11, GET_TIME:201, SET_TIME:202, ATTLOG_RRQ:13, USERTEMP_RRQ:9, CLEAR_DATA:14, CLEAR_ATTLOG:15, USER_WRQ:8,
@@ -159,10 +160,18 @@ function lireBadgeages(buf, nb, utilisateurs){
   }
   return out;
 }
+/* 56.33.11 : règle de purge après collecte — motif de refus, ou "" si l'effacement de l'appareil est permis */
+function refusPurge({erreurArchive, archiveurDispo, archive, integres, lus, annonce}){
+  if (erreurArchive) return erreurArchive;
+  if (archiveurDispo && !archive) return "pas de copie de sauvegarde";
+  if (!integres || !integres.ok) return "badgeages non enregistrés";
+  if (annonce === null || annonce === undefined || lus !== annonce) return "lecture incomplète ("+lus+" lus sur "+(annonce == null ? "?" : annonce)+")";
+  return "";
+}
 /* état ZK du badgeage : 0 entrée, 1 sortie, 2 sortie pause, 3 retour pause, 4/5 heures sup. ; 255 = non renseigné */
 const SENS = {0:"E", 1:"S", 2:"S", 3:"E", 4:"E", 5:"S"};
 
-module.exports = {
+module.exports = {refusPurge, 
   id:"zk", nom:"ZKTeco — protocole natif (TCP 4370)",
   marques:["ZKTeco", "ZKSoftware", "Entrosys", "Anviz (compatibles ZK)", "iClock"],
   modeles:"Séries K, MB, iClock, uFace, SpeedFace, ProFace (mode protocole natif)",
@@ -191,12 +200,23 @@ module.exports = {
         if (action === "utilisateurs-lire") return {utilisateurs:users.map(u=>({id:u.id, nom:u.nom, carte:u.carte ? String(u.carte) : "", privilege:u.privilege}))};
         await L.commande(C.DISABLE);
         try {
-          const bad = lireBadgeages(await L.lireTampon(C.ATTLOG_RRQ, 0), tl.badgeages, users);
-          const integres = await ctx.integrer(bad.map(b=>({utilisateur:b.utilisateur, horodatage:b.horodatage, sens:SENS[b.etat] || ""})));
-          /* purge de l'appareil seulement si tout est bien enregistré et si l'option est demandée */
+          /* 56.33.11 : nombre de badgeages relu appareil verrouillé (plus aucun badgeage ne peut arriver) */
+          const tl2 = await L.tailles().catch(()=>null);
+          const bad = lireBadgeages(await L.lireTampon(C.ATTLOG_RRQ, 0), tl2 ? tl2.badgeages : tl.badgeages, users);
+          const lignes = bad.map(b=>({utilisateur:b.utilisateur, horodatage:b.horodatage, sens:SENS[b.etat] || ""}));
+          /* copie de sauvegarde sur le serveur avant tout enregistrement et toute purge */
+          let arch = null, motifSansPurge = "";
+          if (lignes.length && ctx.archiver){ try { arch = await ctx.archiver(lignes); } catch(e){ motifSansPurge = "archive impossible : "+e.message; } }
+          const integres = await ctx.integrer(lignes);
+          /* purge de l'appareil seulement si l'option est demandée ET si : copie de sauvegarde écrite, badgeages enregistrés
+             par FIWAKTI, et lecture complète (autant de badgeages lus que l'appareil en annonce) — une lecture tronquée
+             (coupure réseau) n'efface jamais l'appareil */
           let purge = false;
-          if (T.purgeApresCollecte && integres.ok && bad.length){ const r = await L.commande(C.CLEAR_ATTLOG); purge = r.code === C.ACK_OK; }
-          return Object.assign({lus:bad.length, purge}, integres);
+          if (T.purgeApresCollecte && bad.length){
+            motifSansPurge = refusPurge({erreurArchive:motifSansPurge, archiveurDispo:!!ctx.archiver, archive:arch, integres, lus:bad.length, annonce:tl2 ? tl2.badgeages : null});
+            if (!motifSansPurge){ const r = await L.commande(C.CLEAR_ATTLOG); purge = r.code === C.ACK_OK; if (!purge) motifSansPurge = "effacement refusé par l'appareil"; }
+          }
+          return Object.assign({lus:bad.length, purge, archive:arch ? path.basename(arch.fichier) : null, purgeNonFaite:motifSansPurge || undefined}, integres);
         } finally { await L.commande(C.ENABLE).catch(()=>{}); }
       }
       if (action === "utilisateurs-envoyer"){
