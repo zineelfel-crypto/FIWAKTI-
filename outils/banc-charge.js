@@ -217,6 +217,16 @@ async function phaseConcurrence(n, duree, pauseMs){
   console.log(("badgeage temps réel"+" ".repeat(26)).slice(0, 26)+" n="+String(tp.length).padStart(5)+"  méd "+String(Math.round(sp.med)).padStart(5)+" ms  p95 "+String(Math.round(sp.p95)).padStart(5)+" ms  max "+String(Math.round(sp.max)).padStart(6)+" ms");
   console.log("débit : "+Math.round(total / sec)+" écrans/s, "+Math.round(pousses / sec)+" badgeages/s ; erreurs : "+erreurs+(erreurs ? " "+JSON.stringify(codes) : ""));
 }
+/* export des éléments variables (tâche de fond) : un état du paramétrage sur une période, pour tout le personnel */
+async function phaseEtat(idEtat, du, au){
+  const d = await referentiel(), et = (d.ref.etats||[]).find(x=>x.id === (idEtat || "et3"));
+  if (!et) throw new Error("état introuvable");
+  const t0 = performance.now(), r = await appel("POST", "/api/v1/travaux", {type:"etat", etat:et, du, au, filtres:{}});
+  if (r.statut !== 200) throw new Error(r.texte);
+  let tr = r.j;
+  while (tr.etat === "attente" || tr.etat === "en_cours"){ await new Promise(ok=>setTimeout(ok, 1000)); tr = ((await appel("GET", "/api/v1/travaux")).j.travaux || []).find(x=>x.id === tr.id) || tr; }
+  console.log("export « "+et.nom+" » "+du+" → "+au+" : "+tr.etat+", "+tr.lignes+" lignes, "+Math.round((performance.now() - t0) / 1000)+" s"+(tr.motif ? " — "+tr.motif : ""));
+}
 (async ()=>{
   const [phase, a, b, c] = process.argv.slice(2);
   await connexion();
@@ -226,6 +236,7 @@ async function phaseConcurrence(n, duree, pauseMs){
   else if (phase === "mesures") await phaseMesures();
   else if (phase === "mesures-chef"){ await connexionChef(); await phaseMesuresChef(); }
   else if (phase === "concurrence") await phaseConcurrence(Number(a) || 100, Number(b) || 60, Number(c) || 0);
+  else if (phase === "etat") await phaseEtat(a, b || "2026-09-01", c || "2026-09-30");
   else if (phase === "comptes") await phaseComptes(Number(a) || 50000);
   else console.log("phase inconnue");
 })().catch(e=>{ console.error(e); process.exit(1); });

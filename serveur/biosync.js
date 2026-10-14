@@ -21,9 +21,11 @@ const DDL = [
   "CREATE INDEX IF NOT EXISTS bio_sync_queue_cle ON bio_sync_queue(cle, statut)",
   "CREATE INDEX IF NOT EXISTS bio_sync_queue_term ON bio_sync_queue(terminal_id, statut)",
   "CREATE TABLE IF NOT EXISTS bio_blocages (mat TEXT PRIMARY KEY, code TEXT, mode TEXT NOT NULL, depuis TEXT, fin TEXT, statut TEXT NOT NULL, leve_le TEXT, leve_par TEXT, maj TEXT NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS bio_presence (terminal_id TEXT NOT NULL, mat TEXT NOT NULL, version_bio TEXT, maj TEXT NOT NULL, PRIMARY KEY(terminal_id, mat))"];
+  "CREATE TABLE IF NOT EXISTS bio_presence (terminal_id TEXT NOT NULL, mat TEXT NOT NULL, version_bio TEXT, maj TEXT NOT NULL, PRIMARY KEY(terminal_id, mat))",
+  /* 56.33.11 : sorties déjà traitées (retrait des appareils fait une fois par date de sortie) */
+  "CREATE TABLE IF NOT EXISTS bio_sorties (mat TEXT PRIMARY KEY, sortie TEXT, traite TEXT)"];
 const ddl = {pg:DDL, sqlite:DDL};
-const tables = {bio_sync_queue:"id", bio_blocages:"mat", bio_presence:"terminal_id"};
+const tables = {bio_sync_queue:"id", bio_blocages:"mat", bio_presence:"terminal_id", bio_sorties:"mat"};
 const DEFAUTS = {actif:false, pause:false, intervalleMin:15, terminauxMaitres:[], maxActionsParCycle:5, formatsVisage:["photo-jpeg", "zk-bio9-*", "zk-face7"],
   inclureTerminauxAcces:true, typesBlocageAuto:[], typesBlocageFinAuto:[], typesBlocageValidationRH:[], delaiGraceHeures:2,
   delaiEntreActionsSec:20, maxDureeCycleSec:120, maxEssais:5, backoffRetrySec:[60, 300, 900, 3600], prioriteRetrait:1, delaiRecuperationJobBloqueMin:10};
@@ -171,6 +173,28 @@ function creer(o){
     void lim;
     return res;
   }
+  /* 56.33.11 : salarié sorti → retrait de tous les appareils (empreintes, visage, badge, code) dès que la date de sortie
+     est passée, même saisie à l'avance et même si personne n'ouvre l'application. Auparavant le retrait n'était
+     déclenché que par la modification de la fiche : avec une date de sortie future, rien ne se passait le jour venu.
+     Une fois par salarié et par date de sortie ; au plus 500 par cycle (reprise d'un historique au premier passage). */
+  let SORTIS = null;
+  async function traiterSortants(cfg){
+    if (!SORTIS) SORTIS = new Map((await B.all("SELECT mat, sortie FROM bio_sorties")).map(r=>[String(r.mat), r.sortie]));
+    const a = auj(), emps = await D.employes(), res = {sortants:0};
+    const nouveaux = emps.filter(e=>e.sortie && e.sortie < a && SORTIS.get(String(e.mat)) !== e.sortie).slice(0, 500);
+    if (!nouveaux.length) return res;
+    const terms = await appareils(cfg), rat = rattaches(emps);
+    for (const e of nouveaux){
+      await ceder();
+      const pres = (await B.all("SELECT terminal_id FROM bio_presence WHERE mat=?", String(e.mat))).map(r=>r.terminal_id);
+      const cibles = Array.from(new Set(perimetre(Object.assign({}, e, {sortie:""}), terms, rat).concat(pres))).filter(t=>terms.some(T=>T.id === t));
+      if (cibles.length) await enfilerRetrait(e.mat, cibles, "sortie");
+      await B.run("INSERT INTO bio_sorties(mat,sortie,traite) VALUES(?,?,?) ON CONFLICT(mat) DO UPDATE SET sortie=excluded.sortie, traite=excluded.traite", String(e.mat), e.sortie, maint());
+      SORTIS.set(String(e.mat), e.sortie); res.sortants++;
+      await audit("systeme", "biometrie.sortie", e.mat+" (sorti le "+e.sortie+") — retrait de "+cibles.length+" appareil(s)");
+    }
+    return res;
+  }
   async function leverBlocage(mat, login){
     const r = await B.get("SELECT * FROM bio_blocages WHERE mat=?", String(mat));
     if (!r || r.statut !== "actif") throw Object.assign(new Error("Aucun blocage biométrique actif pour ce salarié."), {code:404});
@@ -277,6 +301,8 @@ function creer(o){
         for (const tid of cfg.terminauxMaitres) if (terms.some(T=>T.id === tid)) await enfiler({mat:"*", terminal_id:tid, action:"lire", priorite:5, source:"maitre"});
         /* 2. blocages selon les absences (pointage et accès) */
         rapport.blocages = await recalculerBlocages(cfg);
+        /* 2 bis. salariés sortis : retrait de tous les appareils */
+        rapport.sortants = (await traiterSortants(cfg)).sortants;
         /* 3. traitement borné de la file */
         await traiter(cfg, rapport);
         /* 4. purge */

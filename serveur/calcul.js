@@ -386,9 +386,20 @@ function creer(B, D, opts){
       .filter(x=>dans(String(x[1]))).sort();
     return {du, au, ptg, decisions, absences};
   }
+  /* 56.33.11 : export réparti sur tous les fils de calcul (tranches de 2 000 salariés, multiples des lots de 500 du
+     moteur : fichier identique), en priorité « fond » pour ne pas ralentir les écrans. Auparavant un seul fil
+     calculait tout le personnel, lot après lot. */
   async function etat(login, def, du, au, filtres, avancement){
     const {emps} = await selection(login, filtres || {});
-    return tache({type:"etat", def, mats:emps.map(e=>String(e.mat)), du, au}, avancement);
+    const mats = emps.map(e=>String(e.mat)), T = 2000;
+    if (mats.length <= T) return tache({type:"etat", def, mats, du, au}, avancement);
+    const parts = []; for (let i = 0; i < mats.length; i += T) parts.push(mats.slice(i, i + T));
+    const fait = parts.map(()=>0);
+    const res = await Promise.all(parts.map((p, k)=>tache({type:"etat", def, mats:p, du, au}, a=>{ fait[k] = a.fait; if (avancement) avancement({fait:fait.reduce((x, y)=>x + y, 0), total:mats.length}); }, true)
+      .then(txt=>{ fait[k] = p.length; return txt; })));
+    let entete = null; const corps = [];
+    res.forEach(txt=>{ const l = String(txt).replace(/^\uFEFF/, "").split("\r\n").filter(Boolean); if (entete === null && l.length) entete = l[0]; corps.push(...l.slice(1)); });
+    return "\uFEFF"+[entete || ""].concat(corps).join("\r\n");
   }
   /* file d'attente des calculs (observabilité) */
   function charge(){ return {fils:fils.filter(f=>f && f.w).length, enCours:fils.reduce((s, f)=>s + ((f && f.charge) || 0), 0), fondEnFile:FILE_FOND.length}; }

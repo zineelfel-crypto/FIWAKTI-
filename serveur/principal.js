@@ -279,6 +279,15 @@ async function a2fRequise(login){
   return !!((pr && pr.a2f) || u.a2fForce);
 }
 const compteDe = login => B.get("SELECT * FROM comptes WHERE lower(login)=lower(?)", String(login||"").trim());
+/* 56.33.11 : compte rattaché à un salarié sorti (date de sortie passée) — refusé à la connexion et à chaque requête,
+   sans attendre la désactivation du compte (tâche horaire) ni l'ouverture de l'application par un administrateur */
+let SORTIS_CPT = null;
+async function salarieSorti(c){
+  const m = String((c && c.matricule) || ""); if (!m || !D) return false;
+  const emps = await D.employes(), j = aujourdhui();
+  if (!SORTIS_CPT || SORTIS_CPT.emps !== emps || SORTIS_CPT.jour !== j) SORTIS_CPT = {emps, jour:j, set:new Set(emps.filter(e=>e.sortie && e.sortie < j).map(e=>String(e.mat)))};
+  return SORTIS_CPT.set.has(m);
+}
 
 /* comptes de l'application reflétés côté serveur (seul juge des mots de passe) */
 /* empIds (facultatif) : seuls les comptes rattachés à ces salariés sont examinés — cas d'un enregistrement de salariés
@@ -435,7 +444,7 @@ async function sessionDe(req){
   if (n - Number(s.vu) > inactif || n - Number(s.cree) > max){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
   if (n - Number(s.vu) > 15000) await B.run("UPDATE sessions SET vu=? WHERE id=?", n, s.id);
   const c = await compteDe(s.login);
-  if (!c || !Number(c.actif)){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
+  if (!c || !Number(c.actif) || await salarieSorti(c)){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
   return {sid:s.id, compte:c, csrf:s.csrf||"", a2fOk:s.a2f_ok === null || s.a2f_ok === undefined ? true : !!Number(s.a2f_ok)};
 }
 async function ouvrirSession(res, req, login, opts){
@@ -1161,7 +1170,7 @@ async function traiter(req, res){
     const b = await corpsJson(req);
     const c = await compteDe(b.login);
     const refus = async () => { e.n++; ESSAIS_IP.set(ip, e); await noterEchec(b.login, ip); return erreur(res, 401, "Identifiant ou mot de passe incorrect."); };
-    if (!c || !Number(c.actif)) { await hacher("leurre"); return refus(); }
+    if (!c || !Number(c.actif) || await salarieSorti(c)) { await hacher("leurre"); return refus(); }
     if (CONFIG.adminProvisoire && c.login === CONFIG.adminInitial && Number(c.changer) && !estLocalDirect(req))
       return erreur(res, 403, "Compte administrateur provisoire : première connexion uniquement depuis le serveur FIWAKTI lui-même (https://localhost), le temps de choisir un vrai mot de passe.");
     if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(c.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
@@ -2154,6 +2163,18 @@ async function demarrer(){
     const r = await B.partitions(); if (r.creees) journal("partitions : "+r.creees+" créée(s)");
     if (r.ignorees.length) await alerte("partitions.hors_plage", "partitions non créées (lignes déjà présentes dans la partition par défaut) : "+r.ignorees.join(", "));
     return r.creees+" créée(s)"; }});
+  /* 56.33.11 : comptes des salariés sortis désactivés chaque heure (portail fermé, sessions supprimées) */
+  PLAN.planifier("comptes-sortants", {intervalle:3600000, premier:120000, priorite:3, delai:120000, actif:installe, fn:async ()=>{
+    const emps = await D.employes(), j = aujourdhui(), sortis = new Map(emps.filter(e=>e.sortie && e.sortie < j).map(e=>[String(e.mat), e.sortie]));
+    if (!sortis.size) return "aucun";
+    const adm = String(CONFIG.adminInitial||"").toLowerCase();
+    const l = (await B.all("SELECT login, matricule FROM comptes WHERE actif=1 AND matricule IS NOT NULL AND matricule<>''")).filter(c=>sortis.has(String(c.matricule)) && String(c.login).toLowerCase() !== adm);
+    for (const c of l){
+      await B.run("UPDATE comptes SET actif=0, maj=? WHERE login=?", maintenant(), c.login); await B.run("DELETE FROM sessions WHERE login=?", c.login);
+      await audit("systeme", "compte.desactive", c.login+" (salarié "+c.matricule+" sorti le "+sortis.get(String(c.matricule))+")");
+    }
+    return l.length+" compte(s) désactivé(s)";
+  }});
   PLAN.planifier("corbeille", {intervalle:10*60000, priorite:3, delai:120000, actif:installe, fn:async ()=>{
     const n = await D.purgerCorbeille(); if (n) await audit("systeme", "corbeille.purge", n+" élément(s) effacé(s) à l'échéance de conservation"); return n+" effacé(s)"; }});
   PLAN.planifier("supervision-pointeuses", {intervalle:10*60000, priorite:2, delai:60000, actif:()=>installe() && !!PT, fn:async ()=>{
