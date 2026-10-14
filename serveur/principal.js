@@ -2158,6 +2158,20 @@ async function demarrer(){
   PLAN.planifier("nettoyage-sessions-et-travaux", {intervalle:10*60000, priorite:3, delai:60000, actif:installe, fn:async ()=>{
     await B.run("DELETE FROM sessions WHERE vu < ?", Date.now() - 24*3600000); purgerTravaux();
     await B.run("DELETE FROM bases WHERE cree < ?", Date.now() - 24*3600000); return "ok"; }});
+  /* 56.33.11 : lots déjà traités de la file d'ingestion purgés au-delà de conservation.fileJours (30 j par défaut) :
+     leur contenu est conservé dans les événements bruts (raw_events). Jamais un lot en attente, en cours ou en erreur.
+     Par tranches de 5 000 (verrous courts), au plus 200 000 lots par passage. */
+  PLAN.planifier("purge-file-ingestion", {intervalle:3600000, premier:300000, priorite:3, delai:600000, actif:installe, fn:async ()=>{
+    const jours = Math.max(7, Number((CONFIG.conservation||{}).fileJours) || 30), lim = new Date(Date.now() - jours*86400000).toISOString();
+    let n = 0;
+    for (let i = 0; i < 40; i++){
+      const r = await B.run("DELETE FROM ingestion_queue WHERE id IN (SELECT id FROM ingestion_queue WHERE statut='traite' AND traite_utc < ? LIMIT 5000)", lim);
+      n += r.n || 0; if ((r.n || 0) < 5000) break;
+      await new Promise(ok=>setTimeout(ok, 200));
+    }
+    if (n) journal("file d'ingestion : "+n+" lot(s) traité(s) de plus de "+jours+" jours purgé(s)");
+    return n+" lot(s) purgé(s)";
+  }});
   /* v56.2 : partitions des mois à venir (3 mois d'avance) */
   PLAN.planifier("partitions-postgresql", {intervalle:3600000, premier:60000, priorite:2, delai:120000, actif:()=>installe() && B.type === "pg", fn:async ()=>{
     const r = await B.partitions(); if (r.creees) journal("partitions : "+r.creees+" créée(s)");

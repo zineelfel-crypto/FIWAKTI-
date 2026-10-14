@@ -161,7 +161,15 @@ function vue(doc, login){
   if (P.profil && P.profil.persoMasque)
     o.emps = (o.emps||doc.emps||[]).map(e=>{ const c = Object.assign({}, e); CHAMPS_PERSO.forEach(k=>{ if (c[k]) c[k] = MASQUE; }); return c; });
   /* comptes des autres : identité seulement, jamais leur périmètre détaillé */
-  if (niveauProfil(P.profil) !== "admin") o.users = (doc.users||[]).map(u=>u === P.u ? u :
+  /* 56.33.11 : avec un périmètre limité, les comptes du portail salarié (niveau « simple ») des salariés hors
+     périmètre ne sont plus envoyés (6,9 Mo à chaque ouverture pour un chef de site avec 50 000 comptes) : restent son
+     compte, les comptes de responsables / RH / administrateurs (choix d'un délégué, circuits), les comptes avec
+     délégation et ceux des salariés du périmètre. Périmètre global : liste complète, comme avant. */
+  const empsVus = P.set ? new Set((o.emps||[]).map(e=>e.id)) : null;
+  const nivProfil = new Map((doc.profils||[]).map(p=>[p.id, niveauProfil(p)]));
+  const utile = u => !empsVus || u === P.u || (nivProfil.has(u.profilId) ? nivProfil.get(u.profilId) !== "simple" : true) || (u.deleg||[]).length ||
+    (u.delegPerim||[]).length || (u.empId && empsVus.has(u.empId));
+  if (niveauProfil(P.profil) !== "admin") o.users = (doc.users||[]).filter(u=>u && utile(u)).map(u=>u === P.u ? u :
     {id:u.id, login:u.login, nom:u.nom, empId:u.empId, profilId:u.profilId, actif:u.actif, deleg:u.deleg, delegPerim:(u.delegPerim||[]).filter(g=>P.u && g.a === P.u.id)});
   return {doc:o, P};
 }
