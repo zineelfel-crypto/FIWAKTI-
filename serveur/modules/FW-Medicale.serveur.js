@@ -171,7 +171,7 @@ function creer(o){
       const emps = new Map((await D.employes()).map(e=>[String(e.mat), e]));
       const l = (await B.all("SELECT mat, type, prevue_le, realisee_le, statut, aptitude, prochaine_le FROM med_visites ORDER BY mat, prevue_le")).filter(r=>dans(P, r.mat));
       await audit(C.login, "medical.export", l.length+" visite(s)", ip);
-      const csv = ["Matricule;Nom;Type;Prévue le;Réalisée le;Statut;Aptitude;Prochaine visite"].concat(l.map(r=>{ const e = emps.get(r.mat) || {}; return [r.mat, ((e.nom||"")+" "+(e.prenom||"")).trim(), r.type, r.prevue_le||"", r.realisee_le||"", r.statut, r.aptitude||"", r.prochaine_le||""].map(c=>'"'+String(c).replace(/"/g, '""')+'"').join(";"); })).join("\r\n");
+      const csv = ["Matricule;Nom;Type;Prévue le;Réalisée le;Statut;Aptitude;Prochaine visite"].concat(l.map(r=>{ const e = emps.get(r.mat) || {}; return [r.mat, ((e.nom||"")+" "+(e.prenom||"")).trim(), r.type, r.prevue_le||"", r.realisee_le||"", r.statut, r.aptitude||"", r.prochaine_le||""].map(c=>{ let s = String(c); if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+([.,]\d+)?$/.test(s)) s = "'"+s; return '"'+s.replace(/"/g, '""')+'"'; }).join(";"); })).join("\r\n");
       res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"fiwakti-suivi-medical.csv\"", "Cache-Control":"no-store"}); return res.end("\ufeff"+csv);
     }
     return erreur(res, 404, "Introuvable.");

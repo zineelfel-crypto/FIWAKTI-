@@ -247,3 +247,37 @@ Corrigé / ajouté :
 - **En-têtes en arabe reconnus** : la normalisation ne gardait que A-Z/0-9, un en-tête arabe devenait vide et n'était
   jamais associé. Ajout d'alias courants en français (« Date d'entrée », « Service », « Responsable »,
   « Téléphone portable »…) et en arabe (« رقم التسجيل », « اللقب », « الاسم », « تاريخ الانتداب »…).
+
+## 11. Sécurité informatique (quatrième série)
+
+Tests réels sur le serveur du banc (PostgreSQL, 50 000 salariés) :
+
+| Contrôle | Résultat |
+|---|---|
+| En-têtes : CSP stricte (`script-src 'self'`, `frame-ancestors 'none'`), `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` | OK |
+| Cookie de session `HttpOnly`, `SameSite=Strict` (`Secure` en HTTPS) | OK |
+| Traversée de chemin (`..`, `%2e%2e`, `%2f`, `%5c`, octet nul) sur `/public`, `/app`, `/app/modules`, avec et sans session | 404 partout |
+| API sans session | 401 |
+| CSRF : requête sans jeton ou d'une autre origine | 403 |
+| Taille des corps de requête | bornée (1 Mo par défaut, 300 Mo coupés) |
+| Force brute : verrouillage du compte après 5 échecs, 20 essais par adresse, ralentissement global | OK |
+| XSS stockée : `<img onerror>`, `<svg onload>`, `<script>` importés dans nom, prénom et champ personnalisé, affichés en liste et en fiche | affichés comme du texte, rien d'exécuté |
+| Périmètres : chef de site lisant/écrivant un salarié hors périmètre, actions d'administration | refusé (`hors`), écriture ignorée, 403 |
+| Injection SQL : requêtes construites par concaténation | paramètres `?` ou identifiants internes ; `LIMIT`/`OFFSET` convertis en nombres bornés |
+| Secrets dans les journaux (mot de passe PostgreSQL, mot de passe administrateur) | absents |
+| Droits des fichiers de `donnees/` | 0700 / 0600 |
+
+Corrigé :
+- **Énumération des identifiants** : seul un compte existant pouvait répondre « Compte verrouillé » ; un identifiant
+  inconnu ou inactif est désormais verrouillé de la même façon (même nombre d'essais, même durée, même message).
+- **Injection de formules dans les exports CSV** du suivi médical et des visiteurs (nom, société, motif saisis par des
+  personnes extérieures) : une cellule commençant par `=`, `+`, `-`, `@` est neutralisée, comme dans les exports de
+  l'application (`csvCell`).
+- **Dépendances** : `fflate` 0.8.3 (boucle infinie sur une archive ZIP64 malformée, dans le fil principal du module
+  Migration) et `mysql2` 3.24.6 (fuite du mot de passe par rétrogradation d'authentification, décompression non bornée).
+
+Reste connu : `xlsx` 0.18.5 (SheetJS, module Migration) a deux failles publiées sans version corrigée sur npm. La
+lecture est déjà isolée dans un fil séparé (mémoire 1,5 Go, 2 min au plus, résultat recopié), ce qui contient la
+pollution de prototype et le déni de service. Pour supprimer la dépendance, l'éditeur peut installer la version
+corrigée de cdn.sheetjs.com. L'import des salariés n'utilise pas cette bibliothèque (lecture .xlsx propre au navigateur).
+Le paquet `.fwk` livrant `node_modules`, il doit être reconstruit (`npm ci`) puis re-signé par l'éditeur.

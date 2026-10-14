@@ -432,6 +432,9 @@ const MSG_LIC_ECHUE = "Votre licence FIWAKTI est arrivée à échéance. Certain
 
 /* ---------------- sessions ---------------- */
 const COOKIE = "fwk_s", ESSAIS_IP = new Map();
+/* 56.33.11 : identifiants inconnus ou inactifs verrouillés comme un vrai compte (sinon seul un compte existant répond
+   « verrouillé » : l'identifiant se devine) */
+const ECHECS_INCONNUS = new Map();
 function cookies(req){ const o = {}; String(req.headers.cookie||"").split(";").forEach(p=>{ const i = p.indexOf("="); if (i > 0) o[p.slice(0,i).trim()] = decodeURIComponent(p.slice(i+1).trim()); }); return o; }
 const hid = id => crypto.createHash("sha256").update(id).digest("hex");
 async function sessionDe(req){
@@ -1170,7 +1173,16 @@ async function traiter(req, res){
     const b = await corpsJson(req);
     const c = await compteDe(b.login);
     const refus = async () => { e.n++; ESSAIS_IP.set(ip, e); await noterEchec(b.login, ip); return erreur(res, 401, "Identifiant ou mot de passe incorrect."); };
-    if (!c || !Number(c.actif) || await salarieSorti(c)) { await hacher("leurre"); return refus(); }
+    if (!c || !Number(c.actif) || await salarieSorti(c)){
+      const cle = String(b.login||"").toLowerCase().slice(0, 200), secuI = secuDe(await D.referentielLecture());
+      const maxI = Number(secuI.tentatives) || 5, vmI = Math.max(1, Number(secuI.verrouillageMin)||15), x = ECHECS_INCONNUS.get(cle) || {n:0, verrou:0};
+      if (x.verrou > Date.now()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(x.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
+      await hacher("leurre");
+      x.n++; if (x.n >= maxI){ x.n = 0; x.verrou = Date.now() + vmI*60000; }
+      if (ECHECS_INCONNUS.size > 50000) ECHECS_INCONNUS.clear();
+      ECHECS_INCONNUS.set(cle, x);
+      return refus();
+    }
     if (CONFIG.adminProvisoire && c.login === CONFIG.adminInitial && Number(c.changer) && !estLocalDirect(req))
       return erreur(res, 403, "Compte administrateur provisoire : première connexion uniquement depuis le serveur FIWAKTI lui-même (https://localhost), le temps de choisir un vrai mot de passe.");
     if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(c.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
