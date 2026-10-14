@@ -13,7 +13,7 @@
     sections.forEach(s=>{ s.hidden = +s.dataset.etape !== n; });
     [...$("#barre").children].forEach((b,i)=>b.classList.toggle("fait", i < n));
     if (n === 3) controler();
-    const f = sections[n-1].querySelector("input,textarea,button.pri"); if (f) setTimeout(()=>f.focus(), 50);
+    const sec = sections.find(s=>+s.dataset.etape === n), f = sec && sec.querySelector("input,textarea,button.pri"); if (f) setTimeout(()=>f.focus(), 50);
   }
   document.addEventListener("click", e=>{
     if (e.target.closest("[data-suivant]")){
@@ -30,6 +30,8 @@
       voir(etape-1);
     }
   });
+  /* 56.33.11 : btoa() code en Latin-1 alors que le serveur lit de l'UTF-8 */
+  const b64Utf8 = t => { let b = ""; new TextEncoder().encode(t).forEach(x=>{ b += String.fromCharCode(x); }); return btoa(b); };
   const esc = s => String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const ICO = {ok:"🟢", verifier:"🟠", bloquant:"🔴"};
   async function controler(){
@@ -52,12 +54,12 @@
     minuterie = setTimeout(async ()=>{
       const cle = $("#licence").value.trim(); if (!cle){ $("#licMsg").innerHTML = ""; return; }
       const r = await fetch("/api/installation/licence", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({cle})});
-      const j = await r.json();
+      const j = await r.json().catch(()=>({}));
       if (j.ok){
         licOk = true; $("#apresLic").disabled = false;
-        $("#licMsg").innerHTML = '<div class="msg ok">✓ Licence valide — <strong>'+esc(j.client)+'</strong> — modules : '+(j.modules === "PA" ? "Pointage + Contrôle d'accès" : j.modules === "P" ? "Pointage" : "Contrôle d'accès")+(j.expire ? " — jusqu'au "+esc(j.expire) : " — définitive")+'</div>';
+        $("#licMsg").innerHTML = '<div class="msg ok">✓ Licence valide — <strong>'+esc(j.client)+'</strong> — modules : '+(j.fw && j.fw.length ? esc(j.fw.join(", ")) : j.modules === "PA" ? "Pointage + Contrôle d'accès" : j.modules === "P" ? "Pointage" : "Contrôle d'accès")+(j.expire ? " — jusqu'au "+esc(j.expire) : " — définitive")+'</div>';
         if (!$("#entreprise").value) $("#entreprise").value = j.client;
-      } else $("#licMsg").innerHTML = '<div class="msg err">'+esc(j.motif)+'</div>';
+      } else $("#licMsg").innerHTML = '<div class="msg err">'+esc(j.motif || j.message || "Vérification impossible.")+'</div>';
     }, 350);
   });
   function majBase(){
@@ -100,6 +102,8 @@
       const j = await r.json();
       if (!r.ok){ $("#instMsg").innerHTML = '<div class="msg err">'+esc(j.message)+'</div>'; regles(); return; }
       $("#adresse").textContent = location.origin + "/";
+      /* 56.33.11 : sans certificat, FIWAKTI n'écoute que sur ce poste — ne pas présenter « localhost » comme adresse réseau */
+      if (j.ecouteLocale && corps.mode !== "local") $("#adresse").textContent = "aucune pour l'instant : sans certificat HTTPS, FIWAKTI n'accepte que les connexions de ce serveur. Déposez cert.pem et cle.pem dans donnees/certificats puis redémarrez le service pour l'ouvrir au réseau.";
       if (!j.sauvegarde) $("#finTexte").textContent = "FIWAKTI est prêt. Attention : la première sauvegarde n'a pas pu être vérifiée — consultez l'écran État du système.";
       voir(7);
     } catch(e){ $("#instMsg").innerHTML = '<div class="msg err">Le serveur ne répond pas.</div>'; regles(); }
@@ -116,7 +120,7 @@
         $("#repMsg").innerHTML = '<div class="msg info">Clé installée ('+esc(j.empreinte)+'). Restauration en cours…</div>';
       }
       const base = baseChoisie();
-      const r = await fetch("/api/installation/restaurer", {method:"POST", headers:{"X-Nom-Fichier":f.name, "X-Base":btoa(JSON.stringify(base||{}))}, body:f});
+      const r = await fetch("/api/installation/restaurer", {method:"POST", headers:{"X-Nom-Fichier":f.name.replace(/[^\x20-\x7e]/g, "_"), "X-Base":b64Utf8(JSON.stringify(base||{}))}, body:f});
       const j = await r.json(); if (!r.ok) throw new Error(j.message);
       const b = j.bilan;
       $("#repMsg").innerHTML = '<div class="msg ok">✓ Reprise terminée en '+Math.round(j.dureeMs/1000)+' s : '+b.comptes+' comptes, '+b.employes+' employés, '+b.badgeages+' badgeages, '+b.clotures+' clôtures, '+b.audit+' entrées d\'audit'+

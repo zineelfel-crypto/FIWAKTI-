@@ -36,6 +36,8 @@ try { const dm = path.join(__dirname, "modules");
 const COFFRE = require("./coffre.js");
 const TOTP = require("./totp.js");
 
+/* 56.33.11 : base SQLite, journaux et sauvegardes réservés au compte du service (empreintes de mots de passe) */
+try { process.umask(0o077); } catch(e){}
 const VERSION = process.env.FIWAKTI_VERSION || require("./version.json").version;
 const RACINE = process.env.FIWAKTI_RACINE || path.resolve(__dirname, "..", "..", "..");
 const ICI = path.resolve(__dirname, "..");
@@ -67,18 +69,21 @@ function ajoutJours(k, j){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k
 
 /* ---------------- configuration ---------------- */
 function lireConfig(){ try { return JSON.parse(fs.readFileSync(F_CONFIG, "utf8").replace(/^\uFEFF/, "")); } catch(e){ return {}; } }   /* 56.33.9 : config.json retouché à la main (BOM) */
-function ecrireConfig(c){ const t = F_CONFIG+".tmp"; fs.writeFileSync(t, JSON.stringify(c, null, 2), {mode:0o600}); fs.renameSync(t, F_CONFIG); }
+/* 56.33.11 : une base fournie par l'environnement (FIWAKTI_PG_URL, secret Docker) n'est jamais recopiée dans config.json */
+let BASE_ENV = null;
+function ecrireConfig(c){ const t = F_CONFIG+".tmp", o = Object.assign({}, c); if (BASE_ENV && o.base === BASE_ENV) delete o.base;
+  fs.writeFileSync(t, JSON.stringify(o, null, 2), {mode:0o600}); fs.renameSync(t, F_CONFIG); }
 let CONFIG = Object.assign({port:0, installe:false, sauvegarde:{heure:2, retention:14, chiffrer:true, copie:""}, sessionMinutes:30, adresse:"0.0.0.0", fenetreMois:2, seuilGrandEffectif:1000,
   pushReseaux:[], conservation:{badgeagesAns:5, auditAns:5, calculsJours:400}}, lireConfig());
 if (CONFIG.sauvegarde && CONFIG.sauvegarde.chiffrer === undefined) CONFIG.sauvegarde.chiffrer = true;
 const CF = COFFRE.creer(DONNEES);
 /* la base PostgreSQL peut aussi être donnée par l'environnement (Docker) */
-if (!CONFIG.base && process.env.FIWAKTI_PG_URL) CONFIG.base = {type:"pg", url:process.env.FIWAKTI_PG_URL};
+if (!CONFIG.base && process.env.FIWAKTI_PG_URL) CONFIG.base = BASE_ENV = {type:"pg", url:process.env.FIWAKTI_PG_URL};
 /* v47 : secret Docker (fichier monté, jamais dans l'image ni dans une variable d'environnement) */
 if (!CONFIG.base && process.env.FIWAKTI_PG_MDP_FILE){
   try {
     const mdp = fs.readFileSync(process.env.FIWAKTI_PG_MDP_FILE, "utf8").trim(), e = encodeURIComponent;
-    CONFIG.base = {type:"pg", url:"postgres://"+e(process.env.FIWAKTI_PG_UTILISATEUR||"fiwakti")+":"+e(mdp)+"@"+(process.env.FIWAKTI_PG_HOTE||"postgres")+":"+(Number(process.env.FIWAKTI_PG_PORT)||5432)+"/"+e(process.env.FIWAKTI_PG_BASE||"fiwakti")};
+    CONFIG.base = BASE_ENV = {type:"pg", url:"postgres://"+e(process.env.FIWAKTI_PG_UTILISATEUR||"fiwakti")+":"+e(mdp)+"@"+(process.env.FIWAKTI_PG_HOTE||"postgres")+":"+(Number(process.env.FIWAKTI_PG_PORT)||5432)+"/"+e(process.env.FIWAKTI_PG_BASE||"fiwakti")};
   } catch(err){ journal("secret PostgreSQL illisible : "+err.message); }
 }
 
@@ -839,6 +844,18 @@ function purgerTravaux(){
 const DEMARRE = Date.now();
 let SECURISE = false, LOCAL_SEUL = false, JETON_INSTALL = "", GERER_PUSH = ()=>{};
 const estLocal = req => /^(127\.|::1$|::ffff:127\.)/.test(ipDe(req));
+/* 56.33.11 : une requête relayée par un proxy inverse placé sur ce serveur arrive de 127.0.0.1 : elle n'est « locale »
+   que si aucun en-tête de proxy n'est présent (assistant d'installation, compte administrateur provisoire) */
+const estLocalDirect = req => estLocal(req) && !req.headers["x-forwarded-for"] && !req.headers["forwarded"] && !req.headers["x-real-ip"] && !req.headers["x-forwarded-host"];
+/* 56.33.11 : avant installation, seuls les noms de cette machine sont acceptés (protection contre le rebinding DNS) */
+function hoteInstallationOk(req){
+  const brut = String(req.headers.host||"").toLowerCase(), v6 = /^\[([^\]]+)\](:\d+)?$/.exec(brut);
+  const h = v6 ? v6[1] : brut.replace(/:\d+$/, "");
+  if (!h) return true;
+  const ok = new Set(["localhost", "127.0.0.1", "::1", os.hostname().toLowerCase()].concat(CONFIG.nomsHote || []));
+  Object.values(os.networkInterfaces()).flat().forEach(i=>{ if (i && i.address) ok.add(String(i.address).toLowerCase()); });
+  return ok.has(h) || /\.localhost$/.test(h) || h.startsWith(os.hostname().toLowerCase()+".");
+}
 const TYPES = {".html":"text/html; charset=utf-8", ".js":"text/javascript; charset=utf-8", ".css":"text/css; charset=utf-8", ".json":"application/json", ".svg":"image/svg+xml", ".png":"image/png", ".ico":"image/x-icon", ".txt":"text/plain; charset=utf-8"};
 function entetes(res, api){
   res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
@@ -883,7 +900,7 @@ function corps(req, max){
     req.on("end", ()=>ok(Buffer.concat(parts).toString("utf8"))); req.on("error", ko);
   });
 }
-async function corpsJson(req, max){ const t = await corps(req, max || 1e6); try { return t ? JSON.parse(t) : {}; } catch(e){ throw new Error("JSON invalide"); } }
+async function corpsJson(req, max){ const t = await corps(req, max || 1e6); let v; try { v = t ? JSON.parse(t) : {}; } catch(e){ throw new Error("JSON invalide"); } return v && typeof v === "object" ? v : {}; }
 /* v56.14 : fichiers de l'application compressés une fois (Brotli, sinon gzip) et gardés en mémoire, avec empreinte
    (ETag) : un navigateur qui a déjà la bonne version reçoit « 304 Non modifié » au lieu de re-télécharger ~1,6 Mo.
    Les pages HTML restent « no-store » ; les scripts et styles sont revalidés à chaque visite (no-cache + ETag). */
@@ -1014,7 +1031,8 @@ async function traiter(req, res){
 
   /* ---- installation ---- */
   if (!CONFIG.installe){
-    if (p.startsWith("/api/installation") && !estLocal(req)){
+    if (p.startsWith("/api/installation") && !hoteInstallationOk(req)) return erreur(res, 403, "Nom de serveur non reconnu : ouvrez l'assistant avec l'adresse de ce serveur (ou ajoutez ce nom à « nomsHote » dans config.json).");
+    if (p.startsWith("/api/installation") && !estLocalDirect(req)){
       const j = String(req.headers["x-jeton-installation"]||"");
       if (!JETON_INSTALL || !egalConstant(j, JETON_INSTALL)) return erreur(res, 403, "Code d'installation requis : il est affiché par l'installateur (et dans donnees/jeton-installation.txt).", {jeton:true});
     }
@@ -1022,7 +1040,7 @@ async function traiter(req, res){
     if (p === "/api/installation/licence" && req.method === "POST"){
       const b = await corpsJson(req); const r = lireLicence(b.cle);
       if (r.ok){ const e = LICENCE.etat(r.charge, aujourdhui()); if (e.restriction) return json(res, 200, {ok:false, motif:e.etat === "pas_commencee" ? "Cette licence ne commence que le "+e.L.debut+"." : "Cette licence est arrivée à échéance le "+e.L.fin+"."}); }
-      return json(res, 200, r.ok ? {ok:true, client:r.charge.client, modules:r.charge.modules, expire:LICENCE.normaliser(r.charge).fin} : {ok:false, motif:r.motif});
+      return json(res, 200, r.ok ? {ok:true, client:r.charge.client, modules:r.charge.modules, fw:Array.isArray(r.charge.fw) ? r.charge.fw : null, expire:LICENCE.normaliser(r.charge).fin} : {ok:false, motif:r.motif});
     }
     if (p === "/api/installation/base" && req.method === "POST"){
       const b = await corpsJson(req);
@@ -1036,7 +1054,7 @@ async function traiter(req, res){
       { const e = LICENCE.etat(lic.charge, aujourdhui()); if (e.restriction) return erreur(res, 400, e.etat === "pas_commencee" ? "Cette licence ne commence que le "+e.L.debut+"." : "Cette licence est arrivée à échéance le "+e.L.fin+"."); }
       /* 56.33.1 : installation simple — compte « admin », mot de passe provisoire « admin », changement obligatoire à la
          première connexion ; ce compte ne fonctionne que sur le serveur lui-même tant que le mot de passe n'est pas changé */
-      const rapide = b.rapide === true && estLocal(req);
+      const rapide = b.rapide === true && estLocalDirect(req);
       if (rapide){ b.login = "admin"; b.mdp = b.confirmation = "admin"; b.mode = b.mode || "local"; }
       const login = String(b.login||"").trim();
       if (!/^[A-Za-z0-9._@-]{3,60}$/.test(login)) return erreur(res, 400, "Identifiant invalide (3 à 60 caractères : lettres, chiffres, . _ - @).");
@@ -1061,7 +1079,7 @@ async function traiter(req, res){
       try { fs.unlinkSync(path.join(DONNEES, "jeton-installation.txt")); } catch(e){} JETON_INSTALL = "";
       await audit(login, "installation", "FIWAKTI "+VERSION+" — "+CONFIG.entreprise+" — base "+B.type, ip);
       const man = await sauvegarder(login, "fin d'installation");
-      return json(res, 200, {ok:true, sauvegarde:man.verification.ok, base:B.type});
+      return json(res, 200, {ok:true, sauvegarde:man.verification.ok, base:B.type, ecouteLocale:LOCAL_SEUL, mode:b.mode || ""});
     }
     /* v47 : reprise après sinistre — nouvelle machine, clé des sauvegardes et dernière sauvegarde
        récupérées hors du serveur perdu. Étape 1 : la clé ; étape 2 : le fichier de sauvegarde. */
@@ -1106,7 +1124,7 @@ async function traiter(req, res){
         const verifAudit = await verifierAudit();
         await audit(adm ? adm.login : "systeme", "reprise.apres.sinistre", nom+" — "+JSON.stringify(bilan)+" — "+(Date.now()-t0)+" ms", ip);
         return json(res, 200, {ok:true, bilan, dureeMs:Date.now()-t0, licence:lic ? lic.client : null, licenceValide:!!lic, audit:verifAudit.ok, administrateur:adm ? adm.login : null});
-      } catch(e){ return erreur(res, 400, e.message); }
+      } catch(e){ try { fs.unlinkSync(dest); } catch(x){} return erreur(res, 400, e.message); }
       finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
     }
     if (p === "/" || p === "/index.html" || p === "/installation" || p === "/installation.html") return fichierStatique(res, PUBLIC, "installation.html");
@@ -1127,7 +1145,7 @@ async function traiter(req, res){
     const c = await compteDe(b.login);
     const refus = async () => { e.n++; ESSAIS_IP.set(ip, e); await noterEchec(b.login, ip); return erreur(res, 401, "Identifiant ou mot de passe incorrect."); };
     if (!c || !Number(c.actif)) { await hacher("leurre"); return refus(); }
-    if (CONFIG.adminProvisoire && c.login === CONFIG.adminInitial && Number(c.changer) && !estLocal(req))
+    if (CONFIG.adminProvisoire && c.login === CONFIG.adminInitial && Number(c.changer) && !estLocalDirect(req))
       return erreur(res, 403, "Compte administrateur provisoire : première connexion uniquement depuis le serveur FIWAKTI lui-même (https://localhost), le temps de choisir un vrai mot de passe.");
     if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(c.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
     let ok = false;
@@ -2033,9 +2051,9 @@ async function demarrer(){
       DERNIERES_ERREURS.unshift({ref, code:indispo ? 503 : 500, message:indispo ? "base indisponible" : String(e.message||"").slice(0, 160), le:new Date().toISOString()}); DERNIERES_ERREURS.length = Math.min(DERNIERES_ERREURS.length, 20); });
   };
   const serveur = SECURISE ? https.createServer(cert, gestion) : http.createServer(gestion);
-  /* v56.15 : en-têtes en 15 s au plus ; requête complète (dont envoi d'une mise à jour) en 5 min au plus ; connexions
+  /* v56.15 : en-têtes en 15 s au plus ; requête complète (dont envoi d'une sauvegarde ou d'une mise à jour) en 60 min au plus (config « envoiMaxMinutes ») ; connexions
      inactives fermées après 5 s */
-  serveur.headersTimeout = 15000; serveur.requestTimeout = 300000; serveur.keepAliveTimeout = 5000;
+  serveur.headersTimeout = 15000; serveur.requestTimeout = Math.max(5, Number(CONFIG.envoiMaxMinutes) || 60) * 60000; serveur.keepAliveTimeout = 5000;   /* 56.33.11 : 60 min (sauvegardes de plusieurs Go) */
   serveur.listen(port, adresse, ()=>{
     const m = "FIWAKTI "+VERSION+" ("+B.type+") à l'écoute sur "+(SECURISE ? "https" : "http")+"://localhost:"+port+(CONFIG.installe ? "" : "/installation.html");
     journal(m); console.log(m);
