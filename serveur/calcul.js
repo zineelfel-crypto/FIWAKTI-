@@ -18,7 +18,10 @@ function creer(B, D, opts){
   const marque = () => ({t:Date.now(), gen:GENERATION, genP:GEN_P});
   const frais = (c, ttl) => !!c && c.gen === GENERATION && Date.now() - c.t < ttl && (c.genP === GEN_P || Date.now() - c.t < FRAIS_P);
   /* plusieurs fils de calcul avec PostgreSQL (un seul avec la base intégrée, qui n'a qu'un écrivain) */
-  const NB = opts.base && opts.base.type === "pg" ? Math.max(1, Math.min(4, require("os").cpus().length - 1)) : 1;
+  /* 56.33.11 : nombre de fils réglable sur un gros serveur (FIWAKTI_FILS_CALCUL ou config « filsCalcul », 1 à 32) ;
+     par défaut, cœurs − 1, 4 au plus, comme avant */
+  const reglage = Number(process.env.FIWAKTI_FILS_CALCUL) || Number(((opts.config && opts.config()) || {}).filsCalcul) || 0;
+  const NB = opts.base && opts.base.type === "pg" ? Math.max(1, reglage ? Math.min(32, reglage) : Math.min(4, require("os").cpus().length - 1)) : 1;
   const fils = []; let seq = 0; const attente = new Map();
   function fil(i){
     if (fils[i] && fils[i].w) return fils[i];

@@ -176,3 +176,22 @@ niveaux de compétences, 20 000 événements HSE, 50 000 candidatures et 100 000
 - Totaux réels en grand effectif : menu « Employés », en-tête de l'écran Pointages.
 - En-têtes plus compacts, chiffres alignés, survol des lignes, focus clavier visible, champ de recherche harmonisé.
 - Vérifié en clair, en sombre et en arabe, sans erreur JavaScript.
+
+## 8. Navigateur avec 50 000 comptes, file d'ingestion, réglages (troisième série)
+
+- **Écran « Utilisateurs » : navigateur figé 101 s → 0,3 s.** Le contrôle des accès recalculait, pour chacun des
+  50 000 comptes, les délégations reçues en reparcourant tous les comptes (2,5 milliards d'opérations). Les
+  délégations passent par un index reconstruit une fois par rendu (résultat et ordre identiques).
+- **Chaque clic : environ 155 ms → 29 ms.** La cloche de notifications recomptait les 50 000 comptes trois fois
+  à chaque rendu. Les comptages se font maintenant en un passage, gardés 5 s.
+- Mesure de **tous les écrans du menu** (administrateur) : tous sous 260 ms, presque tous sous 100 ms, sans
+  erreur JavaScript.
+- **Chef de site** : il ne reçoit plus que les comptes utiles (son périmètre, les responsables, les délégations).
+  L'ouverture passe de 6,9 Mo à 774 Ko.
+- **File d'ingestion** : les lots traités sont purgés au-delà de `conservation.fileJours` (30 jours par défaut). Leur
+  contenu reste dans les événements bruts ; les lots en attente ou en erreur ne sont jamais purgés.
+- **Fils de calcul** : leur nombre est réglable sur un gros serveur (`FIWAKTI_FILS_CALCUL` ou `filsCalcul`,
+  4 au plus par défaut).
+- **Limite connue** : l'export annuel des congés (49 000 salariés × 365 jours) prend 285 s sur la machine de test.
+  Le recours : plus de fils de calcul sur un gros serveur, ou des cumuls mensuels arrêtés (évolution à valider, car
+  elle touche au calcul des droits à congés).
