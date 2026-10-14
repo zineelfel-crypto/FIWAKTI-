@@ -50,6 +50,9 @@ PostgreSQL : `FIWAKTI_PG_URL=postgres://...`.
   (serveur installé, `FIWAKTI_DEBIT=1000000` pour lever la limite par adresse en essai). Voir `PERFORMANCES-GRAND-EFFECTIF.md`.
 
 ## Paquets de mise à jour (.fwk)
+Construction de la livraison : `node outils/construire-paquet.js [--cle CLE_PRIVEE]` (dossier, archive, .fwk ;
+voir INSTALLATION.md). Scripts livrés : `outils/livraison/installer-maj.js` (mise à jour d'une installation) et
+`outils/livraison/lanceur.js` (lanceur de référence : code 75, versions/essai.txt).
 Les fichiers `FIWAKTI-maj-*.fwk` sont du JSON signé (`format: fiwakti-maj-1`) contenant chaque fichier en base64
 avec son SHA-256. Ce dépôt a été extrait du paquet 56.33.10 (1 339 fichiers, empreintes vérifiées).
 Un paquet modifié doit être re-signé avec la clé privée de l'éditeur (absente de ce dépôt) pour être accepté.
