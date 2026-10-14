@@ -12,14 +12,20 @@ async function appel(T, S, methode, chemin, corpsJson){
   return r.corps;
 }
 const xml = (t, k) => { const m = new RegExp("<"+k+">([^<]*)</"+k+">").exec(t); return m ? m[1] : ""; };
+/* types d'événements d'identification réussie (ISAPI, major 5) : 1 badge, 2 badge + code, 38 empreinte, 40 badge +
+   empreinte, 43 badge + empreinte + code, 46 empreinte + code, 75 visage ; complétés ou remplacés par le réglage de l'appareil */
+const EVT_DEFAUT = [1, 2, 38, 40, 43, 46, 75];
+function typesEvenements(T){ const l = String(T.evenements||"").split(/[;, ]+/).map(Number).filter(n=>Number.isInteger(n) && n > 0 && n < 256);
+  return l.length ? Array.from(new Set(l)) : EVT_DEFAUT; }
 const iso = d => { const p = n => String(n).padStart(2, "0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); };
 /* v56.31 : décalage horaire réel du serveur (avant : « +01:00 » écrit en dur — faux en heure d'été, en France notamment) */
 const tz = d => { const m = -d.getTimezoneOffset(), a = Math.abs(m); return (m >= 0 ? "+" : "-")+String(Math.floor(a/60)).padStart(2, "0")+":"+String(a%60).padStart(2, "0"); };
-module.exports = {
+module.exports = {typesEvenements,
   id:"hikvision", nom:"Hikvision — ISAPI (HTTP)",
   marques:["Hikvision", "HiLook", "Ezviz (gamme pro)"], modeles:"DS-K1T, DS-K1A, MinMoe et terminaux compatibles ISAPI",
   capacites:["diagnostic","info","collecte","utilisateurs-lire","utilisateurs-envoyer","synchro-heure","redemarrer","visages-lire","visages-envoyer","utilisateurs-retirer"],
-  champs:[{k:"utilisateur", l:"Identifiant de l'appareil"}, {k:"mdp", l:"Mot de passe de l'appareil", secret:true}],
+  champs:[{k:"utilisateur", l:"Identifiant de l'appareil"}, {k:"mdp", l:"Mot de passe de l'appareil", secret:true},
+    {k:"evenements", l:"Types d'événements lus (vide = badge, empreinte, visage : 1;2;38;40;43;46;75)", public:true}],
   async executer(action, T, S, ctx){
     if (action === "diagnostic" || action === "info"){
       const x = await appel(T, S, "GET", "/ISAPI/System/deviceInfo");
@@ -34,17 +40,25 @@ module.exports = {
       if (r.statut >= 400) throw new Error("Mise à l'heure refusée ("+r.statut+").");
       return {ecartSecondes:ecart};
     }
+    /* 56.33.11 : tous les modes d'identification réussie, pas seulement le visage (avant : type 75 seul — un terminal
+       à empreinte ou à badge ne remontait aucun badgeage). Types réglables par appareil (« evenements », ex. 1;38;75). */
     if (action === "collecte"){
       const depuis = new Date(Date.now() - (Number(T.joursCollecte)||31)*86400000), fin = new Date();
-      const tous = []; let pos = 0;
-      for (let g = 0; g < 500; g++){
-        const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/AccessControl/AcsEvent?format=json",
-          {AcsEventCond:{searchID:"fiwakti", searchResultPosition:pos, maxResults:100, major:5, minor:75, startTime:iso(depuis)+tz(depuis), endTime:iso(fin)+tz(fin)}}));
-        const ev = (j.AcsEvent && j.AcsEvent.InfoList) || [];
-        ev.forEach(e=>{ if (e.employeeNoString) tous.push({utilisateur:String(e.employeeNoString), horodatage:String(e.time).slice(0,19).replace("T"," "),
-          sens:/checkOut|breakOut|overtimeOut/i.test(e.attendanceStatus||"") ? "S" : /checkIn|breakIn|overtimeIn/i.test(e.attendanceStatus||"") ? "E" : ""}); });
-        pos += ev.length;
-        if (!ev.length || !j.AcsEvent || j.AcsEvent.responseStatusStrg !== "MORE") break;
+      const tous = [], vus = new Set();
+      for (const minor of typesEvenements(T)){
+        let pos = 0;
+        for (let g = 0; g < 500; g++){
+          const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/AccessControl/AcsEvent?format=json",
+            {AcsEventCond:{searchID:"fiwakti-"+minor, searchResultPosition:pos, maxResults:100, major:5, minor, startTime:iso(depuis)+tz(depuis), endTime:iso(fin)+tz(fin)}}));
+          const ev = (j.AcsEvent && j.AcsEvent.InfoList) || [];
+          ev.forEach(e=>{ if (!e.employeeNoString) return;
+            const cle = e.serialNo != null ? "n"+e.serialNo : e.employeeNoString+"|"+e.time; if (vus.has(cle)) return; vus.add(cle);
+            tous.push({utilisateur:String(e.employeeNoString), horodatage:String(e.time).slice(0,19).replace("T"," "),
+              sens:/checkOut|breakOut|overtimeOut/i.test(e.attendanceStatus||"") ? "S" : /checkIn|breakIn|overtimeIn/i.test(e.attendanceStatus||"") ? "E" : "",
+              source_event_id:e.serialNo != null ? "hik:"+T.id+":"+e.serialNo : undefined}); });
+          pos += ev.length;
+          if (!ev.length || !j.AcsEvent || j.AcsEvent.responseStatusStrg !== "MORE") break;
+        }
       }
       return Object.assign({lus:tous.length, purge:false}, await ctx.integrer(tous));
     }
@@ -85,6 +99,8 @@ module.exports = {
         const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/Intelligent/FDLib/FDSearch?format=json", {searchResultPosition:pos, maxResults:30, faceLibType:"blackFD", FDID:"1"}));
         const l = j.MatchList || []; if (!l.length) break;
         for (const x of l){ if (!x.faceURL || !x.FPID) continue;
+          /* l'adresse de la photo vient de l'appareil : suivie seulement si elle pointe vers ce même appareil (identifiants envoyés) */
+          try { if (new URL(x.faceURL).hostname !== String(T.ip)) continue; } catch(e){ continue; }
           const r = await digest(x.faceURL, {method:"GET", binaire:true}, null, (S && S.utilisateur) || T.identifiant || "admin", (S && S.mdp) || "");
           if (r.statut >= 400) continue; lus++;
           const e = await ctx.visageRecu(x.FPID, "photo-jpeg", r.corps, 0); if (e.ok) enreg++; else if (e.inconnu) inconnus++; }

@@ -396,7 +396,15 @@ function creer(o){
     let libere; const verrou = new Promise(x=>{ libere = x; }); OCCUPE.set(String(id), verrou);
     try {
     const mats = options && Array.isArray(options.mats) ? options.mats : null;
-    const ctx = {options:options||{}, integrer:l=>integrer(T, l), archiver:l=>archiver(T, l), utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush,
+    /* 56.33.11 : copie de sauvegarde automatique de toute collecte avant enregistrement, quel que soit le pilote (ZK et
+       pilotes externes l'écrivent eux-mêmes avant de décider d'une purge : pas de seconde copie) */
+    let copie = null;
+    const ctx = {options:options||{},
+      integrer:async l=>{
+        if (!copie && action === "collecte" && Array.isArray(l) && l.length){ try { copie = await archiver(T, l); } catch(e){ journal("copie de sauvegarde "+(T.nom||T.id)+" : "+e.message); } }
+        return Object.assign({archive:copie ? path.basename(copie.fichier) : null}, await integrer(T, l));
+      },
+      archiver:async l=>{ copie = await archiver(T, l); return copie; }, utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush,
       /* v56.5 : visages — enregistrement (identifiant de l'appareil → salarié) et visages à envoyer à cet appareil */
       visageRecu:(utilisateur, format, octets, indice)=>visageRecu(T, utilisateur, format, octets, indice),
       visagesPour:(formats)=>visagesPour(T, formats, mats),

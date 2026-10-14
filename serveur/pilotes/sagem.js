@@ -52,7 +52,7 @@ const motifRe = T => new RegExp("^"+String(T.motif || "*.csv;*.txt;*.dat").split
 module.exports = {
   id:"sagem", nom:"Sagem / Morpho (IDEMIA) — journaux exportés",
   marques:["Sagem", "Morpho", "Safran Morpho", "IDEMIA"], modeles:"MorphoAccess (J, 100, 500, VP), Sigma, MorphoWave, VisionPass — via MorphoManager, MEMS ou BioBridge",
-  capacites:["diagnostic", "info", "collecte", "utilisateurs-envoyer"],
+  capacites:["diagnostic", "info", "collecte", "utilisateurs-envoyer", "utilisateurs-retirer"],
   champs:[{k:"dossier", l:"Dossier des journaux exportés (chemin complet sur le serveur)", public:true},
     {k:"motif", l:"Fichiers à lire (ex. *.csv;*.txt)", public:true},
     {k:"colonnes", l:"Colonnes du fichier si sans en-tête (ex. identifiant=1;date=2;heure=3;sens=4)", public:true},
@@ -66,18 +66,20 @@ module.exports = {
       return {enLigne:true, info:{dossier:d, enAttente:f.length, dernierFichier:der ? der.toISOString().slice(0, 16).replace("T", " ") : "aucun", rangementPossible:ecriture}};
     }
     if (action === "collecte"){
-      const d = dossierDe(T), re = motifRe(T), fait = path.join(d, "integres"), tous = []; let rejets = 0, fichiers = 0; const erreurs = [];
+      const d = dossierDe(T), re = motifRe(T), fait = path.join(d, "integres"), tous = [], lus = []; let rejets = 0, fichiers = 0; const erreurs = [];
       for (const n of fs.readdirSync(d).filter(x=>re.test(x)).sort()){
         const p = path.join(d, n); if (!fs.statSync(p).isFile()) continue;
         if (Date.now() - fs.statSync(p).mtimeMs < 15000) continue;                 /* fichier peut-être encore en cours d'écriture */
-        try { const r = analyser(lireTexte(fs.readFileSync(p)), T, n); r.passages.forEach(x=>tous.push(x)); rejets += r.rejets; fichiers++;
+        try { const r = analyser(lireTexte(fs.readFileSync(p)), T, n); r.passages.forEach(x=>tous.push(x)); rejets += r.rejets; fichiers++; lus.push(n);
         } catch(e){ erreurs.push(e.message); continue; }
       }
       const res = tous.length ? await ctx.integrer(tous) : {integres:0, doublons:0};
-      /* rangement après intégration réussie seulement (les doublons éventuels sont écartés par l'ingestion) */
-      try { fs.mkdirSync(fait, {recursive:true}); for (const n of fs.readdirSync(d).filter(x=>re.test(x))){ const p = path.join(d, n);
-        if (fs.statSync(p).isFile() && Date.now() - fs.statSync(p).mtimeMs >= 15000) fs.renameSync(p, path.join(fait, new Date().toISOString().slice(0, 10)+"_"+n)); } }
+      /* rangement après intégration réussie, des seuls fichiers lus (56.33.11 : avant, tout fichier du dossier était rangé,
+         y compris un fichier illisible ou arrivé pendant la lecture — ses passages n'étaient jamais intégrés) */
+      if (res.ok !== false) try { fs.mkdirSync(fait, {recursive:true}); for (const n of lus){ const p = path.join(d, n);
+        if (fs.existsSync(p)) fs.renameSync(p, path.join(fait, new Date().toISOString().slice(0, 10)+"_"+n)); } }
       catch(e){ erreurs.push("Fichiers non rangés (droit d'écriture sur le dossier ?) : ils seront relus sans créer de doublon."); }
+      if (erreurs.length) erreurs.push("Les fichiers en erreur restent dans le dossier : ils seront relus après correction du réglage.");
       return Object.assign({fichiers, lus:tous.length, rejets, erreurs}, res);
     }
     if (action === "utilisateurs-envoyer"){
@@ -87,6 +89,15 @@ module.exports = {
       const f = path.join(dst, "utilisateurs-"+new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")+".csv");
       fs.writeFileSync(f, "\uFEFF"+["User ID;Last Name;First Name;Card Number"].concat(liste.map(u=>{ const p = String(u.nom||"").split(" "); return [q(u.id), q(p.slice(1).join(" ")), q(p[0]), q(u.carte)].join(";"); })).join("\r\n"));
       return {envoyes:liste.length, fichier:f, consigne:"Importez ce fichier dans MorphoManager (Utilisateurs › Importer), puis synchronisez les terminaux."};
+    }
+    /* 56.33.11 : salariés sortis ou bloqués (congé, maladie…) — fichier de suppression pour MorphoManager / MEMS dans
+       « a-supprimer/ » (avant : retrait ignoré, l'empreinte restait active sur le terminal) */
+    if (action === "utilisateurs-retirer"){
+      const d = dossierDe(T), ids = (ctx.options.ids || []).map(String).filter(Boolean), dst = path.join(d, "a-supprimer"); fs.mkdirSync(dst, {recursive:true});
+      if (!ids.length) return {retires:0};
+      const f = path.join(dst, "utilisateurs-a-supprimer-"+new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")+"-"+crypto.randomBytes(3).toString("hex")+".csv");
+      fs.writeFileSync(f, "\uFEFF"+["User ID"].concat(ids.map(v=>'"'+v.replace(/"/g, '""')+'"')).join("\r\n"));
+      return {retires:ids.length, fichier:f, note:"Fichier de suppression déposé : MorphoManager › Utilisateurs › Supprimer par fichier, puis synchroniser les terminaux."};
     }
     throw new Error("Action non prise en charge par ce pilote : "+action);
   },

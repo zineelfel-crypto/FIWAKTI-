@@ -293,3 +293,37 @@ Le paquet `.fwk` livrant `node_modules`, il doit être reconstruit (`npm ci`) pu
   l'effacement n'était simplement pas demandé.
 - La case « Effacer les badgeages de l'appareil » rappelle les conditions de l'effacement ; l'état de chaque pointeuse
   garde la dernière purge, son motif de refus et le nom de la copie ; un refus est écrit au journal.
+
+## 13. Pointeuses biométriques et faciales autres que ZK (cinquième série)
+
+Chaque pilote est testé contre un appareil simulé : terminal Hikvision ISAPI avec authentification Digest réelle et
+pagination, serveur Suprema BioStar 2 (heures en UTC), dossier d'export Sagem/Morpho, appareil ZK Push.
+
+| Pilote | Défaut constaté | Correction | Vérifié |
+|---|---|---|---|
+| Hikvision | collecte limitée aux **visages** (type 75) : un terminal à empreinte ou à badge ne remontait **aucun** badgeage | badge, badge+code, empreinte, badge+empreinte(+code), empreinte+code, visage ; types réglables par appareil ; doublons écartés par n° d'événement | 122 badgeages (120 empreintes sur 2 pages, 1 badge, 1 visage), l'échec d'empreinte ignoré |
+| Hikvision | photo de visage téléchargée à l'adresse fournie par l'appareil, avec ses identifiants, sans contrôle | adresse suivie seulement si elle désigne le même appareil | photo du même appareil lue et chiffrée, adresse externe ignorée |
+| BioStar 2 | heure UTC prise pour l'heure locale : **1 h d'écart** en Tunisie (2 h en été ailleurs) | l'ingestion accepte une heure avec fuseau (`Z`, `+01:00`) et la convertit dans le fuseau du site | 07:00Z → 08:00, 16:15Z → 17:15 |
+| BioStar 2 | sens jamais lu ; session jamais fermée | touche T&A (F1 entrée, F2 sortie, réglable) ; déconnexion après chaque action | IN / OUT corrects, déconnexion à chaque appel |
+| Sagem / Morpho | un fichier illisible était quand même **rangé** dans `integres/` : ses passages n'étaient jamais intégrés | seuls les fichiers lus sont rangés, après enregistrement ; les autres restent avec un message | fichier valide intégré, fichier mal formé laissé dans le dossier |
+| Sagem / Morpho | **sortie ou absence : empreinte jamais retirée** (« non pris en charge ») | fichier de suppression `a-supprimer/` pour MorphoManager | fichier créé avec le matricule du salarié sorti |
+| ZK Push | « Effacer les badgeages » pouvait perdre des badgeages pas encore transmis | demande de renvoi des badgeages avant l'effacement (exécutés dans l'ordre par l'appareil) | ordre des commandes vérifié |
+| Tous | copie de sauvegarde seulement pour ZK et pilotes externes | copie chiffrée automatique de toute collecte, quel que soit le pilote | copie écrite pour Hikvision, BioStar 2, Sagem |
+
+**Règles biométriques (sortie, congé, maladie)**
+- **Blocage pendant une absence : ne fonctionnait pas.** La synchronisation lisait un référentiel « tts » qui n'existe
+  pas : la liste des types d'absence était **vide à l'écran** (impossible d'en cocher) et aucune absence ne déclenchait
+  de blocage. Corrigé, avec une valeur par défaut : toute absence à la journée bloque (congé annuel, maladie,
+  maternité, absence non justifiée, longue durée, congés spéciaux), mais pas les absences à l'heure (visite médicale,
+  autorisation) ni les missions et formations. Ce choix reste modifiable dans le réglage.
+- Vérifié : congé maladie saisi → salarié bloqué et retrait mis en file sur la pointeuse de son site ; salarié sorti →
+  retrait en un cycle sur Hikvision (visage puis personne), BioStar 2 (utilisateur) et Sagem (fichier), et mis en file
+  pour ZK Push.
+- Un appareil dont le pilote ne sait pas retirer un utilisateur produit désormais une **alerte d'audit**
+  (« à retirer à la main ») au lieu d'un « ok » silencieux.
+- Rappel : la synchronisation biométrique est **désactivée par défaut**. Elle doit être activée à l'installation
+  (Appareils › Synchronisation biométrique), sinon les règles de sortie et de blocage ne s'appliquent pas.
+
+Mesure : 120 badgeages pour 120 salariés s'intègrent en 0,3 à 0,5 s une fois le serveur démarré (3,5 s pour le premier
+lot après redémarrage). 120 badgeages d'un même salarié le même jour prennent 1,5 s, sans conséquence en pratique :
+on compte 2 à 8 badgeages par jour.

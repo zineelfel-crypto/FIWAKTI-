@@ -49,7 +49,9 @@ module.exports = {
       }
       return {salaries:Object.keys(parId).length, photos, gabarits, note:"Commandes en file : appliquées à la prochaine connexion de l'appareil."};
     }
-    if (action === "nettoyage"){ const q = ctx.options.quoi || "pointages"; if (q !== "utilisateurs") cmd("CLEAR LOG"); if (q !== "pointages") cmd("CLEAR DATA"); return {ok:true}; }
+    /* 56.33.11 : avant d'effacer les badgeages, l'appareil renvoie d'abord tous ceux de la période de collecte (il exécute
+       ses commandes dans l'ordre) : un badgeage pas encore transmis n'est pas perdu */
+    if (action === "nettoyage"){ const q = ctx.options.quoi || "pointages"; if (q !== "utilisateurs"){ cmd("DATA QUERY ATTLOG StartTime="+ctx.depuis(T)+"\tEndTime="+ctx.maintenant()); cmd("CLEAR LOG"); } if (q !== "pointages") cmd("CLEAR DATA"); return {ok:true}; }
     if (action === "synchro-heure"){ cmd("SET OPTIONS DateTime="+Math.round(Date.now()/1000)); return {ecartSecondes:null, note:"Mise à l'heure en file."}; }
     if (action === "redemarrer"){ cmd("REBOOT"); return {ok:true}; }
     if (action === "effacer-commandes"){ ctx.viderPush(T.sn); return {ok:true}; }

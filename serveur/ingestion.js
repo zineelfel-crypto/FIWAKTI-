@@ -195,7 +195,11 @@ function creer(o){
       const util = String(b.utilisateur == null ? "" : b.utilisateur).trim();
       const e = util ? corr.get(util) : null;
       const tz = (T && T.fuseau) || (site && site.tz) || (e && (ref.sites||[]).find(s=>s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
-      const local = String(b.horodatage||"").replace("T", " ").slice(0, 19);
+      /* 56.33.11 : instant avec fuseau (« …Z », « +01:00 » : API BioStar 2, pilotes externes) → heure locale du site ;
+         sans fuseau : heure locale de l'appareil, comme avant */
+      const brut = String(b.horodatage||"").trim(), absM = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})$/i.exec(brut);
+      const absMs = absM ? Date.parse(absM[1].replace(" ", "T")+(absM[2].toUpperCase() === "Z" ? "Z" : absM[2].slice(0, 3)+":"+absM[2].slice(-2))) : NaN;
+      const local = absM && !isNaN(absMs) && fuseauValide(tz) ? utcVersLocal(new Date(absMs).toISOString(), tz) : brut.replace("T", " ").slice(0, 19);
       const localOk = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(local);
       const tsLocal = localOk ? (local.length === 16 ? local+":00" : local) : null;
       const tsUtc = tsLocal && fuseauValide(tz) ? localVersUtc(tsLocal, tz) : null;

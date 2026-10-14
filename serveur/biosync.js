@@ -26,8 +26,16 @@ const DDL = [
   "CREATE TABLE IF NOT EXISTS bio_sorties (mat TEXT PRIMARY KEY, sortie TEXT, traite TEXT)"];
 const ddl = {pg:DDL, sqlite:DDL};
 const tables = {bio_sync_queue:"id", bio_blocages:"mat", bio_presence:"terminal_id", bio_sorties:"mat"};
+/* 56.33.11 : types d'absence (référentiel « tt » ; « tts » n'existait pas : la liste des types était vide à l'écran et
+   aucune absence ne déclenchait de blocage). Par défaut (rien d'enregistré), toute absence à la journée bloque :
+   congés, maladie, maternité, absence non justifiée, longue durée… ; pas les absences à l'heure ni missions / formations. */
+const typesAbsence = ref => (ref.tt || ref.tts || []).filter(t=>t && t.code);
+const typesParDefaut = ref => typesAbsence(ref).filter(t=>Number(t.cls) === 5 && t.saisie !== "heure").map(t=>String(t.code).toUpperCase());
+const majuscules = l => (l || []).map(v=>String(v).toUpperCase());
+function typesEffectifs(cfg, ref){ return {auto:cfg.typesBlocageAuto == null ? typesParDefaut(ref) : majuscules(cfg.typesBlocageAuto),
+  fin:majuscules(cfg.typesBlocageFinAuto), rh:majuscules(cfg.typesBlocageValidationRH)}; }
 const DEFAUTS = {actif:false, pause:false, intervalleMin:15, terminauxMaitres:[], maxActionsParCycle:5, formatsVisage:["photo-jpeg", "zk-bio9-*", "zk-face7"],
-  inclureTerminauxAcces:true, typesBlocageAuto:[], typesBlocageFinAuto:[], typesBlocageValidationRH:[], delaiGraceHeures:2,
+  inclureTerminauxAcces:true, typesBlocageAuto:null, typesBlocageFinAuto:[], typesBlocageValidationRH:[], delaiGraceHeures:2,
   delaiEntreActionsSec:20, maxDureeCycleSec:120, maxEssais:5, backoffRetrySec:[60, 300, 900, 3600], prioriteRetrait:1, delaiRecuperationJobBloqueMin:10};
 const ACTION_PILOTE = {lire:"visages-lire", envoyer_users:"utilisateurs-envoyer", envoyer_visages:"visages-envoyer", retrait:"utilisateurs-retirer"};
 const RANG_ACTION = {retrait:0, envoyer_users:1, envoyer_visages:2, lire:3, reconciliation:4};
@@ -39,7 +47,12 @@ function creer(o){
   let CFG = null, BLOQUES = new Set(), CYCLE_EN_COURS = null;
   async function meta(k, v){ if (v === undefined){ const r = await B.get("SELECT v FROM meta WHERE k=?", k); return r ? JSON.parse(r.v) : null; }
     await B.run("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", k, JSON.stringify(v)); }
-  async function config(){ if (!CFG) CFG = Object.assign({}, DEFAUTS, (await meta("biometrie_sync")) || {}); return CFG; }
+  async function config(){
+    if (!CFG){ const m = (await meta("biometrie_sync")) || {};
+      /* réglage enregistré avant 56.33.11 : la liste des types était vide à l'écran, un « [] » n'était donc pas un choix */
+      if (!m.typesV && ![].concat(m.typesBlocageAuto||[], m.typesBlocageFinAuto||[], m.typesBlocageValidationRH||[]).length) delete m.typesBlocageAuto;
+      CFG = Object.assign({}, DEFAUTS, m); }
+    return CFG; }
   function nettoyerConfig(b){
     const c = Object.assign({}, DEFAUTS, CFG || {}), lst = x => Array.isArray(x) ? x.map(v=>String(v).slice(0, 40)).filter(Boolean).slice(0, 100) : [];
     const n = (x, a, z, d) => { const v = Number(x); return Number.isFinite(v) ? Math.min(z, Math.max(a, Math.round(v))) : d; };
@@ -53,6 +66,7 @@ function creer(o){
     if ("delaiRecuperationJobBloqueMin" in b) c.delaiRecuperationJobBloqueMin = n(b.delaiRecuperationJobBloqueMin, 2, 120, 10);
     if (Array.isArray(b.backoffRetrySec)) c.backoffRetrySec = b.backoffRetrySec.map(x=>n(x, 10, 86400, 60)).slice(0, 10);
     ["terminauxMaitres","formatsVisage","typesBlocageAuto","typesBlocageFinAuto","typesBlocageValidationRH"].forEach(k=>{ if (k in b) c[k] = lst(b[k]); });
+    if ("typesBlocageAuto" in b) c.typesV = 2;
     return c;
   }
   /* ---------- appareils concernés (pointage et accès : même règle) ---------- */
@@ -130,10 +144,11 @@ function creer(o){
   /* ---------- blocages selon les absences (lot, une requête par cycle) ---------- */
   async function chargerBloques(){ BLOQUES = new Set((await B.all("SELECT mat FROM bio_blocages WHERE statut='actif'")).map(r=>String(r.mat))); return BLOQUES; }
   async function recalculerBlocages(cfg){
-    const tous = new Set([].concat(cfg.typesBlocageAuto, cfg.typesBlocageFinAuto, cfg.typesBlocageValidationRH));
+    const ref = await D.referentielLecture() || {}, TY = typesEffectifs(cfg, ref);
+    const tous = new Set([].concat(TY.auto, TY.fin, TY.rh));
     const res = {nouveaux:0, leves:0};
     if (tous.size){
-      const ref = await D.referentielLecture() || {}, codeDe = new Map((ref.tts||[]).map(t=>[t.id, String(t.code||"").toUpperCase()])), a = auj();
+      const codeDe = new Map(typesAbsence(ref).map(t=>[t.id, String(t.code||"").toUpperCase()])), a = auj();
       const absAuj = (await B.all("SELECT mat, data FROM enreg WHERE coll='abs' AND d=?", a)).map(r=>{ let x = {}; try { x = JSON.parse(r.data); } catch(e){} return {mat:String(r.mat), code:codeDe.get(x.tt) || String(x.tt||"").toUpperCase()}; })
         .filter(x=>tous.has(x.code));
       if (absAuj.length){
@@ -143,7 +158,7 @@ function creer(o){
         const terms = await appareils(cfg), emps = await D.employes(), rat = rattaches(emps), parMat = new Map(emps.map(e=>[String(e.mat), e]));
         for (const x of absAuj){
           await ceder();
-          const fin = fins.get(x.mat) || a, mode = cfg.typesBlocageValidationRH.indexOf(x.code) >= 0 ? "rh" : "auto";
+          const fin = fins.get(x.mat) || a, mode = TY.rh.indexOf(x.code) >= 0 ? "rh" : "auto";
           const ex = await B.get("SELECT statut, mode, fin FROM bio_blocages WHERE mat=?", x.mat);
           if (ex && ex.statut === "actif"){ if (fin > (ex.fin||"")) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", fin, maint(), x.mat); continue; }
           await B.run("INSERT INTO bio_blocages(mat,code,mode,depuis,fin,statut,maj) VALUES(?,?,?,?,?,?,?) ON CONFLICT(mat) DO UPDATE SET code=excluded.code, mode=excluded.mode, depuis=excluded.depuis, fin=excluded.fin, statut='actif', leve_le=NULL, leve_par=NULL, maj=excluded.maj",
@@ -253,7 +268,10 @@ function creer(o){
           await B.run("UPDATE bio_sync_queue SET statut=?, essais=?, finished_at=?, locked_at=NULL, next_retry_at=?, detail=? WHERE id=?", def ? "echec_final" : "echec", e, maint(), def ? null : new Date(Date.now() + d * 1000).toISOString(), String(detail).slice(0, 300), j.id); }
         if (suite) await suite(j); } };
       if (!T){ await fini("echec", "appareil absent, inactif, sans pilote ou exclu (accès)"); continue; }
-      if (!capable(T, g.action === "reconciliation" ? "envoyer_users" : g.action)){ await fini("ok", "non pris en charge par le pilote de cet appareil"); continue; }
+      if (!capable(T, g.action === "reconciliation" ? "envoyer_users" : g.action)){
+        /* 56.33.11 : un retrait impossible (sortie, absence) n'est jamais silencieux : le salarié reste inscrit sur l'appareil */
+        if (g.action === "retrait") await audit("systeme", "biometrie.retrait_impossible", (T.nom||T.id)+" : le pilote ne sait pas retirer un utilisateur — à retirer à la main sur l'appareil : "+g.jobs.map(j=>j.mat).join(", "));
+        await fini("ok", g.action === "retrait" ? "À RETIRER À LA MAIN : pilote sans retrait (alerte dans l'audit)" : "non pris en charge par le pilote de cet appareil"); continue; }
       for (const id of ids){ await ceder(); await B.run("UPDATE bio_sync_queue SET statut='en_cours', started_at=?, locked_at=?, worker_id=? WHERE id=?", maint(), maint(), WORKER, id); }
       const mats = g.jobs.map(j=>j.mat).filter(m=>m && m !== "*"), opts = {confirme:true, delaiMs:cfg.delaiEntreActionsSec * 1000};
       try {
@@ -332,12 +350,12 @@ function creer(o){
     const et = (await meta("biometrie_sync_terminaux")) || {}, cycles = (await meta("biometrie_sync_cycles")) || [];
     const terms = await appareils(cfg), ref = await D.referentielLecture() || {};
     const evenements = await B.all("SELECT mat, terminal_id, action, statut, essais, finished_at, detail FROM bio_sync_queue WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 20");
-    return {config:cfg, compteurs:c, plusAncienAttente:ancien && ancien.m || null, cycles, dernierReussi:(cycles.find(x=>x.resultat === "réussi")||{}).debut || null,
+    return {config:Object.assign({}, cfg, {typesBlocageAuto:typesEffectifs(cfg, ref).auto}), compteurs:c, plusAncienAttente:ancien && ancien.m || null, cycles, dernierReussi:(cycles.find(x=>x.resultat === "réussi")||{}).debut || null,
       dernierEchec:(cycles.find(x=>x.resultat === "échec" || x.resultat === "avec échecs")||{}).debut || null, bloques:Number((await B.get("SELECT COUNT(*) n FROM bio_blocages WHERE statut='actif'")).n),
       acces:!!(o.moduleActif && o.moduleActif("FW-Acces")),
       terminaux:(ref.terms||[]).filter(T=>T.actif !== false).map(T=>({id:T.id, nom:T.nom, usage:T.usage || "clocking", inclus:terms.some(x=>x.id === T.id), maitre:cfg.terminauxMaitres.indexOf(T.id) >= 0,
         enAttente:parT[T.id] || 0, derniereSynchro:(et[T.id]||{}).derniereSynchro || null, derniereErreur:(et[T.id]||{}).derniereErreur || null})),
-      types:(ref.tts||[]).filter(t=>t.code).map(t=>({code:t.code, nom:t.nom})), evenements};
+      types:typesAbsence(ref).map(t=>({code:t.code, nom:t.nom})), evenements};
   }
   async function enregistrerConfig(b, login){
     const c = nettoyerConfig(b || {}); await meta("biometrie_sync", c); CFG = c;
