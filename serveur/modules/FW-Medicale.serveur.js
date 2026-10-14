@@ -62,13 +62,21 @@ function creer(o){
       const m = mpParMat[String(e.mat)] || []; x.mpDeclarees += m.length; x.mpReconnues += m.filter(z=>z.statut === "reconnue").length;
     });
     const SEUIL = 5, r1 = v => Math.round(v * 10) / 10;
+    /* 56.33.11 : petits nombres — un numérateur de 1 à 4 (embauches, maladies professionnelles) permettait de reconnaître
+       la personne même dans un service de 5 salariés ou plus : valeur remplacée par null (et le taux qui en dépend),
+       ligne signalée par « petitsNombresMasques » (« masque » reste réservé au service entièrement masqué) */
+    const petits = o => { const pn = n => n > 0 && n < SEUIL; let m = false;
+      if (pn(o.embauches)){ o.embauches = null; o.tauxVisitesEmbauche = null; m = true; }
+      if (pn(o.mpDeclarees)){ o.mpDeclarees = null; o.mpReconnues = null; m = true; }
+      if (pn(o.mpReconnues)){ o.mpReconnues = null; m = true; }
+      if (m) o.petitsNombresMasques = true; return o; };
     const lignes = Object.values(parDept).filter(x=>x.effectif).sort((a, b)=>a.service.localeCompare(b.service)).map(x=>x.effectif < SEUIL
       ? {service:x.service, effectif:x.effectif, masque:true}
-      : {service:x.service, effectif:x.effectif, tauxPeriodiquesAJour:r1(100 * x.aJour / x.effectif), periodiquesPeriode:x.periodiquesPeriode, embauches:x.embauches,
-         tauxVisitesEmbauche:x.embauches ? r1(100 * x.embauchesVisite / x.embauches) : null, mpDeclarees:x.mpDeclarees, mpReconnues:x.mpReconnues});
+      : petits({service:x.service, effectif:x.effectif, tauxPeriodiquesAJour:r1(100 * x.aJour / x.effectif), periodiquesPeriode:x.periodiquesPeriode, embauches:x.embauches,
+         tauxVisitesEmbauche:x.embauches ? r1(100 * x.embauchesVisite / x.embauches) : null, mpDeclarees:x.mpDeclarees, mpReconnues:x.mpReconnues}));
     const T = Object.values(parDept).reduce((s, x)=>({effectif:s.effectif + x.effectif, aJour:s.aJour + x.aJour, emb:s.emb + x.embauches, embV:s.embV + x.embauchesVisite, mp:s.mp + x.mpDeclarees, mpR:s.mpR + x.mpReconnues, per:s.per + x.periodiquesPeriode}), {effectif:0, aJour:0, emb:0, embV:0, mp:0, mpR:0, per:0});
-    return {periodiciteMois:per, seuilMasquage:SEUIL, total:T.effectif < SEUIL ? {masque:true} : {tauxPeriodiquesAJour:r1(100 * T.aJour / T.effectif), periodiquesPeriode:T.per, embauches:T.emb,
-      tauxVisitesEmbauche:T.emb ? r1(100 * T.embV / T.emb) : null, mpDeclarees:T.mp, mpReconnues:T.mpR}, parService:lignes};
+    return {periodiciteMois:per, seuilMasquage:SEUIL, total:T.effectif < SEUIL ? {masque:true} : petits({tauxPeriodiquesAJour:r1(100 * T.aJour / T.effectif), periodiquesPeriode:T.per, embauches:T.emb,
+      tauxVisitesEmbauche:T.emb ? r1(100 * T.embV / T.emb) : null, mpDeclarees:T.mp, mpReconnues:T.mpR}), parService:lignes};
   }
   async function aTraiter(x){
     const out = [], a = auj(), rm = rangMed(x.P);

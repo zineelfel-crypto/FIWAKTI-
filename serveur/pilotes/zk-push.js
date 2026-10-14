@@ -29,8 +29,11 @@ module.exports = {
     }
     /* v56.24 : retrait ciblé — l'utilisateur et toutes ses données biométriques (visage, photo, empreintes) */
     if (action === "utilisateurs-retirer"){
-      const ids = (ctx.options.ids || []).map(String).filter(x=>/^[A-Za-z0-9_-]{1,24}$/.test(x));
+      const tous = (ctx.options.ids || []).map(String), ids = tous.filter(x=>/^[A-Za-z0-9_-]{1,24}$/.test(x));
+      /* 56.33.11 : identifiant non transmissible au protocole Push : échec visible (avant : ignoré, compté comme retiré) */
+      if (ids.length < tous.length) throw new Error("Identifiant(s) non transmissible(s) à l'appareil : "+tous.filter(x=>ids.indexOf(x) < 0).join(", ")+" — à retirer à la main.");
       ids.forEach(id=>{ cmd("DATA DELETE BIODATA Pin="+id); cmd("DATA DELETE BIOPHOTO PIN="+id); cmd("DATA DELETE FACE PIN="+id); cmd("DATA DELETE FINGERTMP PIN="+id); cmd("DATA DELETE USERINFO PIN="+id); });
+      if (ctx.persisterPushMaintenant) await ctx.persisterPushMaintenant();
       return {retires:ids.length, note:"Commandes de retrait en file : appliquées à la prochaine connexion de l'appareil."};
     }
     /* v56.5 : visages — l'appareil envoie ses gabarits (Type 9) et ses photos à sa prochaine connexion */
@@ -51,7 +54,9 @@ module.exports = {
     }
     /* 56.33.11 : avant d'effacer les badgeages, l'appareil renvoie d'abord tous ceux de la période de collecte (il exécute
        ses commandes dans l'ordre) : un badgeage pas encore transmis n'est pas perdu */
-    if (action === "nettoyage"){ const q = ctx.options.quoi || "pointages"; if (q !== "utilisateurs"){ cmd("DATA QUERY ATTLOG StartTime="+ctx.depuis(T)+"\tEndTime="+ctx.maintenant()); cmd("CLEAR LOG"); } if (q !== "pointages") cmd("CLEAR DATA"); return {ok:true}; }
+    if (action === "nettoyage"){ const q = ctx.options.quoi || "pointages";
+      /* 56.33.11 : renvoi de tout le journal, effacement envoyé par le serveur seulement après enregistrement confirmé */
+      if (q !== "utilisateurs"){ const id = cmd("DATA QUERY ATTLOG StartTime=2000-01-01 00:00:00\tEndTime=2099-12-31 23:59:59"); if (ctx.demanderPurgePush) ctx.demanderPurgePush(T.sn, id); else return {ok:false, note:"effacement indisponible"}; } if (q !== "pointages") cmd("CLEAR DATA"); return {ok:true}; }
     if (action === "synchro-heure"){ cmd("SET OPTIONS DateTime="+Math.round(Date.now()/1000)); return {ecartSecondes:null, note:"Mise à l'heure en file."}; }
     if (action === "redemarrer"){ cmd("REBOOT"); return {ok:true}; }
     if (action === "effacer-commandes"){ ctx.viderPush(T.sn); return {ok:true}; }

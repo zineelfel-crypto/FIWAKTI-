@@ -12,7 +12,8 @@ const DDL = [
   "CREATE TABLE IF NOT EXISTS mig_lots (id TEXT PRIMARY KEY, cible TEXT NOT NULL, source TEXT, statut TEXT NOT NULL, stats TEXT, cree TEXT NOT NULL, par TEXT, annule_le TEXT)",
   "CREATE TABLE IF NOT EXISTS mig_journal (lot TEXT NOT NULL, n INTEGER NOT NULL, coll TEXT NOT NULL, id TEXT NOT NULL, avant TEXT, PRIMARY KEY(lot, n))"];
 const ddl = {pg:DDL, sqlite:DDL};
-const tables = {mig_profils:"id", mig_lots:"id", mig_journal:"lot"};
+/* 56.33.11 : clé complète (lot, n) — la sauvegarde avance par clé ; « lot » seul sautait des lignes à une frontière de page */
+const tables = {mig_profils:"id", mig_lots:"id", mig_journal:"lot, n"};
 /* champs cibles (obligatoires marqués) et alias reconnus automatiquement dans les en-têtes */
 const CIBLES = {
   salaries:[["mat",1,"matricule|mat|id employe|code employe|employee id|personnel|n°|numero|codigo|cod empleado|idempleado|id empleado|nempleado"],["nom",1,"nom|last name|surname|nom de famille|apellidos|apellido|apellido1"],["prenom",1,"prenom|prénom|first name|given name|nombre"],
@@ -495,7 +496,10 @@ function creer(o){
   }
   async function traiter(req, res, x){
     const {p, C, admin, P, json, erreur, corpsJson} = x;
-    const rang = admin || ((P.profil||{}).droits||{}).SYS === "config"; if (!rang) return erreur(res, 403, "Réservé aux administrateurs.");
+    /* 56.33.11 : l'import réécrit des données de tous les sites — paramétrage système ET périmètre global exigés */
+    const rang = admin || (((P.profil||{}).droits||{}).SYS === "config" && P.set === null); if (!rang) return erreur(res, 403, "Réservé aux administrateurs (périmètre global).");
+    /* 56.33.11 : un jeu lu n'est accessible qu'à son auteur (l'administrateur voit tout) */
+    const jeuAutorise = b => { const j = JEUX.get(b && b.jeu); if (j && !admin && j.par !== C.login) throw Object.assign(new Error("Données expirées : relisez la source."), {code:410}); return b; };
     /* erreurs des pilotes (codes texte : ECONNREFUSED, ESOCKET, 28P01…) → message clair, jamais d'erreur interne */
     const err = e => typeof e.code === "number" ? erreur(res, e.code, e.message) : erreur(res, 400, "Source inaccessible : "+String(e.message || e).replace(/password[^,;]*/gi, "").slice(0, 200));
     nettoyer();
@@ -541,11 +545,11 @@ function creer(o){
           return json(res, 200, {jeux:garder([{nom:(c.base||"base")+" › "+(b.table || "requête"), colonnes:cols, lignes}], C.login)});
         } finally { try { await cn.fermer(); } catch(e){} }
       }
-      if (p === "/api/v1/migration/proposer" && req.method === "POST"){ const b = await corpsJson(req), j = JEUX.get(b.jeu); if (!j) return erreur(res, 410, "Données expirées : relisez la source.");
+      if (p === "/api/v1/migration/proposer" && req.method === "POST"){ const b = jeuAutorise(await corpsJson(req)), j = JEUX.get(b.jeu); if (!j) return erreur(res, 410, "Données expirées : relisez la source.");
         const sig = j.colonnes.map(norm).sort().join("|"), pr = await B.get("SELECT nom, config FROM mig_profils WHERE cible=? AND signature=? ORDER BY cree DESC LIMIT 1", b.cible, sig);
         return json(res, 200, {mapping:pr ? JSON.parse(pr.config).mapping : proposer(b.cible, j.colonnes), profil:pr ? {nom:pr.nom, config:JSON.parse(pr.config)} : null}); }
-      if (p === "/api/v1/migration/analyser" && req.method === "POST") return json(res, 200, await analyser(await corpsJson(req), false, C.login));
-      if (p === "/api/v1/migration/importer" && req.method === "POST"){ const b = await corpsJson(req), r = await analyser(b, true, C.login);
+      if (p === "/api/v1/migration/analyser" && req.method === "POST") return json(res, 200, await analyser(jeuAutorise(await corpsJson(req)), false, C.login));
+      if (p === "/api/v1/migration/importer" && req.method === "POST"){ const b = jeuAutorise(await corpsJson(req)), r = await analyser(b, true, C.login);
         if (b.profil){ const j = JEUX.get(b.jeu); await B.run("INSERT INTO mig_profils(id,nom,cible,signature,config,cree,par) VALUES(?,?,?,?,?,?,?)", id("mp"), String(b.profil).slice(0, 80), b.cible, j.colonnes.map(norm).sort().join("|"),
           JSON.stringify({mapping:b.mapping, transformations:b.transformations, correspondances:b.correspondances}), maint(), C.login); }
         return json(res, 200, r); }

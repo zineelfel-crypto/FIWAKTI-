@@ -62,7 +62,14 @@ function masquerSecrets(m){
     .replace(/(fwk_s|fw_sess|session|cookie)=([^;\s]+)/gi, "$1=***")
     .replace(/\b(FWK1[A-Za-z0-9_\-.]{8})[A-Za-z0-9_\-.]{20,}/g, "$1…");
 }
-function journal(m){ try { fs.appendFileSync(path.join(D_JOURN, "serveur.log"), new Date().toISOString()+" "+masquerSecrets(m)+"\n"); } catch(e){} }
+/* 56.33.11 : rotation des journaux (avant : croissance sans limite) — au-delà de 20 Mo, le fichier devient .1 (… .5) */
+function tourner(f){ try { if (fs.statSync(f).size < 20e6) return; for (let i = 4; i >= 1; i--){ try { fs.renameSync(f+"."+i, f+"."+(i+1)); } catch(e){} } fs.renameSync(f, f+".1"); } catch(e){} }
+let J_COMPTE = 0;
+function journal(m){ try { const f = path.join(D_JOURN, "serveur.log"); if (++J_COMPTE % 500 === 1) tourner(f); fs.appendFileSync(f, new Date().toISOString()+" "+masquerSecrets(m)+"\n"); } catch(e){} }
+/* 56.33.11 : une erreur imprévue est écrite au journal au lieu d'arrêter le serveur sans trace (promesse rejetée) ;
+   une exception non rattrapée est journalisée puis le processus s'arrête (état incertain), le lanceur le relance */
+process.on("unhandledRejection", e=>{ journal("erreur non traitée (promesse) : "+((e && e.stack) || e)); });
+process.on("uncaughtException", e=>{ journal("exception non rattrapée, arrêt : "+((e && e.stack) || e)); try { console.error(e); } catch(x){} process.exit(1); });
 const maintenant = () => new Date().toISOString();
 function aujourdhui(){ const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); }
 function ajoutJours(k, j){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+j); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
@@ -500,7 +507,11 @@ async function sauvegarderInterne(par, motif){
   let fin; SAUVEGARDE_EN_COURS = new Promise(r=>fin = r);
   try {
     const chiffrer = !!(CONFIG.sauvegarde||{}).chiffrer;
-    const nom = "fiwakti-"+horodatage()+B.extension+(chiffrer ? ".chiffre" : ""), f = path.join(D_SAUV, nom);
+    /* 56.33.11 : nom unique même pour deux sauvegardes dans la même seconde (la sauvegarde de sécurité prise avant une
+       restauration écrasait la sauvegarde à restaurer) */
+    let base = "fiwakti-"+horodatage(), k = 1; const ext = B.extension+(chiffrer ? ".chiffre" : "");
+    while (fs.existsSync(path.join(D_SAUV, base+(k > 1 ? "-"+k : "")+ext)) || fs.existsSync(path.join(D_SAUV, base+(k > 1 ? "-"+k : "")+ext+".json"))) k++;
+    const nom = base+(k > 1 ? "-"+k : "")+ext, f = path.join(D_SAUV, nom);
     const brut = chiffrer ? path.join(os.tmpdir(), "fiwakti-export-"+crypto.randomBytes(6).toString("hex")+B.extension) : f;
     /* v56.30 : espace disque contrôlé avant de commencer — à 60 000 employés la base dépasse 4 Go ; export, fichier chiffré
        et copie de vérification demandent environ trois fois sa taille. Un disque plein arrêtait le serveur et laissait
@@ -561,7 +572,10 @@ function listeSauvegardes(){
 }
 function purgerSauvegardes(){
   const garder = Math.max(3, Number((CONFIG.sauvegarde||{}).retention) || 14);
-  listeSauvegardes().slice(garder).forEach(m=>{ ["", ".json"].forEach(x=>{ try { fs.unlinkSync(path.join(D_SAUV, m.fichier+x)); } catch(e){} }); });
+  /* 56.33.11 : les 3 dernières sauvegardes vérifiées sont toujours gardées, même au-delà de la rétention (avant : une
+     suite de sauvegardes en échec pouvait faire supprimer la dernière sauvegarde restaurable) */
+  const l = listeSauvegardes(), sures = new Set(l.filter(m=>m.verification && m.verification.ok).slice(0, 3).map(m=>m.fichier));
+  l.slice(garder).filter(m=>!sures.has(m.fichier)).forEach(m=>{ ["", ".json"].forEach(x=>{ try { fs.unlinkSync(path.join(D_SAUV, m.fichier+x)); } catch(e){} }); });
 }
 /* v56.23 : exécuté dans la réserve à délai long (opération de fond) */
 function restaurer(fichier, par){ return (B && B.enTravail) ? B.enTravail(()=>restaurerInterne(fichier,par)) : restaurerInterne(fichier,par); }
@@ -602,13 +616,21 @@ async function appliquerMiseAJour(paquet, par){
   const cible = path.join(RACINE, "versions", contenu.version);
   if (path.dirname(cible) !== path.join(RACINE, "versions")) throw new Error("Chemin de version refusé.");
   if (contenu.version === VERSION) throw new Error("Cette version est déjà installée.");
+  /* 56.33.11 : pas de retour vers une version plus ancienne par un paquet (un ancien paquet signé rejoué sur une base
+     déjà migrée) — le retour arrière passe par « revenir à la version précédente » ; paquet complet exigé */
+  { const vN = v => String(v).split(".").map(Number).reduce((s, x, i)=>s + x * Math.pow(1000, 2-i), 0);
+    if (vN(contenu.version) < vN(VERSION)) throw new Error("Version "+contenu.version+" plus ancienne que la version installée ("+VERSION+") : refusée.");
+    const noms = Object.keys(contenu.fichiers || {}).map(n=>String(n).replace(/\\/g, "/"));
+    if (!["serveur/principal.js", "serveur/version.json"].every(x=>noms.some(n=>n === x || n.endsWith("/"+x)))) throw new Error("Paquet incomplet (serveur/principal.js ou serveur/version.json absent) : refusé."); }
   /* v47 : compatibilité vérifiée avant toute installation (manifeste signé) */
   const vNum = v => String(v).split(".").map(Number).reduce((s, x, i)=>s + x * Math.pow(1000, 2-i), 0);
   if (contenu.nodeMin && vNum(process.versions.node) < vNum(contenu.nodeMin)) throw new Error("Cette mise à jour demande Node.js "+contenu.nodeMin+" ou plus (installé : "+process.versions.node+").");
   if (contenu.depuis && vNum(VERSION) < vNum(contenu.depuis)) throw new Error("Cette mise à jour s'installe à partir de la version "+contenu.depuis+" (installée : "+VERSION+") : installez d'abord la mise à jour intermédiaire.");
   if (contenu.bases && contenu.bases.indexOf(B.type) < 0) throw new Error("Cette mise à jour ne prend pas en charge la base "+B.type+".");
   journalMaj("début "+VERSION+" → "+contenu.version+" par "+par);
-  await sauvegarder(par, "avant mise à jour vers "+contenu.version);
+  /* 56.33.11 : mise à jour seulement avec une sauvegarde préalable vérifiée (restaurable) */
+  const manAv = await sauvegarder(par, "avant mise à jour vers "+contenu.version);
+  if (!(manAv && manAv.verification && manAv.verification.ok)) throw new Error("Sauvegarde préalable non vérifiée : mise à jour annulée (voir Système › Sauvegardes).");
   const tmp = cible+".tmp";
   fs.rmSync(tmp, {recursive:true, force:true});
   for (const [rel, info] of Object.entries(contenu.fichiers)){
@@ -698,7 +720,7 @@ async function retourModule(id, par, silencieux){
   return {module:id, vers:prec.version||""};
 }
 /* journal des mises à jour, hors de la base (lisible même si la base ne démarre plus) */
-function journalMaj(m){ try { fs.appendFileSync(path.join(D_JOURN, "mises-a-jour.log"), maintenant()+" "+m+"\n"); } catch(e){} }
+function journalMaj(m){ try { const f = path.join(D_JOURN, "mises-a-jour.log"); tourner(f); fs.appendFileSync(f, maintenant()+" "+m+"\n"); } catch(e){} }
 function versionsInstallees(){ const V = path.join(RACINE, "versions"); try { return fs.readdirSync(V).filter(d=>fs.existsSync(path.join(V, d, "serveur", "principal.js"))); } catch(e){ return []; } }
 setTimeout(()=>{ try { const f = path.join(RACINE, "versions", "essai.txt"); if (fs.existsSync(f) && fs.readFileSync(f, "utf8").trim() === VERSION) fs.unlinkSync(f); } catch(e){} }, 90000);
 
@@ -1050,7 +1072,10 @@ async function traiter(req, res){
   /* ---- appareils ZKTeco en mode Push (ADMS) ---- */
   if (/^\/iclock\//i.test(p)){
     if (!CONFIG.installe || !PT) return erreur(res, 503, "Non prêt");
-    return PT.iclock(req, res, u, req.method === "POST" ? await corps(req, 20e6) : "");
+    /* 56.33.11 : mêmes règles que le port Push (module de pointage ou d'accès actif) et limite de débit par adresse */
+    if (MOD && !MOD.estActif("FW-Time") && !MOD.estActif("FW-Acces")) return erreur(res, 403, "Pointage non activé.");
+    { const att = limiteDebit(req, "/api/iclock"); if (att){ res.writeHead(429, {"Retry-After":String(att), "Content-Type":"text/plain"}); return res.end("ERROR: too many requests"); } }
+    return PT.iclock(req, res, u, req.method === "POST" ? ()=>corps(req, 20e6) : "");
   }
   /* ---- toujours publics ---- */
   if (p === "/api/sante" || p === "/api/v1/sante") return json(res, 200, {ok:true, version:VERSION, installe:!!CONFIG.installe, schema:3, base:B ? B.type : null});
@@ -1265,7 +1290,10 @@ async function traiter(req, res){
         return erreur(res, 401, "Code incorrect ou déjà utilisé.");
       }
       await B.run("UPDATE comptes SET a2f_actif=1, a2f_pas=?, echecs=0 WHERE login=?", pasOk, C.login);
-      await B.run("UPDATE sessions SET a2f_ok=1, csrf=? WHERE id=?", crypto.randomBytes(24).toString("base64url"), sess.sid);
+      /* 56.33.11 : nouvel identifiant de session après la double authentification (fixation de session) */
+      const nid2 = crypto.randomBytes(32).toString("base64url"), ligS = await B.get("SELECT persistant FROM sessions WHERE id=?", sess.sid);
+      await B.run("UPDATE sessions SET id=?, a2f_ok=1, csrf=? WHERE id=?", hid(nid2), crypto.randomBytes(24).toString("base64url"), sess.sid);
+      res.setHeader("Set-Cookie", COOKIE+"="+nid2+"; HttpOnly; SameSite=Strict; Path=/"+(SECURISE ? "; Secure" : "")+(ligS && Number(ligS.persistant) ? "; Max-Age="+Math.max(1, Number(secuDe(secuA).sessionMax)||12)*3600 : ""));
       await audit(C.login, Number(c2.a2f_actif) ? "a2f.ok" : "a2f.active", "", ip);
       return json(res, 200, {ok:true, changer:!!Number(C.changer), raison:C.raison||""});
     }
@@ -1357,7 +1385,8 @@ async function traiter(req, res){
       await B.run("INSERT INTO kv(cle,valeur,version,maj,par) VALUES(?,?,1,?,?) ON CONFLICT(cle) DO UPDATE SET valeur=excluded.valeur, version=kv.version+1, maj=excluded.maj, par=excluded.par", k, texte, maintenant(), C.login);
       return json(res, 200, {ok:true});
     }
-    if (req.method === "DELETE"){ await B.run("DELETE FROM kv WHERE cle=?", k); return json(res, 200, {ok:true}); }
+    if (req.method === "DELETE"){ if (k === "fiwakti:home:admin:v2" && !admin) return erreur(res, 403, "Réservé aux administrateurs.");   /* 56.33.11 : comme l'écriture */
+      await B.run("DELETE FROM kv WHERE cle=?", k); return json(res, 200, {ok:true}); }
   }
   if (p === "/api/cles"){
     const pre = String(u.searchParams.get("prefixe")||"");
@@ -1412,7 +1441,7 @@ async function traiter(req, res){
       await B.run("INSERT INTO kv(cle,valeur,version,maj,par) VALUES(?,?,1,?,?)", CLE_APP, JSON.stringify(ref), maintenant(), C.login);
       paquet.ref = {};
     }
-    const r = await D.synchroniser(C.login, paquet);
+    const r = await D.synchroniser(C.login, paquet, {admin});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
     if ((paquet.ref && paquet.ref.users) || (paquet.colls && paquet.colls.emps)){
       /* 56.33.11 : enregistrement de salariés seul → comptes de ces salariés seulement (50 000 comptes examinés et deux
@@ -1437,9 +1466,13 @@ async function traiter(req, res){
   }
 
   /* ---- travaux en arrière-plan ---- */
+  /* 56.33.11 : export d'états (en direct ou en tâche de fond) réservé au droit de consultation des états (matrice ETA) */
+  const droitEtats = async () => { if (admin) return true; const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login);
+    return ({lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).ETA] || 0) >= 1; };
+  if (p === "/api/v1/travaux" && req.method === "POST" && !(await droitEtats())) return erreur(res, 403, "Droit de consultation des états requis.");
   if (p === "/api/v1/travaux" && req.method === "POST"){
     const b = await corpsJson(req, 2e6);
-    if (b.type !== "etat" || !b.etat) return erreur(res, 400, "Travail inconnu.");
+    if (b.type !== "etat" || !b.etat || !Array.isArray(b.etat.champs)) return erreur(res, 400, "Travail inconnu.");
     try { const tr = lancerTravail(C.login, "etat", {titre:(b.etat.nom||"État")+" "+(b.du||"")+" → "+(b.au||""), etat:b.etat, du:b.du, au:b.au, filtres:b.filtres}); await audit(C.login, "travail.lance", tr.titre, ip); return json(res, 200, tr); }
     catch(e){ return erreur(res, e.code === 429 ? 429 : 400, e.message); }
   }
@@ -1557,7 +1590,11 @@ async function traiter(req, res){
     const AN = AN_I.an, q = Object.fromEntries(u.searchParams.entries());
     if (p === "/api/v1/employes" && req.method === "GET") return json(res, 200, await AN.liste(C.login, q));
     if (p === "/api/v1/employes/valeurs" && req.method === "GET") return json(res, 200, await AN.valeurs(C.login));
-    if (p === "/api/v1/employes/compter" && req.method === "GET") return json(res, 200, await AN.compter(q));
+    /* 56.33.11 : comptage sur tout le personnel (avant suppression d'un élément de paramétrage) : réservé au paramétrage */
+    if (p === "/api/v1/employes/compter" && req.method === "GET"){
+      if (!admin){ const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login);
+        if (!({lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PAR] || 0)) return erreur(res, 403, "Réservé au paramétrage."); }
+      return json(res, 200, await AN.compter(q)); }
     if (p === "/api/v1/employes/complets" && req.method === "POST"){ const b = await corpsJson(req, 2e6); return json(res, 200, await AN.complets(C.login, Array.isArray(b.mats) ? b.mats : [])); }
     if (p === "/api/v1/employes/lot" && req.method === "POST"){ const b = await corpsJson(req); return json(res, 200, {lignes:await AN.lot(C.login, Array.isArray(b.mats) ? b.mats : [], Array.isArray(b.ids) ? b.ids : [])}); }
     /* v56.8 : fiche salarié 360° — chaque module actif apporte sa rubrique (droits et périmètre appliqués) */
@@ -1610,10 +1647,11 @@ async function traiter(req, res){
     const dansPerim = mm => admin || P.set === null || (P.set && P.set.has(String(mm)));
     const rangPtg = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PTG] || 0);
     if (rangPtg < 3) return erreur(res, 403, "Recalcul réservé aux profils ayant le droit « validation » sur le pointage.");
-    if (p === "/api/v1/recalculs" && req.method === "GET") return json(res, 200, {recalculs:await RC.liste()});
+    const acces = {login:C.login, admin, global:admin || P.set === null, dansPerim};
+    if (p === "/api/v1/recalculs" && req.method === "GET") return json(res, 200, {recalculs:await RC.liste(acces)});
     if (p === "/api/v1/recalculs" && req.method === "POST"){ try { return json(res, 200, await RC.lancer(C.login, await corpsJson(req), dansPerim)); } catch(e){ return erreur(res, e.code || 400, e.message); } }
-    if ((m = /^\/api\/v1\/recalculs\/(rc-[0-9a-f]{16})$/.exec(p))){ const r = await RC.lire(m[1], u.searchParams.get("ecarts") === "1", +u.searchParams.get("offset")||0, Math.min(500, +u.searchParams.get("limit")||100)); return r ? json(res, 200, r) : erreur(res, 404, "Introuvable."); }
-    if ((m = /^\/api\/v1\/recalculs\/(rc-[0-9a-f]{16})\/valider$/.exec(p)) && req.method === "POST"){ try { const b = await corpsJson(req); return json(res, 200, await RC.valider(C.login, m[1], b.decision === "rejet" ? "rejet" : "ok")); } catch(e){ return erreur(res, e.code || 400, e.message); } }
+    if ((m = /^\/api\/v1\/recalculs\/(rc-[0-9a-f]{16})$/.exec(p))){ const r = await RC.lire(m[1], u.searchParams.get("ecarts") === "1", +u.searchParams.get("offset")||0, Math.min(500, +u.searchParams.get("limit")||100), acces); return r ? json(res, 200, r) : erreur(res, 404, "Introuvable."); }
+    if ((m = /^\/api\/v1\/recalculs\/(rc-[0-9a-f]{16})\/valider$/.exec(p)) && req.method === "POST"){ try { const b = await corpsJson(req); return json(res, 200, await RC.valider(C.login, m[1], b.decision === "rejet" ? "rejet" : "ok", acces)); } catch(e){ return erreur(res, e.code || 400, e.message); } }
     return erreur(res, 404, "Introuvable.");
   }
   if (p === "/api/v1/moteur/comparaison" && req.method === "POST"){
@@ -1645,6 +1683,10 @@ async function traiter(req, res){
     const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
     const rangPtg = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PTG] || 0);
+    /* 56.33.11 : consultation des journées, anomalies et ajustements réservée au droit de lecture du pointage (le
+       portail salarié lit ses journées par /api/v1/donnees) ; matricule du compte pour la séparation des pouvoirs */
+    if (rangPtg < 1) return erreur(res, 403, "Droit de consultation du pointage requis.");
+    const moi = P.u && P.u.empId ? ((await D.employes()).find(e=>e.id === P.u.empId) || {}).mat : null;
     const clot = await WF.clotureJusqu(), a = aujourdhui();
     const filtre = mats => (admin || P.set === null) ? {sql:"", a:[]} : D.filtreMat(new Set(mats || Array.from(P.set||[])));
     const fm = f => f.sql.replace(" AND (mat IS NULL OR mat='' OR ", " AND (");
@@ -1677,7 +1719,7 @@ async function traiter(req, res){
       if (b.tout){ const du = dateOk(b.du) ? b.du : ajoutJours(a, -31), au = dateOk(b.au) ? b.au : a, f = filtre();
         const etatTout = ["CORRIGEE","APPROUVEE_MANAGER","ANOMALIE"].indexOf(b.etat) >= 0 ? b.etat : (niveau === "rh" ? "APPROUVEE_MANAGER" : "CORRIGEE");
         items = (await B.all("SELECT mat, d FROM day_states WHERE d>=? AND d<=? AND etat=?"+fm(f)+" LIMIT 20000", du, au, etatTout, ...f.a)); }
-      try { return json(res, 200, await WF.valider(C.login, items, niveau, b.decision === "rejet" ? "rejet" : "ok", b.motif, dansPerim)); }
+      try { return json(res, 200, await WF.valider(C.login, items, niveau, b.decision === "rejet" ? "rejet" : "ok", b.motif, dansPerim, moi)); }
       catch(e){ return erreur(res, e.code || 400, e.message); }
     }
     if (p === "/api/v1/registre-anomalies"){
@@ -1701,7 +1743,7 @@ async function traiter(req, res){
     }
     if ((m = /^\/api\/v1\/ajustements\/([a-z0-9-]+)\/valider$/.exec(p)) && req.method === "POST"){
       if (rangPtg < 3) return erreur(res, 403, "Validation réservée aux profils ayant le droit « validation » sur le pointage.");
-      try { const b = await corpsJson(req); const r = await WF.validerAjustement(C.login, m[1], b.decision === "refus" ? "refus" : "ok");
+      try { const b = await corpsJson(req); const r = await WF.validerAjustement(C.login, m[1], b.decision === "refus" ? "refus" : "ok", dansPerim, moi);
         if (r.statut === "valide") try { await K.invalider([r.mat+"|"+r.imputation], []); } catch(e){}
         return json(res, 200, r); } catch(e){ return erreur(res, e.code || 400, e.message); }
     }
@@ -1728,8 +1770,14 @@ async function traiter(req, res){
   }
   /* v54 : supervision des pointeuses (statut ONLINE / DEGRADED / OFFLINE, alertes aux changements) */
   if (p === "/api/v1/pointeuses/supervision"){
-    const l = await PT.supervision((CONFIG.supervision||{}).seuilMinutes);
-    await alertesSupervision(l);
+    /* 56.33.11 : droit de lecture des terminaux, pointeuses des sites du périmètre, sans n° de série ni adresse sous le
+       paramétrage ; les alertes sont produites par la tâche planifiée (plus d'écriture sur une simple lecture) */
+    const refS = await D.referentielLecture() || {}, {P:PS} = await D.perimetreDe(refS, C.login);
+    const rangT = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((PS.profil||{}).droits||{}).TER] || 0);
+    if (rangT < 1) return erreur(res, 403, "Droit de consultation des terminaux requis.");
+    let l = await PT.supervision((CONFIG.supervision||{}).seuilMinutes);
+    if (!admin && PS.set !== null){ const sites = new Set((await D.employes()).filter(e=>PS.set && PS.set.has(String(e.mat))).map(e=>e.siteId)); l = l.filter(x=>!x.site || sites.has(x.site)); }
+    if (rangT < 4) l = l.map(x=>{ const c = Object.assign({}, x); delete c.sn; delete c.ip; return c; });
     return json(res, 200, {seuilMinutes:(CONFIG.supervision||{}).seuilMinutes || 10, terminaux:l,
       resume:l.reduce((o, x)=>{ o[x.statut] = (o[x.statut]||0) + 1; return o; }, {})});
   }
@@ -1763,7 +1811,11 @@ async function traiter(req, res){
       r = {hash, nbPtg:c.ptg.length, nbDec:c.decisions.length, nbAbs:c.absences.length, nbRegles:(c.regles||[]).length, version:c.version||1, contenu:q.complet ? c : undefined};
     }
     else if (p === "/api/v1/calcul/etat" && req.method === "POST"){
+      if (!(await droitEtats())) return erreur(res, 403, "Droit de consultation des états requis.");
       const b = await corpsJson(req, 2e6);
+      /* 56.33.11 : paramètres contrôlés (avant : erreur 500 dans le fil de calcul pour un état absent) */
+      if (!b.etat || typeof b.etat !== "object" || !Array.isArray(b.etat.champs)) return erreur(res, 400, "État à produire absent ou incomplet.");
+      if (!dateOk(b.du || q.du) || !dateOk(b.au || q.au)) return erreur(res, 400, "Période invalide (du, au).");
       const texte = await K.etat(C.login, b.etat, b.du || q.du, b.au || q.au, b.filtres || {});
       await audit(C.login, "etat.serveur", (b.etat && b.etat.nom || "")+" "+(b.du||"")+" → "+(b.au||""), ip);
       entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8"}); return res.end(texte);
@@ -1980,8 +2032,11 @@ async function traiter(req, res){
     const pr = moiU ? (ref.profils||[]).find(x=>x.id === moiU.profilId) : null;
     const rang = {aucun:0, lecture:1, saisie:2, validation:3, config:4}[((pr||{}).droits||{}).TER] || 0;
     const action = p.split("/").pop();
+    /* 56.33.11 : lecture des pilotes et de l'état des appareils (n° de série, adresses, badges inconnus) réservée au droit
+       sur les terminaux (avant : tout utilisateur connecté) */
+    if (!admin && rang < 1) return erreur(res, 403, "Droit de consultation des terminaux requis.");
     if (action === "pilotes") return json(res, 200, {pilotes:PT.liste(), attente:PT.attente(), dossier:path.join(DONNEES, "pilotes")});
-    if (action === "etat") return json(res, 200, await PT.etat());
+    if (action === "etat"){ if (!admin && rang < 2) return erreur(res, 403, "Droits insuffisants sur les terminaux."); return json(res, 200, await PT.etat()); }
     if (!admin && rang < 2 && !(action === "biometrie-lever-blocage" && ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) return erreur(res, 403, "Droits insuffisants sur les terminaux.");
     if (action === "biometrie-sync-etat" && req.method === "GET") return json(res, 200, await BS().etat());
     if (req.method !== "POST") return erreur(res, 405, "Méthode");
@@ -2129,7 +2184,8 @@ async function demarrer(){
         const u = new URL(req.url, "http://x");
         if (!/^\/iclock\//i.test(u.pathname) || !CONFIG.installe){ res.writeHead(404); return res.end(); }
         if (MOD && !MOD.estActif("FW-Time") && !MOD.estActif("FW-Acces")){ res.writeHead(403); return res.end(); }
-        (async ()=>PT.iclock(req, res, u, req.method === "POST" ? await corps(req, 20e6) : ""))().catch(e=>{ journal("push : "+e.message); try { res.writeHead(500); res.end(); } catch(x){} });
+        if (limiteDebit(req, "/api/iclock")){ res.writeHead(429); return res.end(); }
+        (async ()=>PT.iclock(req, res, u, req.method === "POST" ? ()=>corps(req, 20e6) : ""))().catch(e=>{ journal("push : "+e.message); try { res.writeHead(500); res.end(); } catch(x){} });
       });
       SP.on("error", e=>{ journal("port push "+portPush+" indisponible : "+e.message); SP = null; });
       SP.listen(portPush, CONFIG.adressePush || CONFIG.adresse || "0.0.0.0", ()=>journal("appareils en mode Push : http://<serveur>:"+portPush+"/iclock/"));

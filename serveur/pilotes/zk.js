@@ -137,9 +137,11 @@ async function avecAppareil(terminal, secret, fn){
   try { await L.connecter((secret && secret.cle) || 0); return await fn(L); }
   finally { await L.fermer(); }
 }
-function lireUtilisateurs(buf){
+/* 56.33.11 : taille d'une fiche (72 ou 28 octets) déduite du nombre d'utilisateurs annoncé par l'appareil quand il est
+   connu : « multiple de 72 » seul lisait de travers un ancien appareil à fiches de 28 octets (18 utilisateurs = 504 octets) */
+function lireUtilisateurs(buf, nb){
   const total = buf.readUInt32LE(0), data = buf.slice(4, 4 + total), out = [];
-  const taille = data.length % 72 === 0 ? 72 : 28;
+  const taille = nb > 0 && (data.length === nb * 72 || data.length === nb * 28) ? data.length / nb : data.length % 72 === 0 ? 72 : 28;
   for (let o = 0; o + taille <= data.length; o += taille){
     const r = data.slice(o, o + taille);
     if (taille === 72) out.push({uid:r.readUInt16LE(0), privilege:r[2], nom:chaine(r.slice(11, 35)), carte:r.readUInt32LE(35), groupe:chaine(r.slice(40, 47)), id:chaine(r.slice(48, 72))});
@@ -160,6 +162,16 @@ function lireBadgeages(buf, nb, utilisateurs){
   }
   return out;
 }
+const nbUtilisateurs = L => L.tailles().then(t=>t.utilisateurs, ()=>0);
+/* 56.33.11 : heure « AAAA-MM-JJ HH:MM:SS » de l'instant ms dans le fuseau tz (l'appareil est à l'heure locale du site) */
+function heureDans(tz, ms){
+  const f = tz => new Intl.DateTimeFormat("en-GB", {timeZone:tz, hourCycle:"h23", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  let F; try { F = f(tz); } catch(e){ F = f("Africa/Tunis"); }
+  const p = {}; F.formatToParts(new Date(ms)).forEach(x=>{ p[x.type] = x.value; });
+  return p.year+"-"+p.month+"-"+p.day+" "+p.hour+":"+p.minute+":"+p.second;
+}
+/* même codage qu'encodeTemps, à partir du texte (sans Date locale du serveur, ni ses changements d'heure) */
+const encodeTexte = h => { const [y, mo, d, hh, mi, ss] = h.match(/\d+/g).map(Number); return (((y % 100) * 12 * 31 + (mo - 1) * 31 + d - 1) * 86400) + (hh * 60 + mi) * 60 + ss; };
 /* 56.33.11 : règle de purge après collecte — motif de refus, ou "" si l'effacement de l'appareil est permis */
 function refusPurge({erreurArchive, archiveurDispo, archive, integres, lus, annonce}){
   if (erreurArchive) return erreurArchive;
@@ -186,17 +198,20 @@ module.exports = {refusPurge,
         return {enLigne:true, info};
       }
       if (action === "synchro-heure"){
+        /* 56.33.11 : heure envoyée dans le fuseau de l'appareil (fiche, site, sinon Africa/Tunis), celui avec lequel
+           l'ingestion lit ses badgeages — et non l'heure locale du serveur : serveur en UTC = badgeages décalés d'1 h */
+        const tz = (ctx && ctx.fuseau) || T.fuseau || "Africa/Tunis";
         const avant = await L.commande(C.GET_TIME);
-        const h = decodeTemps(avant.data.readUInt32LE(0));
-        const ecart = Math.round((Date.now() - new Date(h.replace(" ", "T")).getTime()) / 1000);
-        const b = Buffer.alloc(4); b.writeUInt32LE(encodeTemps(new Date()), 0);
+        const h = decodeTemps(avant.data.readUInt32LE(0)), maintenant = Date.now(), ici = heureDans(tz, maintenant);
+        const ecart = Math.round((Date.parse(ici.replace(" ", "T")+"Z") - Date.parse(h.replace(" ", "T")+"Z")) / 1000);
+        const b = Buffer.alloc(4); b.writeUInt32LE(encodeTexte(ici), 0);
         const r = await L.commande(C.SET_TIME, b);
         if (r.code !== C.ACK_OK) throw new Error("L'appareil a refusé la mise à l'heure.");
         return {ecartSecondes:ecart};
       }
       if (action === "collecte" || action === "utilisateurs-lire"){
         const tl = await L.tailles();
-        const users = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5));
+        const users = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5), tl.utilisateurs);
         if (action === "utilisateurs-lire") return {utilisateurs:users.map(u=>({id:u.id, nom:u.nom, carte:u.carte ? String(u.carte) : "", privilege:u.privilege}))};
         await L.commande(C.DISABLE);
         try {
@@ -206,7 +221,9 @@ module.exports = {refusPurge,
           const lignes = bad.map(b=>({utilisateur:b.utilisateur, horodatage:b.horodatage, sens:SENS[b.etat] || ""}));
           /* copie de sauvegarde sur le serveur avant tout enregistrement et toute purge */
           let arch = null, motifSansPurge = "";
-          if (lignes.length && ctx.archiver){ try { arch = await ctx.archiver(lignes); } catch(e){ motifSansPurge = "archive impossible : "+e.message; } }
+          /* 56.33.11 : copie complète seulement si l'appareil va être effacé ; sans purge, l'appareil garde son journal et
+             la copie automatique (ctx.integrer) n'archive que les badgeages pas encore archivés */
+          if (T.purgeApresCollecte && lignes.length && ctx.archiver){ try { arch = await ctx.archiver(lignes, {complet:true}); } catch(e){ motifSansPurge = "archive impossible : "+e.message; } }
           const integres = await ctx.integrer(lignes);
           /* purge de l'appareil seulement si l'option est demandée ET si : copie de sauvegarde écrite, badgeages enregistrés
              par FIWAKTI, et lecture complète (autant de badgeages lus que l'appareil en annonce) — une lecture tronquée
@@ -223,7 +240,7 @@ module.exports = {refusPurge,
       }
       if (action === "utilisateurs-envoyer"){
         const liste = await ctx.utilisateursPour(T);
-        const actuels = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5));
+        const actuels = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5), await nbUtilisateurs(L));
         const parId = new Map(actuels.map(u=>[u.id, u]));
         let uidMax = actuels.reduce((m, u)=>Math.max(m, u.uid), 0), n = 0;
         await L.commande(C.DISABLE);
@@ -254,7 +271,7 @@ module.exports = {refusPurge,
       if (action === "redemarrer"){ await L.commande(C.RESTART); return {ok:true}; }
       /* v56.24 : retrait ciblé — l'utilisateur et ses empreintes (confirmé par l'appareil) */
       if (action === "utilisateurs-retirer"){
-        const ids = new Set((ctx.options.ids || []).map(String)), actuels = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5)); let n = 0;
+        const ids = new Set((ctx.options.ids || []).map(String)), actuels = lireUtilisateurs(await L.lireTampon(C.USERTEMP_RRQ, 5), await nbUtilisateurs(L)); let n = 0;
         await L.commande(C.DISABLE);
         try { for (const u of actuels.filter(x=>ids.has(String(x.id)))){ const b = Buffer.alloc(2); b.writeUInt16LE(u.uid, 0); const r = await L.commande(C.DELETE_USER, b); if (r.code === C.ACK_OK) n++; }
           await L.commande(C.REFRESHDATA); } finally { await L.commande(C.ENABLE).catch(()=>{}); }
@@ -264,5 +281,5 @@ module.exports = {refusPurge,
       throw new Error("Action non prise en charge par ce pilote.");
     });
   },
-  _interne:{paquet, checksum, cleComm, decodeTemps, encodeTemps, C}
+  _interne:{paquet, checksum, cleComm, decodeTemps, encodeTemps, C, lireUtilisateurs, heureDans, encodeTexte}
 };

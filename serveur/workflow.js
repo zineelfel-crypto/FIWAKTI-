@@ -95,7 +95,9 @@ function creer(o){
             if (apres === "CORRIGEE"){
               const md = await mode(r.mat, r.d);
               if (md === "aucune") await transition(r.mat, r.d, "CORRIGEE", "VALIDEE", "systeme", "validation non requise (règle VALIDATION_JOURNEES)");
-              else { const c = await correcteur(r.mat, r.d, majs.get(k)); const rg = c ? await rangPtg(c.login) : 0;
+              else { const c0 = await correcteur(r.mat, r.d, majs.get(k));
+                /* 56.33.11 : la correction de sa propre journée ne vaut jamais validation */
+                const c = c0 && R.loginParMat.get(String(r.mat)) !== c0.login ? c0 : null; const rg = c ? await rangPtg(c.login) : 0;
                 if (rg >= 3) await transition(r.mat, r.d, "CORRIGEE", final(md), c.login, "corrigée par "+c.login+" (droit de validation) : la correction vaut validation");
                 else if (rg >= 2) await transition(r.mat, r.d, "CORRIGEE", md === "responsable_rh" ? "APPROUVEE_MANAGER" : "VALIDEE", c.login, "corrigée par le responsable "+c.login+" : la correction vaut sa validation"+(md === "responsable_rh" ? " ; validation RH requise" : "")); }
             }
@@ -119,13 +121,16 @@ function creer(o){
     return n;
   }
   /* validation par le responsable (CORRIGEE → APPROUVEE_MANAGER) puis par les RH (→ APPROUVEE_RH) ; rejet → ANOMALIE */
-  async function valider(login, items, niveau, decision, motif, dansPerimetre){
+  /* 56.33.11 : séparation des pouvoirs — personne ne valide ses propres journées, et l'étape RH n'est pas validée par
+     l'auteur de l'étape responsable (« moi » = matricule du compte qui valide) */
+  async function valider(login, items, niveau, decision, motif, dansPerimetre, moi){
     const clot = await clotureJusqu(), res = {faits:0, refus:[]};
     const attendu = niveau === "rh" ? "APPROUVEE_MANAGER" : "CORRIGEE";
     if (decision === "rejet" && !String(motif||"").trim()) throw Object.assign(new Error("Motif obligatoire pour un rejet."), {code:400});
     for (const it of (items||[]).slice(0, 20000)){
       const mat = String(it.mat), d = String(it.d);
       if (!dansPerimetre(mat)){ res.refus.push(mat+" "+d+" : hors périmètre"); continue; }
+      if (moi && mat === String(moi) && decision !== "rejet"){ res.refus.push(mat+" "+d+" : vos propres journées sont validées par un autre responsable"); continue; }
       if (clot && d <= clot){ res.refus.push(mat+" "+d+" : période clôturée"); continue; }
       const s = await B.get("SELECT etat FROM day_states WHERE mat=? AND d=?", mat, d);
       const bloq = await B.get("SELECT COUNT(*) n FROM anomalies WHERE mat=? AND d=? AND statut='ouverte' AND gravite='bloquante'", mat, d);
@@ -135,6 +140,9 @@ function creer(o){
       const md = await mode(mat, d);
       const admissible = s && (s.etat === attendu || (niveau === "rh" && s.etat === "CORRIGEE") || (s.etat === "ANOMALIE" && ouvertes === 0 && decision !== "rejet"));
       const cible = niveau === "rh" ? final(md) : (md === "responsable_rh" ? "APPROUVEE_MANAGER" : "VALIDEE");
+      if (admissible && niveau === "rh" && decision !== "rejet" && s.etat === "APPROUVEE_MANAGER"){
+        const am = await B.get("SELECT auteur FROM day_transitions WHERE mat=? AND d=? AND vers='APPROUVEE_MANAGER' ORDER BY ts DESC LIMIT 1", mat, d);
+        if (am && am.auteur === login){ res.refus.push(mat+" "+d+" : l'étape RH doit être validée par une autre personne que le responsable"); continue; } }
       if (!admissible){ res.refus.push(mat+" "+d+" : état « "+(s ? s.etat : "aucun")+" », attendu « "+attendu+" »"+(s && s.etat === "ANOMALIE" && ouvertes ? " ("+ouvertes+" anomalie(s) ouverte(s))" : "")); continue; }
       await transition(mat, d, s.etat, decision === "rejet" ? "ANOMALIE" : cible, login, decision === "rejet" ? "rejet : "+motif : (motif || (niveau === "rh" ? "validation RH" : "validation du responsable")));
       res.faits++;
@@ -163,9 +171,12 @@ function creer(o){
     await audit(login, "ajustement.propose", mat+" "+d+" "+comp+" "+(delta > 0 ? "+" : "")+delta+" h, imputé au "+imput+" — "+a.motif);
     return B.get("SELECT * FROM adjustments WHERE id=?", id);
   }
-  async function validerAjustement(login, id, decision){
+  async function validerAjustement(login, id, decision, dansPerimetre, moi){
     const x = await B.get("SELECT * FROM adjustments WHERE id=?", id);
     if (!x) throw Object.assign(new Error("Ajustement introuvable."), {code:404});
+    /* 56.33.11 : périmètre du valideur et pas d'ajustement de ses propres heures */
+    if (dansPerimetre && !dansPerimetre(x.mat)) throw Object.assign(new Error("Ajustement introuvable."), {code:404});
+    if (moi && String(x.mat) === String(moi)) throw Object.assign(new Error("Vos propres ajustements sont validés par un autre responsable."), {code:403});
     if (x.statut !== "propose") throw Object.assign(new Error("Ajustement déjà "+x.statut+"."), {code:409});
     if (x.auteur === login) throw Object.assign(new Error("L'auteur d'un ajustement ne peut pas le valider lui-même."), {code:403});
     const st = decision === "refus" ? "refuse" : "valide";

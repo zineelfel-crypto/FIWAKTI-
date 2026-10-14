@@ -143,15 +143,23 @@ async function calculer(mats, du, au, horodatage, source){
         horodatage, list.length, v.inf.jid||"", v.inf.reel ? 1 : 0, a.filter(x=>x.type === "hs").reduce((s, x)=>s + (x.min||0), 0)]);
     }
   }
+  /* 56.33.11 : journées invalidées après le début de ce calcul (horodatage de la tâche) : résultat retiré, recalculé
+     ensuite — dans la transaction, puis une seconde fois après validation (sous PostgreSQL, une invalidation validée
+     pendant la transaction ne voit pas encore ces lignes) */
+  const f = filtre(mats);
+  const perimes = async () => { if (!horodatage) return; try {
+    await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql+" AND calc=? AND EXISTS (SELECT 1 FROM calc_invalidations i WHERE (i.mat=calc_jour.mat OR i.mat='*') AND (i.d=calc_jour.d OR i.d='*') AND i.ts > ?)", du, au, ...f.a, horodatage, horodatage);
+  } catch(e){ /* table créée à la première invalidation */ } };
   await B.transaction(async ()=>{
-    const f = filtre(mats);
     await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql, du, au, ...f.a);
     for (let i = 0; i < lignes.length; i += 400){
       const lot = lignes.slice(i, i+400);
       const ph = lot.map(()=>"(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(",");
       await B.run("INSERT INTO calc_jour(mat,d,dept,site,ht,hp,ret,hs,nano,types,anos,data,calc,nmv,jid,reel,hsmin) VALUES "+ph, ...lot.flat());
     }
+    await perimes();
   });
+  await perimes();
   return lignes.length;
 }
 /* état (export CSV) calculé par lots d'employés, mêmes règles que l'écran États */

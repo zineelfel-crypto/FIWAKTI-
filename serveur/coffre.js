@@ -30,26 +30,32 @@ function creer(dossier){
     return Buffer.concat([d.update(b.slice(28)), d.final()]).toString("utf8");
   }
   /* fichiers (sauvegardes) : MAGIC | iv(12) | données chiffrées | tag(16) — en flux, sans tout charger en mémoire */
-  function chiffrerFichier(src, dst, nom){
-    return new Promise((ok, ko)=>{
-      const iv = crypto.randomBytes(12), c = crypto.createCipheriv("aes-256-gcm", cle(nom), iv);
-      const out = fs.createWriteStream(dst, {mode:0o600});
-      out.write(Buffer.concat([MAGIC, iv]));
-      fs.createReadStream(src).pipe(c).on("data", d=>out.write(d)).on("end", ()=>{ out.end(c.getAuthTag(), ()=>ok(dst)); }).on("error", ko);
-    });
+  /* 56.33.11 : stream.pipeline — erreurs de lecture, de chiffrement et d'écriture (disque plein : ENOSPC) propagées au
+     lieu d'arrêter le serveur (aucun écouteur « error » sur le fichier écrit), contre-pression respectée (plus d'écriture
+     sans attente du disque) et fichier partiel supprimé */
+  const { pipeline } = require("stream").promises;
+  const supprimerPartiel = f => { try { if (fs.lstatSync(f).isFile()) fs.unlinkSync(f); } catch(e){} };   /* jamais /dev/… */
+  async function chiffrerFichier(src, dst, nom){
+    const iv = crypto.randomBytes(12), c = crypto.createCipheriv("aes-256-gcm", cle(nom), iv);
+    try {
+      await pipeline(fs.createReadStream(src), c, async function*(flux){
+        yield Buffer.concat([MAGIC, iv]);
+        for await (const d of flux) yield d;
+        yield c.getAuthTag();
+      }, fs.createWriteStream(dst, {mode:0o600}));
+      return dst;
+    } catch(e){ supprimerPartiel(dst); throw e; }
   }
-  function dechiffrerFichier(src, dst, nom){
-    return new Promise((ok, ko)=>{
-      const taille = fs.statSync(src).size, fd = fs.openSync(src, "r");
-      const tete = Buffer.alloc(MAGIC.length + 12); fs.readSync(fd, tete, 0, tete.length, 0);
-      const tag = Buffer.alloc(16); fs.readSync(fd, tag, 0, 16, taille - 16); fs.closeSync(fd);
-      if (!tete.slice(0, MAGIC.length).equals(MAGIC)) return ko(new Error("Fichier non chiffré par FIWAKTI."));
-      const d = crypto.createDecipheriv("aes-256-gcm", cle(nom), tete.slice(MAGIC.length));
-      d.setAuthTag(tag);
-      const out = fs.createWriteStream(dst, {mode:0o600});
-      fs.createReadStream(src, {start:tete.length, end:taille - 17}).pipe(d).on("error", e=>{ out.destroy(); try { fs.unlinkSync(dst); } catch(x){} ko(new Error("Déchiffrement impossible : clé différente ou fichier altéré.")); })
-        .pipe(out).on("finish", ()=>ok(dst)).on("error", ko);
-    });
+  async function dechiffrerFichier(src, dst, nom){
+    const taille = fs.statSync(src).size, fd = fs.openSync(src, "r");
+    const tete = Buffer.alloc(MAGIC.length + 12), tag = Buffer.alloc(16);
+    try { fs.readSync(fd, tete, 0, tete.length, 0); fs.readSync(fd, tag, 0, 16, Math.max(0, taille - 16)); } finally { fs.closeSync(fd); }
+    if (taille < tete.length + 16 || !tete.slice(0, MAGIC.length).equals(MAGIC)) throw new Error("Fichier non chiffré par FIWAKTI.");
+    const d = crypto.createDecipheriv("aes-256-gcm", cle(nom), tete.slice(MAGIC.length));
+    d.setAuthTag(tag);
+    let refus = false; d.once("error", e=>{ refus = !e.syscall; });   /* échec d'authentification, et non erreur disque propagée */
+    try { await pipeline(taille > tete.length + 16 ? fs.createReadStream(src, {start:tete.length, end:taille - 17}) : require("stream").Readable.from([]), d, fs.createWriteStream(dst, {mode:0o600})); return dst; }
+    catch(e){ supprimerPartiel(dst); throw refus ? new Error("Déchiffrement impossible : clé différente ou fichier altéré.") : e; }
   }
   const estChiffre = f => { try { const fd = fs.openSync(f, "r"), b = Buffer.alloc(MAGIC.length); fs.readSync(fd, b, 0, b.length, 0); fs.closeSync(fd); return b.equals(MAGIC); } catch(e){ return false; } };
   /* v47 : trousseau = toutes les clés (sauvegardes, accès des appareils, approbations des pilotes, double

@@ -45,8 +45,12 @@ function creer(o){
     const rang = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).EMP] || 0);
     if (rang < 1) return erreur(res, 403, "Droit de consultation des salariés requis.");
     const q = Object.fromEntries(u.searchParams.entries());
+    const catalogueActif = async () => { const SC = actif("FW-Competences") && o.service ? o.service("FW-Competences") : null;
+      if (!SC || !SC.service || !SC.service.catalogue) return null; try { return new Set((await SC.service.catalogue()).map(c=>String(c.id))); } catch(e){ return null; } };
     if (p === "/api/v1/evaluation/campagnes" && req.method === "GET"){
-      const l = await B.all("SELECT c.*, (SELECT COUNT(*) FROM eva_evaluations a WHERE a.campagne_id=c.id) total, (SELECT COUNT(*) FROM eva_evaluations a WHERE a.campagne_id=c.id AND a.statut='validee') validees FROM eva_campagnes c ORDER BY debut DESC LIMIT 100");
+      /* 56.33.11 : totaux limités au périmètre (mêmes règles que la liste des évaluations) */
+      const pm = perimSql(B, P, "a.mat"), pw = P.set === null ? "" : " AND ((1=1"+pm.sql+") OR a.evaluateur=?)", pa = P.set === null ? [] : [...pm.a, C.login];
+      const l = await B.all("SELECT c.*, (SELECT COUNT(*) FROM eva_evaluations a WHERE a.campagne_id=c.id"+pw+") total, (SELECT COUNT(*) FROM eva_evaluations a WHERE a.campagne_id=c.id AND a.statut='validee'"+pw+") validees FROM eva_campagnes c ORDER BY debut DESC LIMIT 100", ...pa, ...pa);
       return json(res, 200, {campagnes:l, competencesActif:actif("FW-Competences")});
     }
     if (p === "/api/v1/evaluation/campagnes" && req.method === "POST"){
@@ -91,7 +95,9 @@ function creer(o){
         if (!(rang >= 3 || (rang >= 2 && (ev.evaluateur === C.login || !ev.evaluateur)))) return erreur(res, 403, "Seul l'évaluateur désigné (ou un valideur) peut saisir cette évaluation.");
         const b = await corpsJson(req);
         const ob = json2(ev.objectifs).map((z, k)=>Object.assign(z, {atteinte:Array.isArray(b.objectifs) && b.objectifs[k] != null && b.objectifs[k] !== "" ? Math.max(0, Math.min(100, +b.objectifs[k])) : z.atteinte}));
-        const cp = (Array.isArray(b.competences) ? b.competences : []).slice(0, 60).map(z=>({competence_id:String(z.competence_id), niveau:Math.max(0, Math.min(4, +z.niveau||0))}));
+        /* 56.33.11 : seules les compétences actives du catalogue (service de FW-Competences) sont retenues */
+        const cat = await catalogueActif();
+        const cp = (Array.isArray(b.competences) ? b.competences : []).slice(0, 60).map(z=>({competence_id:String(z.competence_id), niveau:Math.max(0, Math.min(4, +z.niveau||0))})).filter(z=>cat && cat.has(z.competence_id));
         const statut = b.terminer ? "terminee" : "en_cours";
         await B.run("UPDATE eva_evaluations SET note=?, objectifs=?, competences=?, commentaire=?, statut=?, maj=?, evaluateur=COALESCE(evaluateur, ?) WHERE id=?",
           b.note == null || b.note === "" ? null : Math.max(1, Math.min(5, +b.note)), JSON.stringify(ob), JSON.stringify(cp), String(b.commentaire||"").slice(0, 4000), statut, maint(), C.login, ev.id);
@@ -99,6 +105,7 @@ function creer(o){
       }
       if (me[2] && req.method === "POST"){
         if (rang < 3) return erreur(res, 403, "Validation réservée au droit de validation.");
+        if (ev.cstatut !== "ouverte") return erreur(res, 409, "Campagne close."); /* 56.33.11 */
         if (me[2] === "rouvrir"){ if (ev.statut === "validee") return erreur(res, 409, "Une évaluation validée ne se rouvre pas."); await B.run("UPDATE eva_evaluations SET statut='en_cours', maj=? WHERE id=?", maint(), ev.id); await audit(C.login, "evaluation.rouverte", ev.mat, ip); return json(res, 200, {ok:true}); }
         if (ev.statut !== "terminee") return erreur(res, 409, "Seule une évaluation terminée se valide.");
         let reportes = 0;
@@ -106,7 +113,8 @@ function creer(o){
           await B.run("UPDATE eva_evaluations SET statut='validee', valide_par=?, valide_le=?, maj=? WHERE id=?", C.login, maint(), maint(), ev.id);
           /* report des niveaux dans la matrice des compétences, avec historique */
           { const SC = actif("FW-Competences") && o.service ? o.service("FW-Competences") : null;
-            if (SC && SC.service) for (const z of json2(ev.competences)) if (await SC.service.ecrireNiveau(ev.mat, z.competence_id, z.niveau, C.login, "évaluation : "+ev.campagne, maint().slice(0, 10), false)) reportes++; }
+            const cat = await catalogueActif(); /* 56.33.11 : compétence retirée du catalogue depuis la saisie = ignorée */
+            if (SC && SC.service) for (const z of json2(ev.competences)) if (cat && cat.has(String(z.competence_id)) && await SC.service.ecrireNiveau(ev.mat, z.competence_id, z.niveau, C.login, "évaluation : "+ev.campagne, maint().slice(0, 10), false)) reportes++; }
         });
         await audit(C.login, "evaluation.validee", ev.mat+" — "+ev.campagne+" : "+reportes+" niveau(x) reporté(s)", ip); return json(res, 200, {ok:true, reportes});
       }

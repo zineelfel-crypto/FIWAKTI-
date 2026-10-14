@@ -69,8 +69,19 @@ function creer(o){
     });
     return B.get("SELECT * FROM recalculs WHERE id=?", id);
   }
-  async function lire(id, seulementEcarts, offset, limit){
-    const r = await B.get("SELECT * FROM recalculs WHERE id=?", id); if (!r) return null;
+  /* 56.33.11 : un recalcul n'est visible et applicable que par son auteur ou par un valideur dont le périmètre couvre
+     tous ses salariés (avant : liste, détail nominatif et validation ouverts à tout valideur, quel que soit le site) */
+  const COUVRE = new Map();
+  async function accessible(r, acces){
+    if (!acces || acces.global) return true;
+    if (r.par === acces.login) return true;
+    if (r.statut === "en_cours" || r.statut === "erreur") return false;
+    if (!COUVRE.has(r.id)){ let l = []; try { l = JSON.parse(fs.readFileSync(fichier(r.id), "utf8")).lignes; } catch(e){ return false; }
+      if (COUVRE.size > 200) COUVRE.clear(); COUVRE.set(r.id, l.map(x=>String(x.mat))); }
+    return COUVRE.get(r.id).every(m=>acces.dansPerim(m));
+  }
+  async function lire(id, seulementEcarts, offset, limit, acces){
+    const r = await B.get("SELECT * FROM recalculs WHERE id=?", id); if (!r || !(await accessible(r, acces))) return null;
     r.resume = r.resume ? JSON.parse(r.resume) : null;
     let lignes = [];
     try { lignes = JSON.parse(fs.readFileSync(fichier(id), "utf8")).lignes; } catch(e){}
@@ -80,9 +91,11 @@ function creer(o){
     r.lignes = lignes.slice(offset||0, (offset||0) + (limit||100)).map(x=>Object.assign({}, x, {nom:((emps.get(x.mat)||{}).nom||"")+" "+((emps.get(x.mat)||{}).prenom||"")}));
     return r;
   }
-  async function valider(login, id, decision){
+  async function valider(login, id, decision, acces){
     const r = await B.get("SELECT * FROM recalculs WHERE id=?", id);
-    if (!r) throw Object.assign(new Error("Recalcul introuvable."), {code:404});
+    if (!r || !(await accessible(r, acces))) throw Object.assign(new Error("Recalcul introuvable."), {code:404});
+    /* règle des quatre yeux : l'auteur ne valide pas son propre recalcul (sauf administrateur, seul habilité dans les petites structures) */
+    if (decision !== "rejet" && acces && !acces.admin && r.par === login) throw Object.assign(new Error("Un recalcul est validé par une autre personne que son auteur."), {code:403});
     if (r.statut !== "a_valider") throw Object.assign(new Error("Recalcul "+r.statut+"."), {code:409});
     const c = await clot();
     if (decision !== "rejet" && c && r.du <= c) throw Object.assign(new Error("La période a été clôturée depuis : recalcul non applicable."), {code:409});
@@ -98,7 +111,9 @@ function creer(o){
     await audit(login, "recalcul.applique", id+" : nouvelle référence pour "+lignes.length+" salarié(s), "+r.nb_ecarts+" avec écart");
     return {ok:true, statut:"applique", references:lignes.length};
   }
-  async function liste(){ return (await B.all("SELECT * FROM recalculs ORDER BY cree DESC LIMIT 50")).map(r=>Object.assign(r, {resume:r.resume ? JSON.parse(r.resume) : null})); }
+  async function liste(acces){ const out = [];
+    for (const r of await B.all("SELECT * FROM recalculs ORDER BY cree DESC LIMIT 50")) if (await accessible(r, acces)) out.push(Object.assign(r, {resume:r.resume ? JSON.parse(r.resume) : null}));
+    return out; }
   return {lancer, lire, valider, liste};
 }
 module.exports = {creer};

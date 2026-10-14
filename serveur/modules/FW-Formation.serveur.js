@@ -152,6 +152,9 @@ function creer(o){
       if (ms[2] === "cloturer" && req.method === "POST"){
         if (rang < 3) return erreur(res, 403, "Clôture réservée au droit de validation.");
         const l = await B.all("SELECT * FROM frm_inscriptions WHERE session_id=?", s.id);
+        /* 56.33.11 : la clôture reporte niveaux et habilitations de TOUS les inscrits — refusée à un valideur limité dès
+           qu'un inscrit est hors de son périmètre (il n'a pu ni voir ni saisir sa présence) */
+        if (P.set !== null && l.some(r=>!dans(P, r.mat))) return erreur(res, 403, "Des inscrits sont hors de votre périmètre : clôture réservée à un valideur couvrant tous les inscrits.");
         if (l.some(r=>r.presence === "inscrit")) return erreur(res, 409, "Saisissez la présence de chaque inscrit avant de clôturer.");
         let niveaux = 0, habs = 0;
         await B.transaction(async ()=>{

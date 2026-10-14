@@ -169,14 +169,15 @@ function creer(B, PERIM){
     }
     return '{"colls":{'+parties.join(",")+'},"du":'+JSON.stringify(du)+',"au":'+JSON.stringify(au)+'}';
   }
-  async function synchroniser(login, paquet){
+  async function synchroniser(login, paquet, opts){
     /* 56.33.11 : envoi sans paramétrage (salariés, badgeages…) → paramétrage partagé en lecture (copie de surface ; le
        document n'est pas réécrit) au lieu d'une relecture complète (~8 Mo avec 50 000 comptes) */
     const sansRef = !paquet.ref || !Object.keys(paquet.ref).length;
     const refL = sansRef ? await referentielLecture() : null;
     const ref = refL ? Object.assign({}, refL, {__versions:Object.assign({}, refL.__versions || {})}) : await referentiel() || {};
     const {P} = await perimetreDe(refL || ref, login);
-    const admin = !!P.u && (!P.profil || PERIM.niveauProfil(P.profil) === "admin");
+    /* 56.33.11 : administrateur = compte administrateur (rôle tenu par le serveur) ou profil de niveau admin existant */
+    const admin = !!P.u && ((opts && opts.admin === true) || (!!P.profil && PERIM.niveauProfil(P.profil) === "admin"));
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
     const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}};
@@ -198,10 +199,13 @@ function creer(B, PERIM){
           if (moi){ ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, pick(moi, ["ntfVus","derniereConx","langue","prefs","homeLayout"]))); refModifie = true; }
           continue;
         }
-        /* décisions sur les anomalies : tout utilisateur qui traite une anomalie de son périmètre */
+        /* décisions sur les anomalies : droit de correction des pointages (PTG ≥ saisie) sur son périmètre, jamais sur
+           ses propres journées (56.33.11 : avant, tout utilisateur — y compris le portail salarié — justifiait ses retards) */
         if (k === "anoDec" && !admin){
+          if (!PERIM.peutEcrire(P.profil, "corrections")){ ignores.push("anoDec (droit insuffisant)"); continue; }
+          const moi = P.u.empId ? ((await employes()).find(e=>e.id === P.u.empId) || {}).mat : null;
           const n = Object.assign({}, avantDec);
-          Object.keys(r.anoDec||{}).forEach(id=>{ const mat = id.split("|")[1]; if (dansPerim(mat)) n[id] = r.anoDec[id]; });
+          Object.keys(r.anoDec||{}).forEach(id=>{ const mat = id.split("|")[1]; if (dansPerim(mat) && String(mat) !== String(moi)) n[id] = r.anoDec[id]; });
           ref.anoDec = n; refModifie = true; refCles.push(k); continue;
         }
         if (k === "corbeilleCfg" && !(r.corbeilleCfg && CORB_CHOIX.indexOf(Number(r.corbeilleCfg.jours)) >= 0)){ ignores.push("corbeilleCfg (durée non prévue)"); continue; }
@@ -249,6 +253,9 @@ function creer(B, PERIM){
         let refus = 0, clotRefus = false;
         for (const x of (colls[c].put||[])){
           if (!x || x.id === undefined){ refus++; continue; }
+          /* 56.33.11 : identifiant et matricule contrôlés (un identifiant contenant « " » injectait des attributs dans les
+             écrans des valideurs : zone invisible déclenchant une validation) */
+          if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(String(x.id)) || (x.mat != null && /["'<>&`\\]/.test(String(x.mat)))){ refus++; ignores.push(c+" (identifiant invalide)"); continue; }
           const av = await B.get("SELECT data FROM enreg WHERE coll=? AND id=?", c, String(x.id));
           const avant = av ? JSON.parse(av.data) : null;
           if (immuable && avant){ if (JSON.stringify(avant) !== JSON.stringify(x)) refus++; continue; }

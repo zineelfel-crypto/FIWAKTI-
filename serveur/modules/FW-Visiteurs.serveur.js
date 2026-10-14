@@ -248,6 +248,8 @@ function creer(o){
             const b = await corpsJson(req), nv = Object.assign({}, pr);
             if (b.jours) nv.jours = JSON.stringify(valideJours(b.jours));
             if (b.au){ if (!JOUR.test(b.au) || b.au < pr.du) throw Object.assign(new Error("Date de fin invalide."), {code:400}); nv.au = b.au; }
+            /* 56.33.11 : mêmes plafonds qu'à la création (un an, 5 000 visites), sinon une modification les contournait */
+            if ((new Date(nv.au) - new Date(pr.du)) / 86400000 > 366) throw Object.assign(new Error("Période limitée à un an."), {code:400});
             if (b.visiteurs){ const vv = Array.from(new Set(b.visiteurs.map(String))).slice(0, 50); const rows = vv.length ? await B.all("SELECT id FROM vis_visiteurs WHERE actif=1 AND entreprise_id=? AND id IN ("+vv.map(()=>"?").join(",")+")", pr.entreprise_id, ...vv) : [];
               if (!rows.length || rows.length !== vv.length) throw Object.assign(new Error("Visiteurs invalides."), {code:400}); nv.visiteurs = JSON.stringify(vv); }
             if (b.notes !== undefined) nv.notes = String(b.notes||"").slice(0, 500) || null;
@@ -255,7 +257,8 @@ function creer(o){
             if (b.zone !== undefined) nv.zone_id = b.zone || null;
             await B.run("UPDATE vis_programmations SET jours=?, au=?, visiteurs=?, notes=?, zone_id=?, maj=? WHERE id=?", nv.jours, nv.au, nv.visiteurs, nv.notes, nv.zone_id, maint(), pr.id);
             await B.run("DELETE FROM vis_visites WHERE programmation_id=? AND d>=? AND statut='ANNONCEE'", pr.id, a);
-            n = pr.statut === "active" ? await generer(nv, a, C.login) : 0; }
+            n = pr.statut === "active" ? await generer(nv, a, C.login) : 0;
+            if (n > 5000) throw Object.assign(new Error("Programmation trop volumineuse ("+n+" visites) : réduisez la période ou le nombre de visiteurs."), {code:400}); }
           await journal(null, pr.id, pr.statut, act || "modifiee", C.login, n+" visite(s) concernée(s)");
         });
         await audit(C.login, "visiteurs.programmation."+(act || "modification"), pr.id+" : "+n, ip); return json(res, 200, {ok:true, visites:n});

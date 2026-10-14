@@ -31,14 +31,21 @@ function creer(o){
     const nom = m => { const e = parMat.get(String(m)) || {}; return ((e.nom||"")+" "+(e.prenom||"")).trim(); };
     return {parMat, sites, nom};
   }
-  const visible = (P, cx, e, login) => P.set === null || (e.mat && dans(P, e.mat)) || (e.site_id && cx.sites.has(e.site_id)) || e.declare_par === login;
+  /* 56.33.11 : un événement qui nomme un salarié suit uniquement le périmètre de ce salarié (le site ou le déclarant
+     ne suffisent plus : ils exposaient la victime hors périmètre) ; sans salarié, site du périmètre ou déclarant */
+  const visible = (P, cx, e, login) => P.set === null || (e.mat ? dans(P, e.mat) : ((e.site_id && cx.sites.has(e.site_id)) || e.declare_par === login));
+  /* même règle en SQL (préfixe de table « pre », vide ou « e. ») */
+  const visibleSql = (P, cx, login, pre) => { if (P.set === null) return {sql:"", a:[]};
+    const pm = perimSql(B, P, pre+"mat"), ps = perimSql(B, {set:cx.sites}, pre+"site_id");
+    return {sql:" AND (("+pre+"mat IS NOT NULL"+pm.sql+") OR ("+pre+"mat IS NULL AND (("+pre+"site_id IS NOT NULL"+ps.sql+") OR "+pre+"declare_par=?)))", a:[...pm.a, ...ps.a, login]}; };
   /* indicateurs : taux de fréquence (accidents avec arrêt × 1 000 000 / heures travaillées) et taux de gravité
      (jours d'arrêt × 1 000 / heures travaillées) ; heures lues dans les journées calculées par FW-Time */
   /* 56.32 : heures travaillées gardées en mémoire 15 min par période et périmètre (la somme sur 12 mois parcourait
      2,3 millions de journées à chaque ouverture : 6 à 8 s à 60 000 salariés) ; vidées quand les journées changent */
   const HEURES = new Map();
   async function heuresPeriode(P, du, au){
-    const cle = du+"|"+au+"|"+(P.set === null ? "*" : Array.from(P.set).sort().join(",").slice(0, 4000)), h = HEURES.get(cle);
+    /* 56.33.11 : empreinte de la liste complète (la troncature à 4 000 caractères confondait des périmètres différents) */
+    const cle = du+"|"+au+"|"+(P.set === null ? "*" : crypto.createHash("sha1").update(Array.from(P.set).sort().join(",")).digest("hex")), h = HEURES.get(cle);
     if (h && Date.now() - h.t < 15 * 60000) return h.v;
     let heures = 0;
     if (P.set === null) heures = Number((await B.get("SELECT SUM(hp) h FROM calc_jour WHERE d>=? AND d<=?", du, au)).h) || 0;
@@ -50,12 +57,13 @@ function creer(o){
     const cx = await contexte(P);
     const ev = (await B.all("SELECT type, d, mat, site_id, arret, jours_arret, declare_par FROM hse_evenements WHERE d>=? AND d<=?", du, au)).filter(e=>visible(P, cx, e, login));
     let heures = 0;
-    try { heures = await heuresPeriode(P, du, au); if (false) heures = Number((await B.get("SELECT SUM(hp) h FROM calc_jour WHERE d>=? AND d<=?", du, au)).h) || 0;
-      else { const mats = Array.from(P.set); for (let i = 0; i < mats.length; i += 500){ const l = mats.slice(i, i+500);
-        heures += Number((await B.get("SELECT SUM(hp) h FROM calc_jour WHERE d>=? AND d<=? AND mat IN ("+l.map(()=>"?").join(",")+")", du, au, ...l)).h) || 0; } } } catch(e){}
+    /* 56.33.11 : bloc résiduel retiré — il recomptait les heures (TF/TG divisés par deux en périmètre limité) et levait
+       une exception pour un périmètre global (Array.from(null)) */
+    try { heures = await heuresPeriode(P, du, au); } catch(e){}
     const acc = ev.filter(e=>e.type === "accident"), avecArret = acc.filter(e=>e.arret), jours = avecArret.reduce((s, e)=>s + (Number(e.jours_arret)||0), 0);
     const parMois = {}; ev.forEach(e=>{ const m = e.d.slice(0, 7); const x = parMois[m] || (parMois[m] = {accident:0, incident:0, presque_accident:0}); x[e.type]++; });
-    const actions = await B.all("SELECT statut, echeance FROM hse_actions WHERE statut <> 'faite'");
+    const va = visibleSql(P, cx, login, "e.");
+    const actions = await B.all("SELECT a.statut, a.echeance FROM hse_actions a LEFT JOIN hse_evenements e ON e.id=a.evenement_id WHERE a.statut <> 'faite'"+(va.sql ? " AND (a.evenement_id IS NULL OR (e.id IS NOT NULL"+va.sql+"))" : ""), ...va.a);
     return {du, au, heures:Math.round(heures), accidents:acc.length, avecArret:avecArret.length, joursArret:jours, incidents:ev.filter(e=>e.type === "incident").length,
       presqueAccidents:ev.filter(e=>e.type === "presque_accident").length, tf:heures ? Math.round(avecArret.length * 1e6 / heures * 100) / 100 : null,
       tg:heures ? Math.round(jours * 1e3 / heures * 100) / 100 : null, actionsOuvertes:actions.length, actionsRetard:actions.filter(a=>a.echeance < auj()).length,
@@ -97,8 +105,7 @@ function creer(o){
       let w = " WHERE 1=1", a = [];
       if (st) w += st === "clos" ? " AND statut='clos'" : " AND statut <> 'clos'";
       if (TYPES.indexOf(q.type) >= 0){ w += " AND type=?"; a.push(q.type); }
-      if (P.set !== null){ const pm = perimSql(B, P, "mat"), ps = perimSql(B, {set:cx.sites}, "site_id");
-        w += " AND ((mat IS NOT NULL"+pm.sql+") OR (site_id IS NOT NULL"+ps.sql+") OR declare_par=?)"; a.push(...pm.a, ...ps.a, C.login); }
+      const vs = visibleSql(P, cx, C.login, ""); w += vs.sql; a.push(...vs.a);
       const total = Number((await B.get("SELECT COUNT(*) n FROM hse_evenements"+w, ...a)).n);
       const l = await B.all("SELECT id, type, d, heure, site_id, lieu, mat, gravite, arret, jours_arret, description, cause, statut, declare_par FROM hse_evenements"+w+" ORDER BY d DESC, heure DESC LIMIT "+lim+" OFFSET "+off, ...a);
       return json(res, 200, {total, lignes:l.map(e=>Object.assign(e, {victime:e.mat ? cx.nom(e.mat) : ""}))});
@@ -110,6 +117,9 @@ function creer(o){
       if (b.d > auj()) return erreur(res, 400, "La date ne peut pas être dans le futur.");
       const mat = String(b.mat||"").trim();
       if (mat && (!dans(P, mat) || !(await D.employes()).some(e=>String(e.mat) === mat))) return erreur(res, 404, "Salarié introuvable ou hors périmètre.");
+      /* 56.33.11 : site contrôlé (existant et dans les sites du périmètre), comme dans FW-Visiteurs */
+      if (b.siteId){ const ref = await (D.referentielLecture || D.referentiel)() || {}, cx = await contexte(P);
+        if (!(ref.sites||[]).some(z=>z.id === b.siteId) || (cx.sites !== null && !cx.sites.has(b.siteId))) return erreur(res, 400, "Site inconnu ou hors périmètre."); }
       const arret = type === "accident" && !!b.arret;
       const i = id("he"); await B.run("INSERT INTO hse_evenements(id,type,d,heure,site_id,lieu,mat,gravite,arret,jours_arret,description,cause,statut,declare_par,cree) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         i, type, b.d, String(b.heure||"").slice(0, 5), b.siteId || null, String(b.lieu||"").slice(0, 120), mat || null, Math.max(1, Math.min(4, +b.gravite||1)), arret ? 1 : 0, arret ? Math.max(0, Math.min(3650, +b.joursArret||0)) : 0,
@@ -124,7 +134,7 @@ function creer(o){
       if (rang < 3) return erreur(res, 403, "Analyse et clôture réservées au droit de validation.");
       if (e.statut === "clos") return erreur(res, 409, "Événement clos.");
       if (me[2] === "analyse" && req.method === "POST"){ const b = await corpsJson(req);
-        await B.run("UPDATE hse_evenements SET cause=?, statut='en_analyse', jours_arret=CASE WHEN arret=1 THEN ? ELSE 0 END WHERE id=?", String(b.cause||e.cause||"").slice(0, 2000), Math.max(0, Math.min(3650, +b.joursArret || e.jours_arret || 0)), e.id);
+        await B.run("UPDATE hse_evenements SET cause=?, statut='en_analyse', jours_arret=CASE WHEN arret=1 THEN ? ELSE 0 END WHERE id=?", String(b.cause||e.cause||"").slice(0, 2000), Math.max(0, Math.min(3650, (b.joursArret !== undefined && b.joursArret !== null && b.joursArret !== "" ? +b.joursArret : +e.jours_arret) || 0)), e.id); /* 56.33.11 : 0 accepté */
         await audit(C.login, "hse.evenement.analyse", e.id, ip); return json(res, 200, {ok:true}); }
       if (me[2] === "cloturer" && req.method === "POST"){
         if (!String(e.cause||"").trim()) return erreur(res, 409, "Renseignez la cause (analyse) avant de clore.");
@@ -134,23 +144,29 @@ function creer(o){
     }
     if (p === "/api/v1/hse/actions" && req.method === "GET"){
       const st = q.statut === "faite" ? "faite" : null;
-      const w = " WHERE "+(st ? "a.statut='faite'" : "a.statut <> 'faite'");
-      const total = Number((await B.get("SELECT COUNT(*) n FROM hse_actions a"+w)).n);
-      const l = await B.all("SELECT a.id, a.evenement_id, a.risque_id, a.titre, a.responsable, a.echeance, a.statut, a.faite_le, e.type evtype, e.d evd, r.danger FROM hse_actions a LEFT JOIN hse_evenements e ON e.id=a.evenement_id LEFT JOIN hse_risques r ON r.id=a.risque_id"+w+" ORDER BY a.echeance LIMIT "+lim+" OFFSET "+off);
+      /* 56.33.11 : actions rattachées à un événement limitées aux événements visibles (actions sur risque : communes) */
+      const va = visibleSql(P, await contexte(P), C.login, "e.");
+      const w = " WHERE "+(st ? "a.statut='faite'" : "a.statut <> 'faite'")+(va.sql ? " AND (a.evenement_id IS NULL OR (e.id IS NOT NULL"+va.sql+"))" : "");
+      const total = Number((await B.get("SELECT COUNT(*) n FROM hse_actions a LEFT JOIN hse_evenements e ON e.id=a.evenement_id"+w, ...va.a)).n);
+      const l = await B.all("SELECT a.id, a.evenement_id, a.risque_id, a.titre, a.responsable, a.echeance, a.statut, a.faite_le, e.type evtype, e.d evd, r.danger FROM hse_actions a LEFT JOIN hse_evenements e ON e.id=a.evenement_id LEFT JOIN hse_risques r ON r.id=a.risque_id"+w+" ORDER BY a.echeance LIMIT "+lim+" OFFSET "+off, ...va.a);
       return json(res, 200, {total, lignes:l});
     }
     if (p === "/api/v1/hse/actions" && req.method === "POST"){
       if (rang < 3) return erreur(res, 403, "Droit de validation requis.");
       const b = await corpsJson(req), titre = String(b.titre||"").trim();
       if (!titre || !/^\d{4}-\d{2}-\d{2}$/.test(b.echeance||"")) return erreur(res, 400, "Action et échéance obligatoires.");
-      if (b.evenementId && !await B.get("SELECT 1 FROM hse_evenements WHERE id=? AND statut <> 'clos'", b.evenementId)) return erreur(res, 400, "Événement introuvable ou clos.");
+      if (b.evenementId){ const e = await B.get("SELECT * FROM hse_evenements WHERE id=? AND statut <> 'clos'", String(b.evenementId)); /* 56.33.11 : événement visible exigé */
+        if (!e || !visible(P, await contexte(P), e, C.login)) return erreur(res, 400, "Événement introuvable ou clos."); }
       if (b.risqueId && !await B.get("SELECT 1 FROM hse_risques WHERE id=?", b.risqueId)) return erreur(res, 400, "Risque introuvable.");
       const i = id("ha"); await B.run("INSERT INTO hse_actions(id,evenement_id,risque_id,titre,responsable,echeance,statut,cree,par) VALUES(?,?,?,?,?,?,?,?,?)", i, b.evenementId || null, b.risqueId || null, titre.slice(0, 200), String(b.responsable||"").slice(0, 80), b.echeance, "a_faire", maint(), C.login);
       await audit(C.login, "hse.action", titre, ip); return json(res, 200, {ok:true, id:i});
     }
     const ma = /^\/api\/v1\/hse\/actions\/([^/]+)\/faite$/.exec(p);
     if (ma && req.method === "POST"){ if (rang < 2) return erreur(res, 403, "Droit de saisie requis.");
-      const a = await B.get("SELECT * FROM hse_actions WHERE id=?", ma[1]); if (!a) return erreur(res, 404, "Action introuvable."); if (a.statut === "faite") return erreur(res, 409, "Action déjà faite.");
+      const a = await B.get("SELECT * FROM hse_actions WHERE id=?", ma[1]); if (!a) return erreur(res, 404, "Action introuvable.");
+      /* 56.33.11 : action d'un événement hors visibilité = introuvable */
+      if (a.evenement_id){ const e = await B.get("SELECT * FROM hse_evenements WHERE id=?", a.evenement_id); if (!e || !visible(P, await contexte(P), e, C.login)) return erreur(res, 404, "Action introuvable."); }
+      if (a.statut === "faite") return erreur(res, 409, "Action déjà faite.");
       await B.run("UPDATE hse_actions SET statut='faite', faite_le=? WHERE id=?", maint(), a.id); await audit(C.login, "hse.action.faite", a.titre, ip); return json(res, 200, {ok:true}); }
     if (p === "/api/v1/hse/risques" && req.method === "GET")
       return json(res, 200, {lignes:(await B.all("SELECT * FROM hse_risques")).map(r=>Object.assign(r, {criticite:r.gravite * r.probabilite})).sort((a, b)=>b.criticite - a.criticite)});

@@ -205,11 +205,13 @@ function creer(o){
       const tsUtc = tsLocal && fuseauValide(tz) ? localVersUtc(tsLocal, tz) : null;
       let statut = "ACCEPTED", motif = "";
       if (!tsUtc){ statut = "INVALID"; motif = "horodatage illisible ou fuseau inconnu"; }
-      else if (new Date(tsUtc).getTime() > Date.now() + 5*60000){ statut = "INVALID"; motif = "horodatage dans le futur"; }
+      /* 56.33.11 : badgeage dans le futur (horloge de l'appareil en avance) d'un salarié connu : mis en revue et rejouable
+         (avant : INVALID, perdu pour le calcul sans recours) */
+      else if (new Date(tsUtc).getTime() > Date.now() + 5*60000){ statut = e && util ? "PENDING_REVIEW" : "INVALID"; motif = "horodatage dans le futur (horloge de l'appareil en avance ?)"; }
       else if (!util){ statut = "INVALID"; motif = "identifiant absent"; }
       else if (!e){ statut = "PENDING_REVIEW"; motif = "identifiant inconnu : « "+util+" »"; inconnus.add(util); }
       const cle = "k-"+hex([T ? T.id : "saisie:"+auteur, util, tsUtc, b.source_event_id||""].join("|"), 40);
-      const ptgId = e && T ? "t"+crypto.createHash("sha1").update(T.id+"|"+e.mat+"|"+tsLocal).digest("hex").slice(0, 16) : (b.ptgId || null);
+      const ptgId = e && T && statut !== "PENDING_REVIEW" ? "t"+crypto.createHash("sha1").update(T.id+"|"+e.mat+"|"+tsLocal).digest("hex").slice(0, 16) : (b.ptgId || null);
       return {b, rawId, util, e, tz, tsLocal, tsUtc, statut, motif, cle, ptgId};
     });
     /* 2. doublons déjà enregistrés : trois requêtes pour tout le lot */
@@ -233,7 +235,8 @@ function creer(o){
           const dejaN = clesConnues.has(cle), dejaP = !dejaN && ptgId && ptgConnus.has(ptgId);
           if (dejaN || dejaP){ statut = "DUPLICATE_IGNORED"; motif = "déjà reçu"; }
         }
-        if (statut === "ACCEPTED" && e && clot && tsLocal.slice(0, 10) <= clot){ statut = "REJECTED"; motif = "période clôturée jusqu'au "+clot+" : ajustement de période antérieure requis"; res.horsPeriode++; }
+        /* 56.33.11 : clôture contrôlée sur la date de travail (sortie de nuit le 01/10 à 06:00 rattachée au 30/09 clôturé) */
+        if (statut === "ACCEPTED" && e && clot && (tsLocal.slice(0, 10) <= clot || dateDeTravail(e, tsLocal).work_date <= clot)){ statut = "REJECTED"; motif = "période clôturée jusqu'au "+clot+" : ajustement de période antérieure requis"; res.horsPeriode++; }
         /* niveau 1 : toute réception est conservée, avec le message d'origine */
         W.raw.push([rawId, T ? T.id : null, T ? (T.nom||T.id) : null, b.badge != null ? String(b.badge) : ((T && T.identifiantAppareil === "badge") ? util : null), util || null, tsUtc, tsLocal, q.recu_utc, source,
           typeof b.payload === "string" ? b.payload : JSON.stringify(b.payload != null ? b.payload : {utilisateur:b.utilisateur, horodatage:b.horodatage, sens:b.sens}),
@@ -254,7 +257,7 @@ function creer(o){
         }
         W.cles.push([cle, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), "n-"+rawId, cree]); clesConnues.add(cle);
         W.norm.push(["n-"+rawId, moisDe(e ? wd.work_date : tsLocal, q.recu_utc), rawId, cle, e ? String(e.mat) : null, type || "UNKNOWN", methode+" ; date de travail : "+wd.regle, tsUtc, tsLocal, e ? wd.work_date : null, (T && T.siteId) || (e && e.siteId) || null, statut, motif, e ? ptgId : null, cree]);
-        if (statut === "PENDING_REVIEW"){ res.inconnus++; continue; }
+        if (statut === "PENDING_REVIEW"){ if (e) res.futurs = (res.futurs||0) + 1; else res.inconnus++; continue; }
         /* projection de compatibilité : le moteur de calcul actuel lit ces badgeages (résultats inchangés) */
         const sens = type === "IN" || type === "AUTO_IN" ? "E" : "S";
         const pt = {id:ptgId || ("s"+hex(rawId, 16)), mat:String(e.mat), ts:tsLocal, sens, dev:T ? (T.nom||"") : (b.dev||""), src:T ? "badge" : (b.src||"saisie"), term:T ? T.id : undefined, raw:rawId, sensAuto:methode.indexOf("alternance") === 0 ? true : undefined};

@@ -99,7 +99,9 @@ function creer(o){
       if (!mp[2] && req.method === "GET") return json(res, 200, {parcours:pc, taches:await B.all("SELECT * FROM onb_taches WHERE parcours_id=? ORDER BY echeance, ordre", pc.id)});
       if (mp[2] && req.method === "POST"){
         if (rang < 3) return erreur(res, 403, "Droit de validation requis.");
-        await B.run("UPDATE onb_parcours SET statut=? WHERE id=?", mp[2] === "terminer" ? "termine" : "annule", pc.id);
+        /* 56.33.11 : seul un parcours en cours se termine ou s'annule (un parcours annulé ne redevient pas « terminé ») */
+        if (pc.statut !== "en_cours") return erreur(res, 409, "Parcours clôturé.");
+        await B.run("UPDATE onb_parcours SET statut=? WHERE id=? AND statut='en_cours'", mp[2] === "terminer" ? "termine" : "annule", pc.id);
         await audit(C.login, "onboarding.parcours."+mp[2], pc.mat, ip); return json(res, 200, {ok:true});
       }
     }
@@ -110,7 +112,9 @@ function creer(o){
       if (!t || !dans(P, t.mat)) return erreur(res, 404, "Tâche introuvable.");
       if (t.statut !== "en_cours") return erreur(res, 409, "Parcours clôturé.");
       const b = await corpsJson(req), faite = !!b.faite;
-      await B.run("UPDATE onb_taches SET faite_le=?, faite_par=?, commentaire=COALESCE(?, commentaire) WHERE id=?", faite ? maint() : null, faite ? C.login : null, b.commentaire == null ? null : String(b.commentaire).slice(0, 500), t.id);
+      /* 56.33.11 : recocher une tâche déjà faite garde sa date et son signataire d'origine */
+      const deja = faite && t.faite_le;
+      await B.run("UPDATE onb_taches SET faite_le=?, faite_par=?, commentaire=COALESCE(?, commentaire) WHERE id=?", deja ? t.faite_le : faite ? maint() : null, deja ? t.faite_par : faite ? C.login : null, b.commentaire == null ? null : String(b.commentaire).slice(0, 500), t.id);
       await audit(C.login, "onboarding.tache", t.mat+" — "+t.titre+" : "+(faite ? "faite" : "à refaire"), ip); return json(res, 200, {ok:true});
     }
     return erreur(res, 404, "Introuvable.");

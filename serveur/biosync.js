@@ -25,7 +25,7 @@ const DDL = [
   /* 56.33.11 : sorties déjà traitées (retrait des appareils fait une fois par date de sortie) */
   "CREATE TABLE IF NOT EXISTS bio_sorties (mat TEXT PRIMARY KEY, sortie TEXT, traite TEXT)"];
 const ddl = {pg:DDL, sqlite:DDL};
-const tables = {bio_sync_queue:"id", bio_blocages:"mat", bio_presence:"terminal_id", bio_sorties:"mat"};
+const tables = {bio_sync_queue:"id", bio_blocages:"mat", bio_presence:"terminal_id, mat", bio_sorties:"mat"};   /* 56.33.11 : clé primaire complète de bio_presence (lecture par lots de la sauvegarde) */
 /* 56.33.11 : types d'absence (référentiel « tt » ; « tts » n'existait pas : la liste des types était vide à l'écran et
    aucune absence ne déclenchait de blocage). Par défaut (rien d'enregistré), toute absence à la journée bloque :
    congés, maladie, maternité, absence non justifiée, longue durée… ; pas les absences à l'heure ni missions / formations. */
@@ -41,7 +41,9 @@ const ACTION_PILOTE = {lire:"visages-lire", envoyer_users:"utilisateurs-envoyer"
 const RANG_ACTION = {retrait:0, envoyer_users:1, envoyer_visages:2, lire:3, reconciliation:4};
 function creer(o){
   const {B, D, audit, journal} = o, PT = () => o.PT(), WORKER = "w-"+process.pid+"-"+crypto.randomBytes(3).toString("hex");
-  const maint = () => new Date().toISOString(), auj = () => maint().slice(0, 10), nid = () => "bq-"+crypto.randomBytes(8).toString("hex");
+  /* 56.33.11 : « aujourd'hui » à l'heure locale du serveur, comme le calcul et le cycle de vie (avant : UTC — entre
+     minuit et 1 h à Tunis, absences et sorties évaluées sur la veille) */
+  const maint = () => new Date().toISOString(), auj = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10), nid = () => "bq-"+crypto.randomBytes(8).toString("hex");
   /* rend la main à la boucle d'événements régulièrement (base intégrée synchrone) : l'interface reste fluide */
   let PAS = 0; const ceder = () => (++PAS % 20 === 0) ? new Promise(r=>setImmediate(r)) : null;
   let CFG = null, BLOQUES = new Set(), CYCLE_EN_COURS = null;
@@ -99,7 +101,7 @@ function creer(o){
     /* un retrait annule les diffusions en attente du même salarié sur le même appareil, et inversement */
     if (j.mat && j.terminal_id){
       if (j.action === "retrait") await B.run("UPDATE bio_sync_queue SET statut='annule', finished_at=?, detail='remplacé par un retrait' WHERE mat=? AND terminal_id=? AND action IN ('envoyer_users','envoyer_visages') AND statut IN ('attente','echec')", maint(), j.mat, j.terminal_id);
-      else if (j.action === "envoyer_users") await B.run("UPDATE bio_sync_queue SET statut='annule', finished_at=?, detail='remplacé par une diffusion' WHERE mat=? AND terminal_id=? AND action='retrait' AND statut IN ('attente','echec')", maint(), j.mat, j.terminal_id);
+      else if (j.action === "envoyer_users") await B.run("UPDATE bio_sync_queue SET statut='annule', finished_at=?, detail='remplacé par une diffusion' WHERE mat=? AND terminal_id=? AND action='retrait' AND statut IN ('attente','echec') AND (version_bio IS NULL OR version_bio NOT LIKE 'ancien-id:%')", maint(), j.mat, j.terminal_id);
     }
     const id = nid();
     await B.run("INSERT INTO bio_sync_queue(id,cle,mat,terminal_id,action,priorite,statut,cree,essais,max_essais,version_bio,source,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -131,12 +133,19 @@ function creer(o){
     await enfilerDiffusion(mat, perimetre(e, terms, rattaches(emps)).filter(t=>t !== source), "visage:"+source);
   }
   /* changement de site, de rattachement ou sortie : retraits (prioritaires) puis ajouts */
+  const a0 = x => x || {};
   async function surChangementEmp(ancien, nouveau){
     const cfg = await config(); if (!cfg.actif || !nouveau) return;
-    const a = ancien || {}, n = nouveau, change = a.siteId !== n.siteId || JSON.stringify(a.rds||[]) !== JSON.stringify(n.rds||[]) || (a.sortie||"") !== (n.sortie||"") || String(a.mat||"") !== String(n.mat||"");
+    /* 56.33.11 : badge, code ou matricule changé — l'ancien identifiant est retiré des appareils et le nouveau envoyé
+       (avant : carte perdue toujours valide sur les appareils en mode « badge », nouvelle carte jamais envoyée) */
+    const ident = ancien && (String(a0(ancien).badge||"") !== String(nouveau.badge||"") || String(a0(ancien).pin||"") !== String(nouveau.pin||"") || String(a0(ancien).mat||"") !== String(nouveau.mat||""));
+    const a = ancien || {}, n = nouveau, change = ident || a.siteId !== n.siteId || JSON.stringify(a.rds||[]) !== JSON.stringify(n.rds||[]) || (a.sortie||"") !== (n.sortie||"");
     if (!change) return;
     const terms = await appareils(cfg), emps = await D.employes(), rat = rattaches(emps);
     const avant = new Set(ancien ? perimetre(a, terms, rat) : []), apres = new Set(perimetre(n, terms, rat));
+    if (ident){ for (const T of terms){ if (!avant.has(T.id)) continue; const vieux = PT().idSurAppareil(T, a), neuf = PT().idSurAppareil(T, n); if (vieux === neuf) continue;
+        await enfiler({mat:String(n.mat), terminal_id:T.id, action:"retrait", priorite:cfg.prioriteRetrait || 1, version_bio:"ancien-id:"+vieux, source:"identifiant"});
+        if (apres.has(T.id) && !BLOQUES.has(String(n.mat))) await enfilerDiffusion(n.mat, [T.id], "identifiant"); } }
     const retirer = Array.from(avant).filter(t=>!apres.has(t)), ajouter = Array.from(apres).filter(t=>!avant.has(t));
     if (retirer.length) await enfilerRetrait(a.mat || n.mat, retirer, "perimetre");
     if (ajouter.length && !BLOQUES.has(String(n.mat))) await enfilerDiffusion(n.mat, ajouter, "perimetre");
@@ -152,15 +161,21 @@ function creer(o){
       const absAuj = (await B.all("SELECT mat, data FROM enreg WHERE coll='abs' AND d=?", a)).map(r=>{ let x = {}; try { x = JSON.parse(r.data); } catch(e){} return {mat:String(r.mat), code:codeDe.get(x.tt) || String(x.tt||"").toUpperCase()}; })
         .filter(x=>tous.has(x.code));
       if (absAuj.length){
-        const mats = Array.from(new Set(absAuj.map(x=>x.mat))), fins = new Map();
-        for (let i = 0; i < mats.length; i += 500){ const l = mats.slice(i, i+500);
-          (await B.all("SELECT mat, MAX(d) f FROM enreg WHERE coll='abs' AND d>=? AND mat IN ("+l.map(()=>"?").join(",")+") GROUP BY mat", a, ...l)).forEach(r=>fins.set(String(r.mat), r.f)); }
+        /* 56.33.11 : fin du blocage = fin de la suite d'absences bloquantes qui commence aujourd'hui (écarts de 3 jours au
+           plus : fin de semaine, jour férié). Avant : dernière absence future de tout type — maladie le 14/10 et congé
+           posé le 20/12 bloquaient l'empreinte jusqu'au 20/12 */
+        const mats = Array.from(new Set(absAuj.map(x=>x.mat))), fins = new Map(), jour = (k, n) => { const d = new Date(k+"T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+        for (let i = 0; i < mats.length; i += 500){ const l = mats.slice(i, i+500), parM = new Map();
+          (await B.all("SELECT mat, d, data FROM enreg WHERE coll='abs' AND d>=? AND d<=? AND mat IN ("+l.map(()=>"?").join(",")+")", a, jour(a, 400), ...l)).forEach(r=>{
+            let x = {}; try { x = JSON.parse(r.data); } catch(e){} const c = codeDe.get(x.tt) || String(x.tt||"").toUpperCase();
+            if (tous.has(c)) (parM.get(String(r.mat)) || parM.set(String(r.mat), new Set()).get(String(r.mat))).add(r.d); });
+          parM.forEach((jours, m)=>{ let f = a, k = a, vide = 0; while (vide <= 3){ k = jour(k, 1); if (jours.has(k)){ f = k; vide = 0; } else vide++; } fins.set(m, f); }); }
         const terms = await appareils(cfg), emps = await D.employes(), rat = rattaches(emps), parMat = new Map(emps.map(e=>[String(e.mat), e]));
         for (const x of absAuj){
           await ceder();
           const fin = fins.get(x.mat) || a, mode = TY.rh.indexOf(x.code) >= 0 ? "rh" : "auto";
           const ex = await B.get("SELECT statut, mode, fin FROM bio_blocages WHERE mat=?", x.mat);
-          if (ex && ex.statut === "actif"){ if (fin > (ex.fin||"")) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", fin, maint(), x.mat); continue; }
+          if (ex && ex.statut === "actif"){ if (fin !== (ex.fin||"")) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", fin, maint(), x.mat); continue; }
           await B.run("INSERT INTO bio_blocages(mat,code,mode,depuis,fin,statut,maj) VALUES(?,?,?,?,?,?,?) ON CONFLICT(mat) DO UPDATE SET code=excluded.code, mode=excluded.mode, depuis=excluded.depuis, fin=excluded.fin, statut='actif', leve_le=NULL, leve_par=NULL, maj=excluded.maj",
             x.mat, x.code, mode, a, fin, "actif", maint());
           BLOQUES.add(x.mat); res.nouveaux++;
@@ -172,6 +187,13 @@ function creer(o){
         }
       }
     }
+    /* 56.33.11 : absence annulée ou raccourcie — un blocage automatique sans absence bloquante aujourd'hui prend fin hier
+       (puis réactivation ci-dessous après le délai de grâce) ; avant, la date de fin ne faisait que reculer */
+    { const a0 = auj(), hier = (()=>{ const d = new Date(a0+"T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
+      const aujBloquants = new Set(); if (tous.size){ const codeDe2 = new Map(typesAbsence(ref).map(t=>[t.id, String(t.code||"").toUpperCase()]));
+        (await B.all("SELECT mat, data FROM enreg WHERE coll='abs' AND d=?", a0)).forEach(r=>{ let x = {}; try { x = JSON.parse(r.data); } catch(e){} if (tous.has(codeDe2.get(x.tt) || String(x.tt||"").toUpperCase())) aujBloquants.add(String(r.mat)); }); }
+      for (const r of await B.all("SELECT mat FROM bio_blocages WHERE statut='actif' AND mode='auto' AND fin >= ?", a0))
+        if (!aujBloquants.has(String(r.mat))) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", hier, maint(), r.mat); }
     /* réactivation automatique : fin d'absence dépassée + délai de grâce */
     const lim = new Date(Date.now() - (cfg.delaiGraceHeures||0) * 3600000).toISOString().slice(0, 10);
     const aLever = await B.all("SELECT mat, fin FROM bio_blocages WHERE statut='actif' AND mode='auto' AND fin < ?", auj());
@@ -276,7 +298,7 @@ function creer(o){
       const mats = g.jobs.map(j=>j.mat).filter(m=>m && m !== "*"), opts = {confirme:true, delaiMs:cfg.delaiEntreActionsSec * 1000};
       try {
         let r;
-        if (g.action === "retrait"){ opts.ids = mats.map(m=>PT().idSurAppareil(T, emps.get(String(m)) || {mat:m})); r = await PT().executer("utilisateurs-retirer", T.id, opts, PT().AUTO); }
+        if (g.action === "retrait"){ opts.ids = g.jobs.filter(j=>j.mat && j.mat !== "*").map(j=>String(j.version_bio||"").indexOf("ancien-id:") === 0 ? String(j.version_bio).slice(10) : PT().idSurAppareil(T, emps.get(String(j.mat)) || {mat:j.mat})); r = await PT().executer("utilisateurs-retirer", T.id, opts, PT().AUTO); }
         else if (g.action === "lire") r = await PT().executer("visages-lire", T.id, opts, PT().AUTO);
         else if (g.action === "reconciliation"){
           r = await PT().executer("utilisateurs-envoyer", T.id, opts, PT().AUTO);

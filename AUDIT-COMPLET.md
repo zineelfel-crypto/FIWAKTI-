@@ -1,0 +1,158 @@
+# FIWAKTI 56.33.11 — audit complet (sécurité, logique métier, modules, exploitation, interface, performances)
+
+## 1. Ce qu'un audit peut garantir, et ce qu'il ne peut pas garantir
+
+Aucun audit ne peut certifier qu'une application est « sûre à 100 % » ou qu'elle ne demandera « aucune vérification
+supplémentaire ». Ce document dit ce qui a été examiné, ce qui a été trouvé et corrigé, les preuves de bon
+fonctionnement, et ce qui reste à vérifier. Restent à vérifier en particulier :
+- les essais sur les vraies pointeuses du client ;
+- la configuration réseau et HTTPS du site.
+
+## 2. Méthode
+
+Cinq revues indépendantes ont été menées en parallèle sur l'ensemble du code, puis tous les constats ont été corrigés
+et retestés sur le banc : PostgreSQL 16, 50 000 salariés, 5,5 millions de badgeages, 2,26 millions de journées
+calculées.
+
+| Revue | Portée |
+|---|---|
+| Couche HTTP | toutes les routes `/api/*` et `/iclock` : authentification, droits, périmètres, CSRF, sessions, fichiers, journaux |
+| Modules | les 10 modules FW-* (BI, Compétences, Évaluation, Formation, HSE, Médical, Migration, Intégration, Recrutement, Visiteurs) |
+| Logique métier | ingestion, fuseaux, pilotes, synchronisation biométrique, cycle de vie des journées, calcul, planificateur, base |
+| Exploitation | installation, mises à jour signées, sauvegardes et restaurations, migrations, disque plein, journaux |
+| Client | injections HTML, attributs, redirections, stockage local, jeton CSRF, modules chargés à la demande |
+
+## 3. Constats et corrections (tous retestés)
+
+### Critiques et hauts
+
+| # | Constat | Correction |
+|---|---|---|
+| 1 | Sauvegarde PostgreSQL : des lignes perdues (clé de pagination partielle), vérification aveugle | clé primaire réelle utilisée, comptes vérifiés sur toutes les tables, marque de fin ; 30 000/30 000 lignes restaurées |
+| 2 | Sauvegarde > 512 Mo : vérification, restauration et reprise impossibles | lecture en flux (691 Mo lus, 146 Mo de mémoire) |
+| 3 | Disque plein pendant une sauvegarde : arrêt du serveur | flux avec gestion d'erreur ; serveur vivant ; fichier partiel supprimé |
+| 4 | SQLite : transactions simultanées en échec, écritures perdues | vraie file d'attente des transactions |
+| 5 | Profil introuvable = droits d'administrateur sur les données | refus par défaut ; l'administrateur reste reconnu par son rôle |
+| 6 | Tout utilisateur pouvait justifier ses propres anomalies | droit de correction du pointage exigé, jamais sur ses propres journées |
+| 7 | Validation d'ajustements et de recalculs hors périmètre | périmètre contrôlé ; recalcul validé par une autre personne que son auteur |
+| 8 | Un responsable validait ses propres journées | refusé ; l'étape RH est faite par une autre personne que l'étape responsable |
+| 9 | Recrutement : candidats, CV et entretiens de tous les sites lisibles | cloisonné par site ; CV et entretiens réservés au droit de saisie |
+| 10 | HSE : taux de fréquence et de gravité divisés par 2 pour un responsable de site ; accidents d'autres sites visibles | calcul corrigé ; visibilité selon la victime ; sites et actions cloisonnés |
+| 11 | Calcul de fond pouvant réécrire une journée corrigée avec l'ancien résultat | invalidations horodatées ; résultat périmé retiré et recalculé |
+| 12 | Fin de blocage biométrique fausse (maladie aujourd'hui + congé en décembre → bloqué 2 mois ; absence annulée → blocage maintenu) | fin = fin des absences consécutives ; levée à l'annulation |
+| 13 | Mise à l'heure ZK et Hikvision dans le fuseau du serveur (1 h d'écart si serveur en UTC) | heure envoyée dans le fuseau de l'appareil ou du site |
+| 14 | ZK Push : effacement de l'appareil sans attendre l'enregistrement des badgeages renvoyés | effacement seulement après accusé de l'appareil, enregistrement complet et 15 s sans envoi |
+| 15 | Injection d'attributs par un identifiant de demande (zone invisible déclenchant une validation) | identifiants contrôlés par le serveur, échappés à l'écran (52 endroits) |
+
+### Moyens et bas (corrigés)
+
+- **Annuaire paginé** : données personnelles non masquées pour un profil « masqué ».
+- **Terminaux** :
+  - liste et état (n° de série, adresses) visibles par tous ;
+  - lecture de la supervision qui écrivait des alertes.
+- **`/iclock`** : sans limite de débit ; jusqu'à 20 Mo lus avant l'identification de l'appareil.
+- **Exports d'états** : sans contrôle du droit « États » ; paramètres non validés (erreur 500).
+- **Divers** :
+  - comptage de tout le personnel accessible sans droit ;
+  - suppression de la page d'accueil administrateur possible sans être administrateur ;
+  - identifiant de session non renouvelé après la double authentification.
+- **Mises à jour** :
+  - paquet plus ancien accepté (retour vers une version vulnérable) ;
+  - paquet incomplet accepté ;
+  - mise à jour lancée sans sauvegarde vérifiée.
+- **Sauvegardes** :
+  - rétention capable de supprimer la dernière sauvegarde restaurable ;
+  - deux sauvegardes dans la même seconde s'écrasaient.
+- **Restauration SQLite interrompue** : base laissée fermée.
+- **Journaux** : sans rotation. Erreur imprévue non journalisée.
+- **Archives des pointeuses ZK** : recopie complète à chaque collecte (≈ 60 Mo/jour/appareil).
+- **Sagem** : heures mal lues (« 4/1/2026 18:30 » → 08:30 ; AM/PM).
+- **Ingestion** :
+  - badgeage « dans le futur » perdu (il passe désormais en revue et peut être rejoué) ;
+  - clôture contrôlée sur la date civile au lieu de la date de travail.
+- **Biométrie** :
+  - nouveau badge ou code non propagé (carte perdue toujours valide) ;
+  - « aujourd'hui » calculé en UTC.
+- **ZK Push** :
+  - commandes de retrait conservées 2 s en mémoire seulement ;
+  - identifiant non transmissible ignoré sans le dire ;
+  - commande refusée par l'appareil jamais signalée.
+- **ZK ancien modèle** : fiches utilisateurs de 28 octets mal lues.
+- **Formation** : clôture d'une session contenant des inscrits hors périmètre.
+- **Visiteurs** : plafond de visites non appliqué en modification.
+- **Migration** : ouverte à un paramétreur limité à un site.
+- **Évaluation** :
+  - compétences hors catalogue acceptées ;
+  - validation possible après la clôture de la campagne.
+- **Intégration** : transitions de statut non contrôlées.
+- **Suivi médical** : petits nombres (1 à 4) pouvant ré-identifier une personne dans le pilotage.
+- **Navigateur** :
+  - copie en clair du référentiel en cas de coupure réseau, jamais effacée ;
+  - jeton CSRF pouvant partir vers une autre origine.
+- **PostgreSQL < 14** : erreur de syntaxe incompréhensible (message clair désormais).
+
+## 4. Vérifié correct (sans modification)
+
+- **Authentification** :
+  - mots de passe scrypt ;
+  - comparaisons en temps constant ;
+  - verrouillage par compte et par adresse, identifiants inconnus compris ;
+  - double authentification sans rejeu.
+- **Sessions et en-têtes** :
+  - sessions aléatoires stockées hachées ;
+  - cookie HttpOnly, SameSite=Strict ;
+  - CSRF sur toutes les écritures ;
+  - CSP stricte.
+- **Injections et fichiers** :
+  - aucune injection SQL (requêtes paramétrées partout) ;
+  - aucune traversée de chemin ;
+  - aucun secret dans les journaux ;
+  - fichiers de données en 0600 et 0700 ;
+  - dépôts de CV contrôlés (type, signature, taille, chiffrement).
+- **Données protégées** :
+  - données médicales réservées au droit médical ;
+  - badgeages bruts et ajustements immuables au niveau de la base (déclencheurs PostgreSQL).
+- **Mises à jour signées** : SHA-256 par fichier, écriture atomique.
+- **Fuseaux horaires** : changements d'heure gérés (heure inexistante, heure ambiguë).
+
+## 5. Preuves (après corrections)
+
+| Contrôle | Résultat |
+|---|---|
+| `node --check` sur les 55 fichiers JavaScript | 0 erreur |
+| Tous les écrans (50) en administrateur, en français, anglais et arabe | 0 erreur JavaScript, chaque clic sous 0,3 s |
+| Écrans d'un responsable de site (16 écrans selon ses droits) | 0 erreur JavaScript |
+| Ingestion sur une installation neuve : 53 cas piégés | résultats identiques à la référence ; seul changement voulu : badgeage futur mis en revue |
+| Ingestion Push, 100 000 badgeages nouveaux, 20 appareils en parallèle | 7 909 badgeages/s (référence : 6 900 à 7 500/s) |
+| Renvoi de badgeages déjà reçus | 19 519/s |
+| Pilotage (BI) | 4,1 s au premier calcul après redémarrage, puis 4 ms |
+| Exploits de l'audit rejoués | tous refusés (403 / 404 / identifiant invalide) |
+| Effacement ZK Push en deux temps (appareil simulé) | rien avant l'accusé ; effacement unique après 15 s |
+| Blocage biométrique (maladie aujourd'hui et J+3, congé à J+60) | fin au J+3 ; levée immédiate à l'annulation |
+| Hikvision, BioStar 2, Sagem (appareils simulés) | collecte, copie de sauvegarde, doublons écartés |
+| Sauvegarde PostgreSQL de 30 000 lignes, restauration | 30 000 lignes ; fichier altéré refusé |
+| Disque plein pendant une sauvegarde | erreur gérée, serveur en service |
+
+## 6. Ce qui reste à vérifier ou à décider
+
+1. **Sur site, le jour de l'installation (indispensable)**. Pour une pointeuse de chaque marque :
+   - diagnostic, collecte, envoi d'un salarié ;
+   - retrait d'un sortant, blocage d'un absent ;
+   - mise à l'heure.
+
+   Les pilotes sont testés contre des appareils simulés conformes aux protocoles publiés, pas contre le matériel du
+   client.
+2. **Signature du paquet et licence** par l'éditeur (clé privée absente du dépôt). `npm ci` avant la construction du
+   paquet.
+3. **Lanceur de production** : il est absent de ce dépôt. C'est lui qui relance le serveur après une mise à jour ou
+   un arrêt ; à fournir par l'installateur de l'éditeur.
+4. **Windows** : droits du dossier `donnees/` à restreindre par l'installateur (le umask Unix n'y a pas d'effet).
+5. **Limites connues, acceptées** :
+   - Retrait ZK Push : la confirmation repose sur l'appareil. Une commande refusée est signalée dans l'audit, et
+     « Vérifier les identifiants » montre tout salarié resté sur un appareil.
+   - Horloge de licence : une date trop en avance au démarrage ne se corrige pas depuis l'application (jeton
+     éditeur à prévoir).
+   - Bibliothèque `xlsx` (module Migration seulement) : failles publiées sans correctif sur npm, exécutée isolée.
+   - Styles en ligne autorisés par la CSP (`style-src 'unsafe-inline'`), nécessaires à l'interface. Les injections
+     d'attributs sont désormais bloquées à la source.
+   - Compteurs « à traiter » de Recrutement et HSE globaux : des nombres seulement, sans nom.

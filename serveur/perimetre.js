@@ -34,7 +34,9 @@ function contexte(doc){
   return {doc, emps, depts, parChef, jour:aujourdhui()};
 }
 function niveauProfil(p){
-  if (!p) return "admin";
+  /* 56.33.11 : profil introuvable (supprimé, jamais attribué) = refus par défaut (avant : « admin », tout le personnel
+     et la réécriture des comptes et des profils) */
+  if (!p) return "simple";
   if (p.niveauMenu && NIV_MENU[p.niveauMenu] !== undefined) return p.niveauMenu;
   const d = p.droits || {};
   if (d.SYS === "config") return "admin";
@@ -91,7 +93,7 @@ function repliGlobalActif(C){
 function perimDirect(C, u){
   const pr = profilEff(C, u), niv = niveauProfil(pr);
   const me = u.empId ? C.emps.find(e=>e.id === u.empId) : null;
-  if (!pr || niv === "admin") return null;
+  if (pr && niv === "admin") return null;
   const set = new Set(me ? [me.mat] : []);
   if (niv === "simple") return set;
   const q = u.perim || {};
@@ -142,7 +144,8 @@ function perimetre(doc, login){
 }
 function droitsDe(profil){ return (profil && profil.droits) || {}; }
 function peutEcrire(profil, cle){
-  if (!profil || niveauProfil(profil) === "admin") return true;
+  if (!profil) return false;
+  if (niveauProfil(profil) === "admin") return true;
   const r = ECRITURE[cle]; if (!r) return false;
   return (RANG[droitsDe(profil)[r[0]]] || 0) >= r[1];
 }
@@ -243,4 +246,4 @@ function fusionUsers(stockes, recus, moi){
     const c = Object.assign({}, u); USER_SOI.forEach(k=>{ if (k in r) c[k] = r[k]; }); return c;
   });
 }
-module.exports = {perimetre, vue, fusionner, niveauProfil, peutEcrire};
+module.exports = {perimetre, vue, fusionner, niveauProfil, peutEcrire, CHAMPS_PERSO, MASQUE};

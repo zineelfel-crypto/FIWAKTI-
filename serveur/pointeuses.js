@@ -102,7 +102,7 @@ function creer(o){
         if (action === "collecte" && Array.isArray(rep2.pointages)){
           if (rep2.purge){ journal("pilote externe "+cfg.id+" : l'appareil "+(T.nom||T.id)+" a été effacé par le pilote lui-même, avant l'enregistrement par FIWAKTI");
             await audit("systeme", "pointeuse.purge_par_pilote", (T.nom||T.id)+" — "+rep2.pointages.length+" badgeage(s), purge faite par le pilote externe "+cfg.id); }
-          const arch = ctx.archiver ? await ctx.archiver(rep2.pointages) : null;
+          const arch = ctx.archiver ? await ctx.archiver(rep2.pointages, {complet:!!rep2.purge}) : null;   /* 56.33.11 : appareil effacé → copie complète */
           return Object.assign({lus:rep2.pointages.length, purge:!!rep2.purge, purgeDemandee:false, archive:arch ? path.basename(arch.fichier) : null}, await ctx.integrer(rep2.pointages));
         }
         return rep2;
@@ -177,6 +177,22 @@ function creer(o){
     try { fs.writeSync(fd, contenu); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     return {fichier, sha256, n:lignes.length};
   }
+  /* 56.33.11 : copie incrémentale. Sans purge, l'appareil garde tout son journal et chaque collecte le relit en entier :
+     tout était archivé de nouveau dans un nouveau .fwa à chaque collecte automatique (≈ 60 Mo par jour et par appareil).
+     Seuls les badgeages postérieurs au plus récent déjà archivé pour cet appareil (même seconde : identifiant pas encore
+     vu) sont copiés ; repère conservé dans meta (« archive_pointeuse:<id> »). Copie complète quand l'appareil est
+     effacé (purge) ; les badgeages restent de toute façon dans raw_events. */
+  const cleArch = b => String(b.utilisateur)+"|"+String(b.horodatage);
+  async function archiverNouveaux(T, lignes, complet){
+    const k = "archive_pointeuse:"+T.id, m = (await meta(k)) || {}, max = String(m.max || ""), vus = new Set(m.cles || []);
+    const l = complet ? lignes : lignes.filter(b=>{ const h = String(b.horodatage || ""); return !h || h > max || (h === max && !vus.has(cleArch(b))); });
+    if (!l.length) return null;
+    const r = await archiver(T, l);
+    let nmax = max; l.forEach(b=>{ const h = String(b.horodatage || ""); if (h > nmax) nmax = h; });
+    const cles = new Set(nmax === max ? vus : []); l.forEach(b=>{ if (String(b.horodatage || "") === nmax) cles.add(cleArch(b)); });
+    try { await meta(k, {max:nmax, cles:Array.from(cles).slice(-1000)}); } catch(e){}
+    return r;
+  }
   /* relecture d'une archive (contrôle, réintégration) */
   function lireArchive(fichier){
     const zlib = require("zlib"), o = JSON.parse(fs.readFileSync(fichier, "utf8"));
@@ -250,8 +266,14 @@ function creer(o){
   async function etatPushCharger(){ Object.assign(PUSH, (await meta("pointeuses_push")) || {}); }
   let sauvePush = null;
   function persisterPush(){ if (sauvePush) return; sauvePush = setTimeout(()=>{ sauvePush = null; meta("pointeuses_push", PUSH).catch(()=>{}); }, 2000); }
+  /* 56.33.11 : écriture immédiate (retraits de sortants : un redémarrage dans les 2 s ne doit pas perdre la commande) */
+  async function persisterPushMaintenant(){ if (sauvePush){ clearTimeout(sauvePush); sauvePush = null; } await meta("pointeuses_push", PUSH); }
   const etatPush = sn => PUSH[sn] || (PUSH[sn] = {cmds:[], seq:0});
-  function commandePush(sn, c){ const e = etatPush(sn); e.seq = (e.seq||0) + 1; e.cmds.push({id:e.seq, c}); persisterPush(); }
+  function commandePush(sn, c){ const e = etatPush(sn); e.seq = (e.seq||0) + 1; e.cmds.push({id:e.seq, c}); persisterPush(); return e.seq; }
+  /* 56.33.11 : effacement des badgeages d'un appareil Push en deux temps — l'appareil renvoie tout son journal ; le
+     « CLEAR LOG » n'est envoyé qu'après son accusé de réception de la demande, tous les envois enregistrés sans erreur
+     et 15 s sans nouvel envoi (avant : effacement envoyé dans le même lot, badgeages renvoyés pas encore enregistrés) */
+  function demanderPurgePush(sn, idQuery, login){ const e = etatPush(sn); e.purge = {query:idQuery, demande:Date.now(), par:login||""}; persisterPush(); }
   function viderPush(sn){ const e = etatPush(sn); e.cmds = []; persisterPush(); }
   const ipNorm = x => String(x||"").replace(/^::ffff:/, "").trim();
   function dansReseau(ip, cidr){
@@ -275,7 +297,10 @@ function creer(o){
   }
   let dernierRefus = {};
   async function refuserPush(sn, ip, motif){
-    const cle = sn+"|"+ip+"|"+motif;
+    /* 56.33.11 : numéros de série inventés regroupés par adresse (une entrée d'audit par adresse et par 10 min, et non
+       une par numéro), table bornée */
+    const cle = (motif === "numéro de série inconnu" ? "?" : sn)+"|"+ip+"|"+motif;
+    if (Object.keys(dernierRefus).length > 5000) dernierRefus = {};
     if (!dernierRefus[cle] || Date.now() - dernierRefus[cle] > 600000){
       dernierRefus[cle] = Date.now();
       journal("push refusé "+sn+" depuis "+ip+" : "+motif);
@@ -296,6 +321,8 @@ function creer(o){
     /* le numéro de série ne suffit pas : l'appel doit venir de l'adresse déclarée de l'appareil (ou d'un réseau autorisé) */
     if (!origineAutorisee(T, ipSrc)){ await refuserPush(sn, ipSrc, "adresse d'origine non autorisée (attendue : "+(T.ip||"réseau autorisé")+")"); return texte(403, "ERROR: forbidden"); }
     if (!debitOk(sn)){ await refuserPush(sn, ipSrc, "débit excessif"); return texte(429, "ERROR: too many requests"); }
+    /* 56.33.11 : corps lu seulement après identification de l'appareil (avant : jusqu'à 20 Mo lus pour tout appelant) */
+    if (typeof corps === "function") corps = await corps();
     const e = etatPush(sn); e.vu = horo(new Date()); e.ip = (req.socket && req.socket.remoteAddress) || "";
     const p = u.pathname.toLowerCase();
     if (p.endsWith("/cdata") && req.method === "GET"){
@@ -312,7 +339,8 @@ function creer(o){
         const l = lignes.map(x=>[x, x.split("\t")]).map(([ligne, x])=>({utilisateur:String(x[0]||"").trim().slice(0, 64), horodatage:String(x[1]||"").trim(), sens:{0:"E", 1:"S", 2:"S", 3:"E", 4:"E", 5:"S"}[x[2]] || "", payload:ligne}));
         let r;
         try { r = await integrer(T, l, "push"); }
-        catch(e){ journal("push "+sn+" : "+e.message); return texte(503, "ERROR: retry later"); }      /* l'appareil garde ses badgeages et les renverra */
+        catch(e2){ journal("push "+sn+" : "+e2.message); if (e.purge){ e.purge = null; persisterPush(); journal("push "+sn+" : effacement annulé (envoi non enregistré)"); } return texte(503, "ERROR: retry later"); }      /* l'appareil garde ses badgeages et les renverra */
+        e.dernierEnvoi = Date.now();
         if (r.invalides) await refuserPush(sn, ipSrc, r.invalides+" badgeage(s) invalide(s) conservé(s) pour examen");
         await audit("pointeuse", "pointeuse.push", T.nom+" : "+l.length+" reçus, "+r.integres+" nouveaux, "+r.doublons+" doublons, "+r.invalides+" invalides");
         return texte(200, "OK: "+l.length);
@@ -342,11 +370,24 @@ function creer(o){
     }
     if (p.endsWith("/getrequest")){
       const info = u.searchParams.get("INFO"); if (info){ const x = info.split(","); e.firmware = x[0] || e.firmware; e.modele = e.modele || ""; }
+      if (e.purge && e.purge.queryFaite && Date.now() - (e.dernierEnvoi || 0) > 15000 && Date.now() - e.purge.queryFaite > 15000){
+        const par = e.purge.par; e.purge = null; commandePush(sn, "CLEAR LOG");
+        journal("push "+sn+" : badgeages renvoyés et enregistrés, effacement de l'appareil envoyé");
+        await audit(par || "systeme", "pointeuse.purge_push", T.nom+" : effacement après renvoi complet et enregistrement des badgeages");
+      }
+      if (e.purge && Date.now() - e.purge.demande > 6 * 3600000){ e.purge = null; persisterPush(); journal("push "+sn+" : effacement abandonné (renvoi non confirmé en 6 h)"); }
       if (!e.cmds.length) return texte(200, "OK");
       const lot = e.cmds.splice(0, 20); e.envoyees = (e.envoyees||[]).concat(lot).slice(-200); persisterPush();
       return texte(200, lot.map(c=>"C:"+c.id+":"+c.c).join("\r\n"));
     }
-    if (p.endsWith("/devicecmd")){ e.retours = (e.retours||[]).concat(String(corps||"").split(/\r?\n/).filter(Boolean)).slice(-200); persisterPush(); return texte(200, "OK"); }
+    if (p.endsWith("/devicecmd")){ const rl = String(corps||"").split(/\r?\n/).filter(Boolean); e.retours = (e.retours||[]).concat(rl).slice(-200);
+      /* 56.33.11 : commande refusée par l'appareil (retour négatif) : journal et audit, jamais silencieuse */
+      for (const x of rl){ const mR = /(?:^|&)ID=(\d+)&Return=(-\d+)/i.exec(x); if (mR){ const c0 = (e.envoyees||[]).find(c=>c.id === Number(mR[1]));
+        journal("push "+sn+" : commande "+mR[1]+" refusée par l'appareil ("+mR[2]+") : "+(c0 ? String(c0.c).slice(0, 80) : "?"));
+        await audit("pointeuse", "pointeuse.push.commande_refusee", T.nom+" : "+(c0 ? String(c0.c).slice(0, 120) : "commande "+mR[1])+" → "+mR[2]); } }
+      if (e.purge && !e.purge.queryFaite) rl.forEach(x=>{ const o = {}; x.split("&").forEach(kv=>{ const i = kv.indexOf("="); if (i > 0) o[kv.slice(0, i).toUpperCase()] = kv.slice(i + 1); });
+        if (Number(o.ID) === e.purge.query){ if (Number(o.RETURN) >= 0) e.purge.queryFaite = Date.now(); else { e.purge = null; journal("push "+sn+" : renvoi refusé par l'appareil, effacement annulé"); } } });
+      persisterPush(); return texte(200, "OK"); }
     return texte(404, "ERROR");
   }
 
@@ -399,16 +440,24 @@ function creer(o){
     /* 56.33.11 : copie de sauvegarde automatique de toute collecte avant enregistrement, quel que soit le pilote (ZK et
        pilotes externes l'écrivent eux-mêmes avant de décider d'une purge : pas de seconde copie) */
     let copie = null;
-    const ctx = {options:options||{},
+    /* 56.33.11 : fuseau de l'appareil (fiche, sinon site, sinon défaut) — celui avec lequel l'ingestion lit ses badgeages ;
+       heures « depuis » / « maintenant » données dans ce fuseau, et non à l'heure locale du serveur (serveur en UTC) */
+    const ING = require("./ingestion.js");
+    const fuseau = await (async ()=>{ let z = T.fuseau;
+      if (!z && T.siteId) try { const ref = await D.referentielLecture() || {}, st = (ref.sites||[]).find(x=>x.id === T.siteId); z = st && st.tz; } catch(e){}
+      try { new Intl.DateTimeFormat("en-GB", {timeZone:z || ING.FUSEAU_DEFAUT}); return z || ING.FUSEAU_DEFAUT; } catch(e){ return ING.FUSEAU_DEFAUT; } })();
+    const horoTz = ms => ING.utcVersLocal(new Date(ms).toISOString(), fuseau);
+    const ctx = {options:options||{}, fuseau,
       integrer:async l=>{
-        if (!copie && action === "collecte" && Array.isArray(l) && l.length){ try { copie = await archiver(T, l); } catch(e){ journal("copie de sauvegarde "+(T.nom||T.id)+" : "+e.message); } }
+        if (!copie && action === "collecte" && Array.isArray(l) && l.length){ try { copie = await archiverNouveaux(T, l, false); } catch(e){ journal("copie de sauvegarde "+(T.nom||T.id)+" : "+e.message); } }
         return Object.assign({archive:copie ? path.basename(copie.fichier) : null}, await integrer(T, l));
       },
-      archiver:async l=>{ copie = await archiver(T, l); return copie; }, utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush,
+      archiver:async (l, opt)=>{ copie = await archiverNouveaux(T, l, !!(opt && opt.complet)); return copie; },
+      utilisateursPour:T2=>utilisateursPour(T2, mats), etatPush, commandePush, viderPush, demanderPurgePush:(sn, id)=>demanderPurgePush(sn, id, login), persisterPushMaintenant,
       /* v56.5 : visages — enregistrement (identifiant de l'appareil → salarié) et visages à envoyer à cet appareil */
       visageRecu:(utilisateur, format, octets, indice)=>visageRecu(T, utilisateur, format, octets, indice),
       visagesPour:(formats)=>visagesPour(T, formats, mats),
-      depuis:T2=>horo(new Date(Date.now() - (Number(T2.joursCollecte)||31)*86400000)), maintenant:()=>horo(new Date())};
+      depuis:T2=>horoTz(Date.now() - (Number(T2.joursCollecte)||31)*86400000), maintenant:()=>horoTz(Date.now())};
     const t0 = Date.now();
     const reseau = e => /ECONNRESET|ETIMEDOUT|EPIPE|ECONNREFUSED|EHOSTUNREACH|ne répond plus|fermée|Pas de réponse/i.test((e.code||"")+" "+e.message);
     try {

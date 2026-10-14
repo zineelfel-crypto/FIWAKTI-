@@ -3,6 +3,8 @@
 Ce document rassemble ce qui a été vérifié et corrigé, ce qui **bloque** encore l'installation, les prérequis et les
 réglages à faire le jour de l'installation. Détails et mesures : `ANALYSE-INSTALLATION.md` (assistant d'installation)
 et `PERFORMANCES-GRAND-EFFECTIF.md` (sections 1 à 14).
+Audit complet de sécurité, de logique métier, des modules et de l'exploitation (constats, corrections, preuves, ce qui
+reste à vérifier sur site) : `AUDIT-COMPLET.md`.
 
 ## 1. Blocages : à lever avant d'installer
 

@@ -121,8 +121,12 @@ function ouvrirSqlite(fichier, dossier){
   const prep = new Map();
   const st = sql => { let p = prep.get(sql); if (!p){ p = d.prepare(sql); prep.set(sql, p); } return p; };
   const als = new AsyncLocalStorage();
-  let verrou = null;
-  const attendre = async () => { while (verrou && !als.getStore()) await verrou; };
+  /* 56.33.11 : file d'attente FIFO des transactions (chaîne de promesses). Auparavant toutes les transactions en attente
+     reprenaient dans la même microtâche à la libération du verrou et s'écrasaient l'une l'autre (« cannot start a
+     transaction within a transaction ») ; une écriture isolée émise entre-temps pouvait ne jamais aboutir. Une requête
+     hors transaction s'exécute d'un bloc (node:sqlite est synchrone) dès qu'aucune transaction n'est ouverte. */
+  let chaine = Promise.resolve(), ouverte = false;
+  const attendre = async () => { while (ouverte && !als.getStore()) await chaine; };
   const B = {
     type:"sqlite", fichier, enTravail(fn){ return fn(); },
     partitions:async ()=>({creees:0, ignorees:[], tables:[]}), lignesParDefaut:async ()=>({}),
@@ -130,15 +134,17 @@ function ouvrirSqlite(fichier, dossier){
     async all(sql, ...a){ await attendre(); return st(sql).all(...a); },
     async run(sql, ...a){ await attendre(); const r = st(sql).run(...a); return {n:r.changes}; },
     async exec(sql){ await attendre(); d.exec(sql); },
-    async transaction(fn){
+    transaction(fn){
       if (als.getStore()) return fn(B);
-      await attendre();
-      let lib; verrou = new Promise(r=>lib = r);
-      d.exec("BEGIN");
-      const ctx = {annul:[]};
-      try { const r = await als.run(ctx, ()=>fn(B)); d.exec("COMMIT"); return r; }
-      catch(e){ try { d.exec("ROLLBACK"); } catch(x){} annuler(ctx); throw e; }
-      finally { verrou = null; lib(); }
+      const p = chaine.then(async ()=>{
+        d.exec("BEGIN"); ouverte = true;
+        const ctx = {annul:[]};
+        try { const r = await als.run(ctx, ()=>fn(B)); d.exec("COMMIT"); return r; }
+        catch(e){ try { d.exec("ROLLBACK"); } catch(x){} annuler(ctx); throw e; }
+        finally { ouverte = false; }
+      });
+      chaine = p.catch(()=>{});
+      return p;
     },
     /* 56.33.11 : action à exécuter si la transaction en cours est annulée (ex. cache mémoire à oublier) */
     siAnnulation(f){ const c = als.getStore(); if (c && c.annul) c.annul.push(f); },
@@ -162,11 +168,37 @@ function ouvrirSqlite(fichier, dossier){
       } catch(e){ return {ok:false, motif:e.message}; }
       finally { try { fs.unlinkSync(tmp); } catch(e){} }
     },
+    /* 56.33.11 : la base en service n'est plus fermée avant que la copie soit complète et lisible. Auparavant : fermeture,
+       WAL supprimé puis copie — une copie en échec (disque plein, fichier illisible) laissait cet objet fermé (erreurs 500
+       jusqu'au redémarrage) et la base tronquée. Désormais : copie dans un fichier voisin, écriture forcée sur le disque,
+       contrôle d'ouverture, puis échange par renommage ; en cas d'échec, l'ancienne base est remise et rouverte ici. */
     async restaurer(f){
+      const neuf = fichier+".restauration", ancien = fichier+".avant-restauration";
+      const nettoyer = x => ["", "-wal", "-shm", "-journal"].forEach(s=>{ try { fs.unlinkSync(x+s); } catch(e){} });
+      nettoyer(neuf);
+      try {
+        fs.copyFileSync(f, neuf);
+        const fd = fs.openSync(neuf, "r+"); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        const x = new DatabaseSync(neuf); try { x.prepare("SELECT COUNT(*) n FROM kv").get(); } finally { x.close(); }
+      } catch(e){ nettoyer(neuf); throw e; }
+      await attendre();
+      try { d.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch(e){}
       d.close();
-      ["-wal","-shm"].forEach(x=>{ try { fs.unlinkSync(fichier+x); } catch(e){} });
-      fs.copyFileSync(f, fichier);
-      return ouvrirSqlite(fichier, dossier);
+      const reprendre = () => { Object.assign(B, ouvrirSqlite(fichier, dossier)); };
+      nettoyer(ancien);
+      try { fs.renameSync(fichier, ancien); }
+      catch(e){ nettoyer(neuf); reprendre(); throw e; }
+      try {
+        /* WAL de l'ancienne base (vide après le point de contrôle) : ne doit jamais être rejoué sur la base restaurée */
+        ["-wal","-shm"].forEach(s=>{ try { fs.renameSync(fichier+s, ancien+s); } catch(e){} });
+        fs.renameSync(neuf, fichier);
+        const R = ouvrirSqlite(fichier, dossier);
+        nettoyer(ancien);
+        return R;
+      } catch(e){
+        try { ["", "-wal", "-shm"].forEach(s=>{ try { fs.unlinkSync(fichier+s); } catch(x){} }); fs.renameSync(ancien, fichier); ["-wal","-shm"].forEach(s=>{ try { fs.renameSync(ancien+s, fichier+s); } catch(x){} }); } catch(x){}
+        nettoyer(neuf); reprendre(); throw e;
+      }
     },
     extension:".db"
   };
@@ -227,7 +259,13 @@ async function ouvrirPg(cfg, dossier){
   /* v56.15 : une connexion inactive coupée par PostgreSQL (arrêt, redémarrage, réseau) ne doit jamais arrêter le serveur :
      l'erreur est signalée, la connexion est écartée et le pool en ouvre une nouvelle à la requête suivante */
   pool.on("error", e=>{ try { process.emitWarning("PostgreSQL : connexion inactive interrompue ("+(e.code||e.message)+")"); } catch(x){} });
-  const c0 = await pool.connect(); c0.release();
+  const c0 = await pool.connect();
+  /* 56.33.11 : PostgreSQL 14 ou plus (déclencheurs « CREATE OR REPLACE TRIGGER ») — message clair au lieu d'une erreur
+     de syntaxe à la création du schéma */
+  try { const v = Number((await c0.query("SELECT current_setting('server_version_num') v")).rows[0].v);
+    if (v && v < 140000){ c0.release(); await pool.end().catch(()=>{}); await poolTravaux.end().catch(()=>{}); throw new Error("PostgreSQL "+Math.floor(v/10000)+" détecté : FIWAKTI exige PostgreSQL 14 ou plus (16 conseillé)."); }
+  } catch(e){ if (/exige PostgreSQL/.test(e.message)) throw e; }
+  c0.release();
   for (const s of schema("pg")) await pool.query(s);
   /* v56.2 : colonne « mois » (installations antérieures, tables non partitionnées) et partitions mensuelles */
   await creerDefauts((s, p)=>pool.query(s, p));
@@ -267,27 +305,45 @@ async function ouvrirPg(cfg, dossier){
     async taille(){ const r = await pool.query("SELECT pg_database_size(current_database()) t"); return Number(r.rows[0].t); },
     /* sauvegarde logique : chaque table en lignes JSON compressées ; indépendante de pg_dump */
     async exporter(dest){
+      /* 56.33.11 : gzip → fichier par stream.pipeline : une erreur d'écriture (disque plein) rejette la sauvegarde au lieu
+         d'arrêter le serveur (aucun écouteur « error » sur le fichier pendant l'export) ; fichier partiel supprimé */
       const gz = zlib.createGzip({level:6}), out = fs.createWriteStream(dest);
-      gz.pipe(out);
-      const ecrire = s => new Promise(r=>{ if (!gz.write(s)) gz.once("drain", r); else r(); });
-      await ecrire(JSON.stringify({format:"fiwakti-pg-1", tables:TABLES})+"\n");
-      for (const t of TABLES){
-        await ecrire(JSON.stringify({table:t})+"\n");
-        /* 56.33.9 : lecture par lots en avançant sur la clé (et non plus par OFFSET, de plus en plus lent), sur la réserve
-           à délai long : la sauvegarde d'une base de plusieurs centaines de milliers de badgeages était annulée au bout
-           de 30 s (« annulation de la requête à cause du délai écoulé »), ce qui bloquait aussi les mises à jour */
-        const cols = String(CLES[t] || "id").split(",").map(x=>x.trim()).filter(Boolean), lot = 20000, db = poolTravaux;
-        let dernier = null;
-        for (;;){
-          const cond = dernier ? " WHERE ("+cols.join(", ")+") > ("+cols.map((c, i)=>"$"+(i+1)).join(", ")+")" : "";
-          const r = await db.query("SELECT * FROM "+t+cond+" ORDER BY "+cols.join(", ")+" LIMIT "+lot, dernier || []);
-          if (!r.rows.length) break;
-          let buf = ""; for (const row of r.rows) buf += JSON.stringify(row)+"\n";
-          await ecrire(buf); const z = r.rows[r.rows.length-1]; dernier = cols.map(c=>z[c]);
-          if (r.rows.length < lot) break;
+      const fini = require("stream").promises.pipeline(gz, out); fini.catch(()=>{});
+      const ecrire = s => new Promise((ok, ko)=>{
+        if (gz.destroyed) return ko(new Error("Écriture de la sauvegarde interrompue."));
+        if (gz.write(s)) return ok();
+        const fin = f => (...a)=>{ gz.off("drain", d); gz.off("error", e); gz.off("close", c); f(...a); };
+        const d = fin(ok), e = fin(ko), c = fin(()=>ko(new Error("Écriture de la sauvegarde interrompue.")));
+        gz.on("drain", d); gz.on("error", e); gz.on("close", c);
+      });
+      /* 56.33.11 : nombre de lignes écrites par table, inscrit en fin de fichier et contrôlé à la relecture */
+      const lignes = {};
+      try {
+        await ecrire(JSON.stringify({format:"fiwakti-pg-1", tables:TABLES, fin:true})+"\n");
+        for (const t of TABLES){
+          await ecrire(JSON.stringify({table:t})+"\n");
+          /* 56.33.9 : lecture par lots en avançant sur la clé (et non plus par OFFSET, de plus en plus lent), sur la réserve
+             à délai long : la sauvegarde d'une base de plusieurs centaines de milliers de badgeages était annulée au bout
+             de 30 s (« annulation de la requête à cause du délai écoulé »), ce qui bloquait aussi les mises à jour */
+          const cols = await clePagination(poolTravaux, t), lot = 20000, db = poolTravaux;
+          let dernier = null; lignes[t] = 0;
+          for (;;){
+            const cond = dernier ? " WHERE ("+cols.join(", ")+") > ("+cols.map((c, i)=>"$"+(i+1)).join(", ")+")" : "";
+            const r = await db.query("SELECT * FROM "+t+cond+" ORDER BY "+cols.join(", ")+" LIMIT "+lot, dernier || []);
+            if (!r.rows.length) break;
+            /* 56.33.11 : clé non unique = lignes perdues en limite de lot (reprise « après » la dernière valeur) : refus */
+            for (let i = 1; i < r.rows.length; i++) if (cols.every(c=>String(r.rows[i][c]) === String(r.rows[i-1][c])))
+              throw new Error("Sauvegarde : clé de lecture non unique pour la table "+t+" ("+cols.join(", ")+").");
+            let buf = ""; for (const row of r.rows) buf += JSON.stringify(row)+"\n";
+            await ecrire(buf); lignes[t] += r.rows.length; const z = r.rows[r.rows.length-1]; dernier = cols.map(c=>z[c]);
+            if (r.rows.length < lot) break;
+          }
         }
-      }
-      await new Promise((ok, ko)=>{ out.on("finish", ok); out.on("error", ko); gz.end(); });
+        /* fin de fichier : une ligne « table » à un seul champ, que les versions antérieures lisent comme une table vide */
+        await ecrire(JSON.stringify({table:FIN+JSON.stringify(lignes)})+"\n");
+        gz.end(); await fini;
+      } catch(e){ gz.destroy(); const cause = await fini.then(()=>null, x=>x); try { if (fs.lstatSync(dest).isFile()) fs.unlinkSync(dest); } catch(x){}
+        throw /interrompue/.test(e.message) && cause ? cause : e; }
       return dest;
     },
     /* restauration d'essai dans un schéma temporaire, puis suppression */
@@ -299,23 +355,28 @@ async function ouvrirPg(cfg, dossier){
         await c.query("SET search_path TO "+sch);
         for (const s of schema("pg")) await c.query(s.replace(/ON (\w+)\(/, "ON "+sch+".$1(").replace(/INDEX IF NOT EXISTS (\w+)/, "INDEX IF NOT EXISTS "+sch+"_$1"));
         await creerDefauts((s, p)=>c.query(s, p));
-        const n = await chargerFichier(c, f, sch);
+        const lu = await chargerFichier(c, f, sch);
         const cpt = {};
         for (const t of TABLES){ const r = await c.query("SELECT COUNT(*) n FROM "+sch+"."+t); cpt[t] = Number(r.rows[0].n); }
         let illisibles = 0;
         (await c.query("SELECT valeur FROM "+sch+".kv")).rows.forEach(r=>{ try { JSON.parse(r.valeur); } catch(e){ illisibles++; } });
         for (const t of ["kv","enreg","comptes"]) if (attendus && attendus[t] !== undefined && cpt[t] !== attendus[t]) return {ok:false, motif:t+" : "+cpt[t]+" lignes au lieu de "+attendus[t]};
+        /* 56.33.11 : toutes les tables exportées (et plus seulement kv, enreg, comptes) : lignes restaurées = lignes écrites */
+        if (lu.lignes) for (const t of Object.keys(lu.lignes)) if (cpt[t] !== undefined && cpt[t] !== lu.lignes[t]) return {ok:false, motif:t+" : "+cpt[t]+" lignes restaurées au lieu de "+lu.lignes[t]};
         if (illisibles) return {ok:false, motif:illisibles+" document(s) illisible(s)"};
         return {ok:true, lignes:cpt};
       } catch(e){ return {ok:false, motif:e.message}; }
-      finally { try { await c.query("SET search_path TO public"); await c.query("DROP SCHEMA IF EXISTS "+sch+" CASCADE"); } catch(e){} c.release(); }
+      finally { try { await c.query("RESET search_path"); /* 56.33.11 : valeur de la connexion (et non « public » imposé) */ await c.query("DROP SCHEMA IF EXISTS "+sch+" CASCADE"); } catch(e){} c.release(); }
     },
     async restaurer(f){
       const c = await pool.connect();
       try {
         await c.query("BEGIN");
         for (const t of TABLES) await c.query("TRUNCATE "+t+(t === "audit" ? " RESTART IDENTITY" : ""));
-        await chargerFichier(c, f, "public");
+        /* 56.33.11 : schéma en service (search_path de la connexion), et non « public » imposé : une base installée dans un
+           autre schéma voyait ses tables vidées puis la restauration écrite ailleurs (ou refusée) */
+        const sch = (await c.query("SELECT current_schema() s")).rows[0].s;
+        await chargerFichier(c, f, '"'+String(sch).replace(/"/g, '""')+'"');
         await c.query("SELECT setval(pg_get_serial_sequence('audit','id'), COALESCE((SELECT MAX(id) FROM audit), 0) + 1, false)");
         await c.query("COMMIT");
       } catch(e){ await c.query("ROLLBACK"); throw e; }
@@ -326,28 +387,61 @@ async function ouvrirPg(cfg, dossier){
   };
   return B;
 }
+/* 56.33.11 : marque de fin de sauvegarde (nombre de lignes par table) */
+const FIN = "#fin ";
+/* 56.33.11 : clé de lecture par lots — la clé déclarée si elle couvre la clé primaire, sinon la clé primaire réelle (lue
+   dans le catalogue). Une clé déclarée partielle (bio_presence « terminal_id » pour (terminal_id, mat)) faisait sauter
+   toutes les lignes de même valeur en limite de lot : 30 000 lignes → 20 000 sauvegardées, vérification « ok ». */
+async function clePagination(db, t){
+  const decl = String(CLES[t] || "id").split(",").map(x=>x.trim()).filter(Boolean);
+  let pk = [];
+  try { pk = (await db.query("SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = to_regclass($1) AND i.indisprimary ORDER BY array_position(i.indkey::int2[], a.attnum)", [t])).rows.map(r=>r.attname); } catch(e){}
+  return !pk.length || pk.every(c=>decl.indexOf(c) >= 0) ? decl : pk;
+}
+/* 56.33.11 : lecture en flux, ligne à ligne. Auparavant tout le fichier décompressé était converti en une seule chaîne :
+   au-delà d'environ 512 Mo (ERR_STRING_TOO_LONG), vérification, restauration et reprise après sinistre échouaient. */
+async function* lignesGz(f){
+  const src = fs.createReadStream(f), z = zlib.createGunzip(), dec = new (require("string_decoder").StringDecoder)("utf8");
+  src.on("error", e=>z.destroy(e)); src.pipe(z);
+  let reste = "";
+  try {
+    for await (const m of z){
+      const l = (reste + dec.write(m)).split("\n"); reste = l.pop();
+      for (const x of l) yield x;
+    }
+    reste += dec.end(); if (reste) yield reste;
+  } finally { src.destroy(); z.destroy(); }
+}
 async function chargerFichier(c, f, sch){
-  const texte = zlib.gunzipSync(fs.readFileSync(f)).toString("utf8");
-  let table = null, cols = null, lot = [], n = 0;
+  let table = null, cols = null, lot = [], n = 0, entete = null, fin = null, i = 0;
+  const lus = {};
   const vider = async () => {
     if (!lot.length) return;
     const vals = [], ph = [];
     lot.forEach((row, i)=>{ ph.push("("+cols.map((_, j)=>"$"+(i*cols.length+j+1)).join(",")+")"); cols.forEach(k=>vals.push(row[k])); });
     await c.query("INSERT INTO "+sch+"."+table+" ("+cols.join(",")+") VALUES "+ph.join(","), vals);
-    n += lot.length; lot = [];
+    n += lot.length; lus[table] = (lus[table] || 0) + lot.length; lot = [];
   };
-  let debut = 0;
-  const lignes = texte.split("\n");
-  for (let i = 1; i < lignes.length; i++){
-    const l = lignes[i]; if (!l) continue;
+  for await (const l of lignesGz(f)){
+    if (i++ === 0){ try { entete = JSON.parse(l); } catch(e){} continue; }
+    if (!l) continue;
     const o = JSON.parse(l);
-    if (o && o.table && Object.keys(o).length === 1){ await vider(); table = o.table; cols = null; continue; }
+    if (o && o.table && Object.keys(o).length === 1){
+      await vider();
+      if (String(o.table).indexOf(FIN) === 0){ fin = JSON.parse(o.table.slice(FIN.length)); table = null; cols = null; continue; }
+      if (!/^\w+$/.test(o.table)) throw new Error("Sauvegarde illisible : nom de table invalide.");
+      table = o.table; cols = null; lus[table] = lus[table] || 0; continue;
+    }
+    if (!table) throw new Error("Sauvegarde illisible : ligne hors table.");
     if (!cols) cols = Object.keys(o);
     lot.push(o);
     if (lot.length * cols.length >= 30000) await vider();
   }
   await vider();
-  return n;
+  /* 56.33.11 : fichier tronqué ou incomplet détecté (les sauvegardes antérieures, sans marque de fin, restent lisibles) */
+  if (entete && entete.fin && !fin) throw new Error("Sauvegarde incomplète : marque de fin absente.");
+  if (fin) for (const t of Object.keys(fin)) if ((lus[t] || 0) !== fin[t]) throw new Error("Sauvegarde incohérente : "+t+" : "+(lus[t] || 0)+" lignes lues au lieu de "+fin[t]+".");
+  return {n, lignes:fin, lus};
 }
 /* copie complète d'une base vers une autre (passage de SQLite à PostgreSQL), par lots */
 const CLES = {kv:"cle", comptes:"login", sessions:"id", audit:"id", meta:"k", bases:"id", enreg:"coll, id", calc_jour:"mat, d",
@@ -378,4 +472,4 @@ async function copier(src, dst, progression){
   if (dst.type === "pg") await dst.exec("SELECT setval(pg_get_serial_sequence('audit','id'), COALESCE((SELECT MAX(id) FROM audit), 0) + 1, false)");
   return n;
 }
-module.exports = {ouvrir, copier, TABLES, ajouterModule, schema, PARTITIONNEES};
+module.exports = {ouvrir, copier, TABLES, ajouterModule, schema, PARTITIONNEES, _chargerFichier:chargerFichier};

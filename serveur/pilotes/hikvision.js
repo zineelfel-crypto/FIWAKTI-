@@ -20,7 +20,14 @@ function typesEvenements(T){ const l = String(T.evenements||"").split(/[;, ]+/).
 const iso = d => { const p = n => String(n).padStart(2, "0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); };
 /* v56.31 : décalage horaire réel du serveur (avant : « +01:00 » écrit en dur — faux en heure d'été, en France notamment) */
 const tz = d => { const m = -d.getTimezoneOffset(), a = Math.abs(m); return (m >= 0 ? "+" : "-")+String(Math.floor(a/60)).padStart(2, "0")+":"+String(a%60).padStart(2, "0"); };
-module.exports = {typesEvenements,
+/* 56.33.11 : heure et décalage dans le fuseau de l'appareil (ctx.fuseau : fuseau de la pointeuse ou de son site) et non
+   celui du serveur — un serveur en UTC décalait d'une heure tous les badgeages après une mise à l'heure */
+function partiesTz(d, fz){ const o = {}; new Intl.DateTimeFormat("en-GB", {timeZone:fz, hourCycle:"h23", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"})
+  .formatToParts(d).forEach(p=>{ o[p.type] = p.value; }); return o; }
+const isoZ = (d, fz) => { if (!fz) return iso(d); const o = partiesTz(d, fz); return o.year+"-"+o.month+"-"+o.day+"T"+(o.hour === "24" ? "00" : o.hour)+":"+o.minute+":"+o.second; };
+const tzZ = (d, fz) => { if (!fz) return tz(d); const o = partiesTz(d, fz), m = Math.round((Date.UTC(+o.year, +o.month-1, +o.day, +o.hour % 24, +o.minute, +o.second) - Math.floor(d.getTime()/1000)*1000) / 60000), a = Math.abs(m);
+  return (m >= 0 ? "+" : "-")+String(Math.floor(a/60)).padStart(2, "0")+":"+String(a%60).padStart(2, "0"); };
+module.exports = {typesEvenements, isoZ, tzZ,
   id:"hikvision", nom:"Hikvision — ISAPI (HTTP)",
   marques:["Hikvision", "HiLook", "Ezviz (gamme pro)"], modeles:"DS-K1T, DS-K1A, MinMoe et terminaux compatibles ISAPI",
   capacites:["diagnostic","info","collecte","utilisateurs-lire","utilisateurs-envoyer","synchro-heure","redemarrer","visages-lire","visages-envoyer","utilisateurs-retirer"],
@@ -34,7 +41,7 @@ module.exports = {typesEvenements,
     if (action === "synchro-heure"){
       const x = await appel(T, S, "GET", "/ISAPI/System/time");
       const avant = xml(x, "localTime"), ecart = avant ? Math.round((Date.now() - new Date(avant).getTime())/1000) : null;
-      const corps = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Time><timeMode>manual</timeMode><localTime>"+iso(new Date())+"</localTime></Time>";
+      const corps = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Time><timeMode>manual</timeMode><localTime>"+isoZ(new Date(), ctx.fuseau)+"</localTime></Time>";
       const {digest:dg} = require("./http-util.js");
       const r = await dg(base(T)+"/ISAPI/System/time", {method:"PUT", headers:{"Content-Type":"application/xml"}}, corps, (S&&S.utilisateur)||T.identifiant||"admin", (S&&S.mdp)||"");
       if (r.statut >= 400) throw new Error("Mise à l'heure refusée ("+r.statut+").");
@@ -49,7 +56,7 @@ module.exports = {typesEvenements,
         let pos = 0;
         for (let g = 0; g < 500; g++){
           const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/AccessControl/AcsEvent?format=json",
-            {AcsEventCond:{searchID:"fiwakti-"+minor, searchResultPosition:pos, maxResults:100, major:5, minor, startTime:iso(depuis)+tz(depuis), endTime:iso(fin)+tz(fin)}}));
+            {AcsEventCond:{searchID:"fiwakti-"+minor, searchResultPosition:pos, maxResults:100, major:5, minor, startTime:isoZ(depuis, ctx.fuseau)+tzZ(depuis, ctx.fuseau), endTime:isoZ(fin, ctx.fuseau)+tzZ(fin, ctx.fuseau)}}));
           const ev = (j.AcsEvent && j.AcsEvent.InfoList) || [];
           ev.forEach(e=>{ if (!e.employeeNoString) return;
             const cle = e.serialNo != null ? "n"+e.serialNo : e.employeeNoString+"|"+e.time; if (vus.has(cle)) return; vus.add(cle);

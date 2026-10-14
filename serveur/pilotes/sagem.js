@@ -20,7 +20,16 @@ function dateISO(v, fmt){ v = String(v||"").trim(); let m;
   if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/.exec(v))){ const y = m[3].length === 2 ? "20"+m[3] : m[3]; const [j, mo] = fmt === "mdy" ? [m[2], m[1]] : [m[1], m[2]];
     return y+"-"+String(mo).padStart(2, "0")+"-"+String(j).padStart(2, "0"); }
   return null; }
-function heure(v){ const m = /(\d{1,2})[:hH.](\d{2})(?::(\d{2}))?/.exec(String(v||"")); return m ? m[1].padStart(2, "0")+":"+m[2]+":"+(m[3]||"00") : null; }
+/* 56.33.11 : heure 0–23 (rejet au-delà), secondes 0–59, AM/PM pris en compte (« 6:30:00 PM » donnait « 30:00:00 ») */
+function heure(v){ const m = /(\d{1,2})[:hH.](\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?/.exec(String(v||"")); if (!m) return null;
+  let h = +m[1]; const mi = +m[2], s = +(m[3]||0), ap = (m[4]||"").toUpperCase();
+  if (ap){ if (h < 1 || h > 12) return null; h = h % 12 + (ap === "PM" ? 12 : 0); }
+  if (h > 23 || mi > 59 || s > 59) return null;
+  return String(h).padStart(2, "0")+":"+String(mi).padStart(2, "0")+":"+String(s).padStart(2, "0"); }
+/* date et heure dans une même colonne : l'heure est lue après la date reconnue (avant : à partir du 11e caractère,
+   faux pour « 4/1/2026 18:30 » ou « 2026-1-5 18:30 », lus 08:30) */
+const DATE_RE = /^\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})/;
+function heureApresDate(v){ const m = DATE_RE.exec(String(v||"")); return heure(m ? String(v).slice(m[0].length) : v); }
 /* sens : codes texte usuels (IN / OUT, Entrée / Sortie) et touches de fonction réglables (ex. « F1=E;F2=S ») */
 function sensDe(v, table){ const s = String(v||"").trim(); if (!s) return "";
   if (table && Object.prototype.hasOwnProperty.call(table, s.toUpperCase())) return table[s.toUpperCase()];
@@ -37,7 +46,7 @@ function analyser(texte, T, nomFichier){
     throw new Error("Colonnes non reconnues dans "+nomFichier+" : réglez « Colonnes du fichier » (ex. identifiant=1;date=2;heure=3;sens=4).");
   const passages = []; let rejets = 0;
   lignes.slice(aEntete ? 1 : 0).forEach(l=>{ const c = decouper(l, sep), id = String(c[col.identifiant]||"").trim();
-    let d = null, h = null; if (col.horodatage !== undefined){ const v = String(c[col.horodatage]||""); d = dateISO(v, T.formatDate); h = heure(v.slice(10)) || heure(v); } else { d = dateISO(c[col.date], T.formatDate); h = heure(c[col.heure]); }
+    let d = null, h = null; if (col.horodatage !== undefined){ const v = String(c[col.horodatage]||""); d = dateISO(v, T.formatDate); h = heureApresDate(v); } else { d = dateISO(c[col.date], T.formatDate); h = heure(c[col.heure]); }
     if (!id || !d || !h){ rejets++; return; }
     passages.push({utilisateur:id, horodatage:d+" "+h, sens:col.sens !== undefined ? sensDe(c[col.sens], table) : "",
       source_event_id:"sagem:"+crypto.createHash("sha1").update(String(T.id)+"|"+l.trim()).digest("hex").slice(0, 24),
@@ -101,5 +110,5 @@ module.exports = {
     }
     throw new Error("Action non prise en charge par ce pilote : "+action);
   },
-  _interne:{analyser, sensDe, dateISO}
+  _interne:{analyser, sensDe, dateISO, heure, heureApresDate}
 };

@@ -43,7 +43,13 @@ function creer(o){
     PREP = {tous, texte, parNom, parMat, pos:new Map(tous.map((e, i)=>[e, i]))};
     return PREP;
   }
-  async function perimetre(login){ const ref = await (D.referentielLecture || D.referentiel)() || {}; const {P, emps} = await D.perimetreDe(ref, login); return {P, emps:emps.filter(e=>P.set === null || P.set.has(String(e.mat)))}; }
+  /* 56.33.11 : profil « données personnelles masquées » appliqué aussi à l'annuaire paginé (fiche, lot, fiches complètes),
+     comme au document filtré (avant : CIN, e-mail, badge… en clair par /api/v1/employes) */
+  const PERIM = require("./perimetre.js");
+  const masquer = e => { const c = Object.assign({}, e); PERIM.CHAMPS_PERSO.forEach(k=>{ if (c[k]) c[k] = PERIM.MASQUE; }); return c; };
+  async function perimetre(login){ const ref = await (D.referentielLecture || D.referentiel)() || {}; const {P, emps} = await D.perimetreDe(ref, login);
+    const l = emps.filter(e=>P.set === null || P.set.has(String(e.mat)));
+    return {P, emps:P.profil && P.profil.persoMasque ? l.map(masquer) : l}; }
   function filtrer(l, q, tous){
     if (q.site) l = l.filter(e=>e.siteId === q.site);
     if (q.dept) l = l.filter(e=>e.deptId === q.dept);

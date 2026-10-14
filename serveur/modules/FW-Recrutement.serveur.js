@@ -79,6 +79,14 @@ function creer(o){
     if (rang < 1) return erreur(res, 403, "Droit de consultation des salariés requis.");
     const q = Object.fromEntries(u.searchParams.entries());
     const ecrire = rang >= 2, decider = rang >= 3;
+    /* 56.33.11 : périmètre — un compte limité ne voit que les postes des sites de son périmètre (un poste sans site
+       reste réservé au périmètre global), leurs candidatures, et les candidats qui y ont postulé ou qu'il a saisis */
+    const sites = P.set === null ? null : new Set((await D.employes()).filter(e=>P.set.has(String(e.mat))).map(e=>e.siteId).filter(Boolean));
+    const sitesSql = col => sites === null ? {sql:"", a:[]} : {sql:" AND "+col+" IN ("+(Array.from(sites).map(()=>"?").join(",") || "''")+")", a:Array.from(sites)};
+    const posteVu = po => !!po && (sites === null || (!!po.site_id && sites.has(po.site_id)));
+    const candidatureVue = async cid => { const s = sitesSql("p.site_id"); return cid ? await B.get("SELECT a.*, p.statut poste_statut FROM rec_candidatures a JOIN rec_postes p ON p.id=a.poste_id WHERE a.id=?"+s.sql, String(cid), ...s.a) : null; };
+    const candidatVu = async cid => { if (sites === null) return !!await B.get("SELECT 1 FROM rec_candidats WHERE id=?", String(cid||""));
+      const s = sitesSql("p.site_id"); return !!await B.get("SELECT 1 FROM rec_candidats c WHERE c.id=? AND (c.par=? OR EXISTS (SELECT 1 FROM rec_candidatures a JOIN rec_postes p ON p.id=a.poste_id WHERE a.candidat_id=c.id"+s.sql+"))", String(cid||""), C.login, ...s.a); };
     if (p === "/api/v1/recrutement/parametres" && req.method === "GET") return json(res, 200, {conservationMois:await conservation(), durees:DUREES});
     if (p === "/api/v1/recrutement/parametres" && req.method === "POST"){
       if (rang < 4) return erreur(res, 403, "Réservé au paramétrage.");
@@ -90,7 +98,7 @@ function creer(o){
     /* postes */
     if (p === "/api/v1/recrutement/postes" && req.method === "GET"){
       const st = q.statut === "clos" ? "clos" : q.statut === "tous" ? null : "ouvert", {off, lim} = page(q);
-      const w = st ? " WHERE statut=?" : "", a = st ? [st] : [];
+      const ps = sitesSql("site_id"), w = " WHERE 1=1"+(st ? " AND statut=?" : "")+ps.sql, a = (st ? [st] : []).concat(ps.a);
       const total = Number((await B.get("SELECT COUNT(*) n FROM rec_postes"+w, ...a)).n);
       const l = await B.all("SELECT p.*, (SELECT COUNT(*) FROM rec_candidatures c WHERE c.poste_id=p.id) candidatures, (SELECT COUNT(*) FROM rec_candidatures c WHERE c.poste_id=p.id AND c.etape='retenu') retenus FROM rec_postes p"+w+" ORDER BY ouvert_le DESC LIMIT "+lim+" OFFSET "+off, ...a);
       return json(res, 200, {total, lignes:l});
@@ -99,6 +107,7 @@ function creer(o){
       if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
       const b = await corpsJson(req), intit = String(b.intitule||"").trim().slice(0, 120);
       if (!intit) return erreur(res, 400, "Intitulé obligatoire.");
+      if (sites !== null && !(b.siteId && sites.has(b.siteId))) return erreur(res, 400, "Site de votre périmètre obligatoire."); /* 56.33.11 */
       const i = id("rp"); await B.run("INSERT INTO rec_postes(id,intitule,fonction,site_id,dept_id,nb,statut,description,ouvert_le,par) VALUES(?,?,?,?,?,?,?,?,?,?)",
         i, intit, String(b.fonction||"").slice(0, 80), b.siteId||null, b.deptId||null, Math.max(1, Math.min(500, +b.nb||1)), "ouvert", String(b.description||"").slice(0, 4000), maint(), C.login);
       await audit(C.login, "recrutement.poste", "ouvert : "+intit, ip); return json(res, 200, {ok:true, id:i});
@@ -106,15 +115,18 @@ function creer(o){
     const mp = /^\/api\/v1\/recrutement\/postes\/([^/]+)\/(clore|rouvrir)$/.exec(p);
     if (mp && req.method === "POST"){
       if (!decider) return erreur(res, 403, "Droit de validation requis.");
+      if (!posteVu(await B.get("SELECT * FROM rec_postes WHERE id=?", mp[1]))) return erreur(res, 404, "Poste introuvable."); /* 56.33.11 */
       await B.run("UPDATE rec_postes SET statut=?, clos_le=? WHERE id=?", mp[2] === "clore" ? "clos" : "ouvert", mp[2] === "clore" ? maint() : null, mp[1]);
       await audit(C.login, "recrutement.poste", mp[2]+" "+mp[1], ip); return json(res, 200, {ok:true});
     }
     /* candidats */
     if (p === "/api/v1/recrutement/candidats" && req.method === "GET"){
       const {off, lim} = page(q), s = String(q.q||"").trim().toLowerCase();
-      const w = s ? " WHERE lower(nom || ' ' || COALESCE(prenom,'') || ' ' || COALESCE(email,'')) LIKE ?" : "", a = s ? ["%"+s+"%"] : [];
-      const total = Number((await B.get("SELECT COUNT(*) n FROM rec_candidats"+w, ...a)).n);
-      const l = await B.all("SELECT c.*, (SELECT COUNT(*) FROM rec_cv v WHERE v.candidat_id=c.id) cv FROM rec_candidats c"+w+" ORDER BY cree DESC LIMIT "+lim+" OFFSET "+off, ...a);
+      const ps = sitesSql("p.site_id"), w = " WHERE 1=1"+(s ? " AND lower(c.nom || ' ' || COALESCE(c.prenom,'') || ' ' || COALESCE(c.email,'')) LIKE ?" : "")
+        +(sites === null ? "" : " AND (c.par=? OR EXISTS (SELECT 1 FROM rec_candidatures a JOIN rec_postes p ON p.id=a.poste_id WHERE a.candidat_id=c.id"+ps.sql+"))");
+      const a = (s ? ["%"+s+"%"] : []).concat(sites === null ? [] : [C.login, ...ps.a]);
+      const total = Number((await B.get("SELECT COUNT(*) n FROM rec_candidats c"+w, ...a)).n);
+      const l = await B.all("SELECT c.*, (SELECT COUNT(*) FROM rec_cv v WHERE v.candidat_id=c.id) cv FROM rec_candidats c"+w+" ORDER BY c.cree DESC LIMIT "+lim+" OFFSET "+off, ...a);
       return json(res, 200, {total, lignes:l});
     }
     if (p === "/api/v1/recrutement/candidats" && req.method === "POST"){
@@ -132,7 +144,7 @@ function creer(o){
         if (!attendu) return erreur(res, 400, "CV refusé : le contenu du fichier ne correspond pas à son type.");
         if (!/\.(pdf|png|jpe?g)$/i.test(String(b.cv.nom||""))) return erreur(res, 400, "CV refusé : extension non autorisée.");
         cvBuf = buf; }
-      if (b.posteId && !await B.get("SELECT 1 FROM rec_postes WHERE id=? AND statut='ouvert'", String(b.posteId))) return erreur(res, 400, "Poste ouvert obligatoire.");
+      if (b.posteId && !posteVu(await B.get("SELECT * FROM rec_postes WHERE id=? AND statut='ouvert'", String(b.posteId)))) return erreur(res, 400, "Poste ouvert obligatoire.");
       const i = id("rc"), cvChiffre = cvBuf ? chiffrer(cvBuf) : null;
       await B.transaction(async ()=>{
         await B.run("INSERT INTO rec_candidats(id,nom,prenom,email,tel,source,cree,par) VALUES(?,?,?,?,?,?,?,?)", i, nom, String(b.prenom||"").slice(0, 80), String(b.email||"").slice(0, 120), String(b.tel||"").slice(0, 30), String(b.source||"").slice(0, 60), maint(), C.login);
@@ -144,6 +156,9 @@ function creer(o){
     }
     const mcv = /^\/api\/v1\/recrutement\/candidats\/([^/]+)\/cv$/.exec(p);
     if (mcv && req.method === "GET"){
+      /* 56.33.11 : CV déchiffré réservé au droit de saisie et aux candidats du périmètre */
+      if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
+      if (!await candidatVu(mcv[1])) return erreur(res, 404, "Aucun CV.");
       const r = await B.get("SELECT * FROM rec_cv WHERE candidat_id=?", mcv[1]); if (!r) return erreur(res, 404, "Aucun CV.");
       await audit(C.login, "recrutement.cv.consulte", mcv[1], ip);
       res.writeHead(200, {"Content-Type":r.type, "Content-Disposition":"attachment; filename=\""+String(r.nom_fichier).replace(/[^\w.\- ]/g, "_")+"\"", "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"});
@@ -152,17 +167,21 @@ function creer(o){
     /* candidatures : tableau par étape, paginé */
     if (p === "/api/v1/recrutement/candidatures" && req.method === "GET"){
       const {off, lim} = page(q); if (!q.poste) return erreur(res, 400, "Poste obligatoire.");
+      if (!posteVu(await B.get("SELECT * FROM rec_postes WHERE id=?", String(q.poste)))) return erreur(res, 404, "Poste introuvable."); /* 56.33.11 */
       const comptes = {}; (await B.all("SELECT etape, COUNT(*) n FROM rec_candidatures WHERE poste_id=? GROUP BY etape", q.poste)).forEach(r=>{ comptes[r.etape] = Number(r.n); });
       const et = ETAPES.indexOf(q.etape) >= 0 ? q.etape : null;
       const l = await B.all("SELECT a.id, a.etape, a.note, a.maj, c.id candidat_id, c.nom, c.prenom, c.email, c.tel, (SELECT mat FROM rec_embauches h WHERE h.candidature_id=a.id) salarie, (SELECT COUNT(*) FROM rec_cv v WHERE v.candidat_id=c.id) cv FROM rec_candidatures a JOIN rec_candidats c ON c.id=a.candidat_id WHERE a.poste_id=?"+(et ? " AND a.etape=?" : "")+" ORDER BY a.maj DESC LIMIT "+lim+" OFFSET "+off, ...(et ? [q.poste, et] : [q.poste]));
       return json(res, 200, {etapes:ETAPES, suivantes:SUIVANTES, comptes, lignes:l});
     }
     const ma = /^\/api\/v1\/recrutement\/candidatures\/([^/]+)\/(etape|entretien|historique)$/.exec(p);
-    if (ma && ma[2] === "historique" && req.method === "GET")
-      return json(res, 200, {historique:await B.all("SELECT * FROM rec_historique WHERE candidature_id=? ORDER BY ts", ma[1]), entretiens:await B.all("SELECT * FROM rec_entretiens WHERE candidature_id=? ORDER BY d", ma[1])});
+    /* 56.33.11 : historique et comptes rendus d'entretien : droit de saisie et candidature du périmètre */
+    if (ma && ma[2] === "historique" && req.method === "GET"){
+      if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
+      if (!await candidatureVue(ma[1])) return erreur(res, 404, "Candidature introuvable.");
+      return json(res, 200, {historique:await B.all("SELECT * FROM rec_historique WHERE candidature_id=? ORDER BY ts", ma[1]), entretiens:await B.all("SELECT * FROM rec_entretiens WHERE candidature_id=? ORDER BY d", ma[1])}); }
     if (ma && ma[2] === "etape" && req.method === "POST"){
       if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
-      const b = await corpsJson(req), a = await B.get("SELECT * FROM rec_candidatures WHERE id=?", ma[1]); if (!a) return erreur(res, 404, "Candidature introuvable.");
+      const b = await corpsJson(req), a = await candidatureVue(ma[1]); if (!a) return erreur(res, 404, "Candidature introuvable.");
       const vers = String(b.vers||"");
       if ((SUIVANTES[a.etape]||[]).indexOf(vers) < 0) return erreur(res, 409, "Passage de « "+a.etape+" » à « "+vers+" » non permis.");
       if ((vers === "retenu" || vers === "refuse") && !decider) return erreur(res, 403, "La décision est réservée au droit de validation.");
@@ -176,6 +195,7 @@ function creer(o){
     if (ma && ma[2] === "entretien" && req.method === "POST"){
       if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
       const b = await corpsJson(req); if (!/^\d{4}-\d{2}-\d{2}/.test(String(b.d||""))) return erreur(res, 400, "Date obligatoire.");
+      if (!await candidatureVue(ma[1])) return erreur(res, 404, "Candidature introuvable."); /* 56.33.11 */
       await B.run("INSERT INTO rec_entretiens(id,candidature_id,d,intervenant,avis,note,par,cree) VALUES(?,?,?,?,?,?,?,?)", id("re"), ma[1], String(b.d).slice(0, 16), String(b.intervenant||"").slice(0, 80), String(b.avis||"").slice(0, 2000), b.note == null ? null : Math.max(0, Math.min(5, +b.note)), C.login, maint());
       await audit(C.login, "recrutement.entretien", ma[1], ip); return json(res, 200, {ok:true});
     }
@@ -183,10 +203,11 @@ function creer(o){
     const mh = /^\/api\/v1\/recrutement\/candidatures\/([^/]+)\/embauche$/.exec(p);
     if (mh && req.method === "POST"){
       if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
-      const a = await B.get("SELECT * FROM rec_candidatures WHERE id=?", mh[1]); if (!a) return erreur(res, 404, "Candidature introuvable.");
+      const a = await candidatureVue(mh[1]); if (!a) return erreur(res, 404, "Candidature introuvable.");
       if (a.etape !== "retenu") return erreur(res, 409, "Seule une candidature retenue donne lieu à une embauche.");
       const mat = String((await corpsJson(req)).mat||"").trim();
-      if (!mat || !(await D.employes()).some(e=>String(e.mat) === mat)) return erreur(res, 404, "Fiche salarié introuvable : enregistrez-la d'abord.");
+      /* 56.33.11 : fiche salarié du périmètre uniquement */
+      if (!mat || (P.set !== null && !P.set.has(mat)) || !(await D.employes()).some(e=>String(e.mat) === mat)) return erreur(res, 404, "Fiche salarié introuvable : enregistrez-la d'abord.");
       if (await B.get("SELECT 1 FROM rec_embauches WHERE candidature_id=? OR mat=?", a.id, mat)) return erreur(res, 409, "Cette embauche est déjà enregistrée.");
       await B.run("INSERT INTO rec_embauches(candidature_id,mat,le,par) VALUES(?,?,?,?)", a.id, mat, maint(), C.login);
       await B.run("INSERT INTO rec_historique(id,candidature_id,de,vers,par,motif,ts) VALUES(?,?,?,?,?,?,?)", id("rh"), a.id, "retenu", "retenu", C.login, "fiche salarié créée : "+mat, maint());
@@ -195,8 +216,8 @@ function creer(o){
     if (p === "/api/v1/recrutement/candidatures" && req.method === "POST"){
       if (!ecrire) return erreur(res, 403, "Droit de saisie requis.");
       const b = await corpsJson(req);
-      if (!await B.get("SELECT 1 FROM rec_postes WHERE id=? AND statut='ouvert'", String(b.posteId||""))) return erreur(res, 400, "Poste ouvert obligatoire.");
-      if (!await B.get("SELECT 1 FROM rec_candidats WHERE id=?", String(b.candidatId||""))) return erreur(res, 400, "Candidat introuvable.");
+      if (!posteVu(await B.get("SELECT * FROM rec_postes WHERE id=? AND statut='ouvert'", String(b.posteId||"")))) return erreur(res, 400, "Poste ouvert obligatoire.");
+      if (!await candidatVu(b.candidatId)) return erreur(res, 400, "Candidat introuvable."); /* 56.33.11 : candidat du périmètre */
       if (await B.get("SELECT 1 FROM rec_candidatures WHERE poste_id=? AND candidat_id=?", b.posteId, b.candidatId)) return erreur(res, 409, "Ce candidat a déjà postulé à ce poste.");
       const c = id("ra"); await B.run("INSERT INTO rec_candidatures(id,poste_id,candidat_id,etape,maj,cree) VALUES(?,?,?,?,?,?)", c, b.posteId, b.candidatId, "recue", maint(), maint());
       await B.run("INSERT INTO rec_historique(id,candidature_id,de,vers,par,motif,ts) VALUES(?,?,?,?,?,?,?)", id("rh"), c, null, "recue", C.login, "candidature enregistrée", maint());

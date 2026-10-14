@@ -161,8 +161,22 @@ function creer(B, D, opts){
     try { const r = await p; VERIFIES.set(cle, m0); if (VERIFIES.size > 500) VERIFIES.clear(); return r; } finally { enCours.delete(cle); }
   }
   const EN_FOND = {actif:false, depuis:0, salaries:0};
+  /* 56.33.11 : invalidations horodatées — un calcul en cours (lecture des données avant l'écriture) ne réécrit pas une
+     journée invalidée après le début de sa lecture : le fil de calcul supprime ces lignes (moteur.js, calculer). Avant,
+     une correction ou un badgeage arrivé pendant un calcul de fond pouvait être recouvert par l'ancien résultat. */
+  let INV_PRET = null, INV_PURGE = 0;
+  const INV_DDL = "CREATE TABLE IF NOT EXISTS calc_invalidations (mat TEXT NOT NULL, d TEXT NOT NULL, ts TEXT NOT NULL, PRIMARY KEY(mat, d))";
+  async function noterInvalidations(paires){
+    if (!INV_PRET) INV_PRET = B.run(INV_DDL).catch(e=>{ INV_PRET = null; throw e; });
+    await INV_PRET; const ts = new Date().toISOString();
+    for (let i = 0; i < paires.length; i += 400){ const p = paires.slice(i, i + 400);
+      await B.run("INSERT INTO calc_invalidations(mat,d,ts) VALUES "+p.map(()=>"(?,?,?)").join(",")+" ON CONFLICT(mat,d) DO UPDATE SET ts=excluded.ts", ...[].concat(...p.map(x=>[x[0], x[1], ts]))); }
+    if (Date.now() - INV_PURGE > 600000){ INV_PURGE = Date.now(); await B.run("DELETE FROM calc_invalidations WHERE ts < ?", new Date(Date.now() - 3600000).toISOString()); }
+  }
   async function invalider(touches, refCles, opts){
     if ((refCles||[]).length || !(opts && opts.pointeuse)) GENERATION++; else GEN_P++;
+    try { const paires = (refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0) ? [["*", "*"]] : Array.from(new Set(touches||[])).map(t=>t.split("|")).filter(x=>x[0] && x[1]);
+      if (paires.length) await noterInvalidations(paires); } catch(e){ if (opts && opts.journal) opts.journal("invalidations : "+e.message); }
     if ((refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0)){ await B.run("DELETE FROM calc_jour"); return; }
     /* 56.33.11 : badgeage reçu d'une pointeuse pour hier ou aujourd'hui → journée marquée « à rafraîchir » (date de
        calcul vidée) au lieu d'être effacée : les écrans servent la valeur précédente quelques secondes et le recalcul
