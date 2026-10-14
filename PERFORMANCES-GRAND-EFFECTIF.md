@@ -128,3 +128,51 @@ Chaque optimisation a été comparée à l'ancien code :
 - **Matériel** : PostgreSQL sur un serveur dédié (ou 8 cœurs ou plus au total), 16 Go de mémoire, disque SSD.
   `shared_buffers` à environ 25 % de la mémoire.
 - **SQLite** reste réservé aux petits effectifs : c'est un seul écrivain, et un seul fil de calcul.
+
+## 7. Compteurs, règles de sortie, modules et interface (deuxième série)
+
+### Compteurs arithmétiques
+Le moteur calcule déjà, journée par journée et selon les règles versionnées (paramétrables par société, site,
+service, équipe, planning, catégorie ou salarié) :
+- les heures de nuit (fenêtre paramétrable) ;
+- le travail du dimanche et des jours fériés ;
+- les heures supplémentaires par tranche (seuils et taux) ;
+- la récupération, les absences payées ou non ;
+- les taux de majoration.
+
+- **Bug corrigé** : la variable `NUIT` valait « non calculé » les jours sans badgeage. Le total d'une période qui
+  contenait un repos ou un week-end était perdu : un compteur d'heures de nuit ne pouvait donc pas fonctionner.
+- **13 compteurs standard ajoutés** s'ils manquent : heures de nuit, de dimanche et de jours fériés et leurs
+  majorations, heures supplémentaires par tranche et leur majoration, heures à récupérer, absences payées et non
+  payées, nombre de jours fériés. Ils restent modifiables et supprimables. Leurs valeurs ont été vérifiées à la main
+  sur un cas réel (dimanche, jour férié, nuit, longues journées).
+- **Calcul des compteurs 25 % plus rapide**, résultats identiques (300 calculs × 36 compteurs comparés, jour par jour
+  et en total).
+- **Export des éléments variables** réparti sur tous les fils de calcul : 49 000 salariés sur un mois en **87 s**
+  (177 s auparavant), fichier identique octet par octet.
+
+### Salariés sortis et absents (biométrie, portail, badge)
+- **Absence** (congé, maladie…) : blocage biométrique déjà géré par le serveur, paramétrable par type d'absence (fin
+  automatique, levée par les RH, délai de grâce) ; les empreintes sont retirées des appareils puis rediffusées au
+  retour. Les types d'absence qui bloquent sont à choisir dans le paramétrage (aucun par défaut).
+- **Sortie, nouveau** : dès que la date de sortie est passée (même saisie à l'avance, même si personne n'ouvre
+  l'application) :
+  - retrait automatique de toutes les pointeuses et de tous les lecteurs d'accès (empreintes, visage, badge, code) ;
+  - connexion au portail refusée et sessions ouvertes fermées immédiatement ;
+  - compte désactivé par une tâche horaire, avec une trace dans l'audit.
+  Vérifié sur le banc.
+
+### Modules (avec volume)
+Données de test : 150 000 visites médicales, 150 000 inscriptions et 100 000 habilitations de formation, 500 000
+niveaux de compétences, 20 000 événements HSE, 50 000 candidatures et 100 000 évaluations (script
+`outils/banc-modules.sql`). Résultats :
+- toutes les routes de lecture répondent en moins de 70 ms pour l'administrateur et moins de 105 ms pour le chef de
+  site ;
+- cinq routes (BI, compétences, visiteurs) passent de 200–330 ms à 2–52 ms ;
+- les écarts de compétences chargent une fois un index en mémoire (environ 1 s au premier appel), puis répondent en
+  5 ms.
+
+### Interface
+- Totaux réels en grand effectif : menu « Employés », en-tête de l'écran Pointages.
+- En-têtes plus compacts, chiffres alignés, survol des lignes, focus clavier visible, champ de recherche harmonisé.
+- Vérifié en clair, en sombre et en arabe, sans erreur JavaScript.
