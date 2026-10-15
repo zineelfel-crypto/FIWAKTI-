@@ -313,3 +313,19 @@ sur la Hikvision avant d'exister dans FIWAKTI).
   - 2 badgeages du matricule 300, alors inconnu, ont été mis en attente ;
   - après la création du salarié, ils ont été rattachés en 110 s ;
   - les 26 400 autres sont restés en attente sans être retraités.
+
+**État de communication des pointeuses remis à « Non testé »** (essai sur site : « Répond », puis « Non testé » après
+l'enregistrement).
+
+- **Cause** (`app/app.js`) :
+  - « Tester tous » et « Tester la communication » reposaient sur une fonction de démonstration. Sur un vrai serveur,
+    elle ne testait rien et remettait toutes les pointeuses à « Non testé » ;
+  - l'enregistrement d'une fiche ouverte avant le test réécrivait l'état antérieur.
+- **Correction** :
+  - ces boutons lancent maintenant le vrai diagnostic de chaque appareil (`/api/v1/pointeuses/diagnostic`) ;
+  - le résultat est reporté sur la fiche ouverte ;
+  - à l'enregistrement, l'état de communication, qui ne se modifie pas dans la fiche, est repris de l'appareil.
+- **Preuve** (navigateur, diagnostic simulé « en ligne ») :
+  - avant : après « Tester tous », 3 appareils sur 3 en « Non testé » ;
+  - après : 3 sur 3 en « Répond » ;
+  - après l'enregistrement d'une fiche périmée : toujours « Répond ».
