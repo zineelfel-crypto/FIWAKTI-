@@ -195,4 +195,34 @@ navigateur, et l'export produisait un fichier sans aucune ligne.
   - 5 880 salariés exportés en 0,4 à 0,7 s (Excel et CSV) ;
   - avec la recherche « trabelsi », 300 salariés exportés, comme à l'écran.
 
-Revue de tous les écrans en grand effectif : à part Pointage et Employés, l'export contient ce que l'écran affiche.
+**États** (même cause) : en grand effectif, la sortie d'un état posait trois problèmes.
+
+- Le menu *Exporter* du haut de l'écran exportait la liste des modèles d'états, et non l'état.
+- TXT, PDF et Imprimer calculaient l'état dans le navigateur, où les salariés ne sont pas chargés : le résultat était
+  vide.
+- CSV lançait seulement un travail en arrière-plan, à télécharger ensuite depuis la liste des travaux.
+
+**Correction** :
+
+- Toutes les sorties passent par le calcul du serveur (`/api/v1/travaux`), dans le périmètre de l'utilisateur.
+- L'écran suit l'avancement du calcul.
+- Le fichier est remis dès qu'il est prêt :
+  - CSV : le fichier du serveur, tel quel ;
+  - Excel et TXT : 200 000 lignes au plus, dates en jj/mm/aaaa et décimales à virgule ;
+  - PDF et impression : les 5 000 premières lignes, avec un message.
+- Un bouton *Excel* est ajouté dans la barre de sortie de l'état.
+- Le menu *Exporter* du haut exporte l'état ouvert. Si aucun état n'est ouvert, un message le demande.
+
+**Preuve** : avec 6 000 salariés, l'état *Contrôle journalier* de septembre donne 176 400 lignes.
+
+| Sortie | Lignes | Durée |
+|---|---|---|
+| CSV | 176 400 | 11 s |
+| Excel | 176 400 | 15 s |
+| TXT | 176 400 | 11 s |
+
+- Impression : 5 000 lignes, avec un message.
+- *Récapitulatif des éléments variables* exporté en Excel depuis le menu du haut : 5 880 lignes.
+
+Revue de tous les écrans en grand effectif : à part Pointage, Employés et États, l'export contient ce que l'écran
+affiche.
