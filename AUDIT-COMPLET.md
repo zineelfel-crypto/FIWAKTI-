@@ -353,3 +353,28 @@ l'enregistrement).
   - avant : liste vide, « Bravo », cartes à 0, onglet « (0) », alors que la puce « Tout » affichait 5 400 ;
   - après : 40 anomalies affichées, onglet et carte à 5 400 ;
   - « Confirmer l'absence » retire la carte, et le total du serveur passe à 5 399.
+
+**Blocage biométrique selon le type d'absence : réactivation automatique ou validée par les RH** (besoin exprimé sur
+site : mise à pied, code 11, réactivation automatique ; maladie longue durée, code 60, réactivation par les RH).
+
+- **Existant** (réglage *Appareils › Synchro biométrie*) :
+  - « Absences qui bloquent » ;
+  - « Réactivation automatique à la fin » ;
+  - « Réactivation après validation RH ».
+- **Manques corrigés** (`biosync.js`, `principal.js`, `app/app.js`) :
+  - absence à validation RH enchaînée sur une absence à fin automatique (congé, puis maladie longue durée) : le
+    blocage restait en réactivation automatique. Il passe désormais en validation RH, sauf si les RH ont déjà levé le
+    blocage ;
+  - absence à validation RH annulée ou raccourcie : la date de fin du blocage n'était pas corrigée, et la réactivation
+    était reportée ;
+  - aucune liste des salariés en attente de réactivation (il fallait saisir le matricule). Elle s'affiche maintenant
+    dans le réglage, avec le type d'absence, les dates, la mention « absence terminée » et un bouton « Réactiver
+    l'empreinte » ;
+  - cette liste est réservée à la validation RH (EMP) et au paramétrage des terminaux, parce que le type d'absence peut
+    être médical.
+- **Preuve** (serveur d'essai ; codes 11 et 030 en réactivation automatique, 60 en validation RH, délai de grâce 0) :
+  1. absences du jour : les 3 salariés sont bloqués, avec un retrait mis en file pour chacun ;
+  2. congé (030) remplacé par une maladie longue durée (60) : le blocage passe en validation RH ;
+  3. absences terminées : mise à pied et congé réactivés automatiquement, avec renvoi mis en file ; maladie longue
+     durée toujours bloquée et affichée « absence terminée » dans la liste RH ;
+  4. clic sur « Réactiver l'empreinte » : blocage levé par l'administrateur, renvoi mis en file.

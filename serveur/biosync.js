@@ -174,8 +174,15 @@ function creer(o){
         for (const x of absAuj){
           await ceder();
           const fin = fins.get(x.mat) || a, mode = TY.rh.indexOf(x.code) >= 0 ? "rh" : "auto";
-          const ex = await B.get("SELECT statut, mode, fin FROM bio_blocages WHERE mat=?", x.mat);
-          if (ex && ex.statut === "actif"){ if (fin !== (ex.fin||"")) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", fin, maint(), x.mat); continue; }
+          const ex = await B.get("SELECT statut, mode, fin, leve_par FROM bio_blocages WHERE mat=?", x.mat);
+          if (ex && ex.statut === "actif"){
+            if (fin !== (ex.fin||"")) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", fin, maint(), x.mat);
+            /* 56.33.11 : absence à validation RH enchaînée sur une absence à fin automatique (congé puis maladie longue
+               durée) — le blocage passe en validation RH (avant : réactivation automatique à la fin de la suite), sauf
+               si les RH ont déjà levé le blocage */
+            if (mode === "rh" && ex.mode !== "rh" && !ex.leve_par){ await B.run("UPDATE bio_blocages SET mode='rh', code=?, maj=? WHERE mat=?", x.code, maint(), x.mat);
+              await audit("systeme", "biometrie.blocage", x.mat+" ("+x.code+") : réactivation désormais soumise à la validation RH"); }
+            continue; }
           await B.run("INSERT INTO bio_blocages(mat,code,mode,depuis,fin,statut,maj) VALUES(?,?,?,?,?,?,?) ON CONFLICT(mat) DO UPDATE SET code=excluded.code, mode=excluded.mode, depuis=excluded.depuis, fin=excluded.fin, statut='actif', leve_le=NULL, leve_par=NULL, maj=excluded.maj",
             x.mat, x.code, mode, a, fin, "actif", maint());
           BLOQUES.add(x.mat); res.nouveaux++;
@@ -192,7 +199,9 @@ function creer(o){
     { const a0 = auj(), hier = (()=>{ const d = new Date(a0+"T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
       const aujBloquants = new Set(); if (tous.size){ const codeDe2 = new Map(typesAbsence(ref).map(t=>[t.id, String(t.code||"").toUpperCase()]));
         (await B.all("SELECT mat, data FROM enreg WHERE coll='abs' AND d=?", a0)).forEach(r=>{ let x = {}; try { x = JSON.parse(r.data); } catch(e){} if (tous.has(codeDe2.get(x.tt) || String(x.tt||"").toUpperCase())) aujBloquants.add(String(r.mat)); }); }
-      for (const r of await B.all("SELECT mat FROM bio_blocages WHERE statut='actif' AND mode='auto' AND fin >= ?", a0))
+      /* 56.33.11 : aussi pour un blocage à validation RH (date de fin juste : la liste des RH l'affiche « absence terminée »
+         et la réactivation est immédiate) — seule la levée automatique reste réservée au mode « auto » */
+      for (const r of await B.all("SELECT mat FROM bio_blocages WHERE statut='actif' AND fin >= ?", a0))
         if (!aujBloquants.has(String(r.mat))) await B.run("UPDATE bio_blocages SET fin=?, maj=? WHERE mat=?", hier, maint(), r.mat); }
     /* réactivation automatique : fin d'absence dépassée + délai de grâce */
     const lim = new Date(Date.now() - (cfg.delaiGraceHeures||0) * 3600000).toISOString().slice(0, 10);
@@ -377,7 +386,13 @@ function creer(o){
       acces:!!(o.moduleActif && o.moduleActif("FW-Acces")),
       terminaux:(ref.terms||[]).filter(T=>T.actif !== false).map(T=>({id:T.id, nom:T.nom, usage:T.usage || "clocking", inclus:terms.some(x=>x.id === T.id), maitre:cfg.terminauxMaitres.indexOf(T.id) >= 0,
         enAttente:parT[T.id] || 0, derniereSynchro:(et[T.id]||{}).derniereSynchro || null, derniereErreur:(et[T.id]||{}).derniereErreur || null})),
-      types:typesAbsence(ref).map(t=>({code:t.code, nom:t.nom})), evenements};
+      types:typesAbsence(ref).map(t=>({code:t.code, nom:t.nom})), evenements, blocagesRh:await (async ()=>{
+        /* 56.33.11 : salariés bloqués dont la réactivation attend les RH (absence terminée ou en cours) */
+        const l = await B.all("SELECT mat, code, depuis, fin FROM bio_blocages WHERE statut='actif' AND mode='rh' ORDER BY fin, mat LIMIT 300");
+        if (!l.length) return [];
+        const parMat = new Map((await D.employes()).map(e=>[String(e.mat), e])), lib = new Map(typesAbsence(ref).map(t=>[String(t.code).toUpperCase(), t.nom||""]));
+        return l.map(r=>{ const e = parMat.get(String(r.mat)) || {}; return {mat:r.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), code:r.code, type:lib.get(String(r.code||"").toUpperCase()) || "",
+          depuis:r.depuis, fin:(r.fin||"") < (r.depuis||"") ? r.depuis : r.fin, termine:(r.fin||"") < auj()}; }); })()};
   }
   async function enregistrerConfig(b, login){
     const c = nettoyerConfig(b || {}); await meta("biometrie_sync", c); CFG = c;

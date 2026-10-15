@@ -2041,7 +2041,10 @@ async function traiter(req, res){
     if (action === "pilotes") return json(res, 200, {pilotes:PT.liste(), attente:PT.attente(), dossier:path.join(DONNEES, "pilotes")});
     if (action === "etat"){ if (!admin && rang < 2) return erreur(res, 403, "Droits insuffisants sur les terminaux."); return json(res, 200, await PT.etat()); }
     if (!admin && rang < 2 && !(action === "biometrie-lever-blocage" && ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) return erreur(res, 403, "Droits insuffisants sur les terminaux.");
-    if (action === "biometrie-sync-etat" && req.method === "GET") return json(res, 200, await BS().etat());
+    /* 56.33.11 : liste des réactivations en attente des RH (matricule, nom, code d'absence) réservée à ceux qui peuvent
+       lever le blocage : validation RH ou paramétrage des terminaux */
+    const etatBio = async () => { const e = await BS().etat(); if (!(admin || rang >= 4 || ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) delete e.blocagesRh; return e; };
+    if (action === "biometrie-sync-etat" && req.method === "GET") return json(res, 200, await etatBio());
     if (req.method !== "POST") return erreur(res, 405, "Méthode");
     const b = await corpsJson(req);
     if (action === "recharger"){ if (!admin) return erreur(res, 403, "Réservé aux administrateurs."); const r = await PT.charger(); await audit(C.login, "pilotes.recharges", JSON.stringify({nb:r.nb, erreurs:r.erreurs, attente:(r.attente||[]).map(x=>x.id)}), ip); return json(res, 200, Object.assign({pilotes:PT.liste(), attente:PT.attente()}, r)); }
@@ -2059,7 +2062,7 @@ async function traiter(req, res){
     if (action === "referentiel") return json(res, 200, {ok:true});
     if (action === "verifier-identifiants" && req.method === "POST"){ try { return json(res, 200, await PT.verifierIdentifiants(String(b.id||""), C.login)); } catch(e){ return erreur(res, e.code || 400, e.message); } }
     /* v56.24 : synchronisation biométrique automatique (pointage et accès) — les actions manuelles restent inchangées */
-    if (action === "biometrie-sync-etat") return json(res, 200, await BS().etat());
+    if (action === "biometrie-sync-etat") return json(res, 200, await etatBio());
     if (action === "biometrie-sync-config" || action === "biometrie-sync-now" || action === "biometrie-resync-terminal"){
       if (!admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux.");
       if (action === "biometrie-sync-config") return json(res, 200, {ok:true, config:await BS().enregistrerConfig(b, C.login)});
