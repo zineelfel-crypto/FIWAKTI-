@@ -332,3 +332,24 @@ l'enregistrement).
 - **Complément** : sur site, la fiche ouverte affichait encore « Non testé » alors que la liste affichait « Répond ». La
   fiche affiche maintenant l'état de communication de l'appareil en direct, et non sa copie d'édition.
   - Essai : fiche ouverte puis modifiée, Diagnostic, Enregistrer → la fiche et la liste affichent « Répond ».
+
+**Résolution des anomalies vide (« Bravo ! ») alors que les compteurs en signalent des milliers** (essai sur site,
+6 000 salariés).
+
+- **Cause** (`app/app.js`) :
+  - en grand effectif, la liste vient du serveur ;
+  - chaque anomalie était ensuite rattachée au salarié chargé dans le navigateur, et écartée s'il n'y était pas. Pour un
+    administrateur ou un RH, l'annuaire est paginé et aucun salarié n'est chargé : liste vide et message « Bravo » ;
+  - les cartes « Anomalies à traiter », « Heures supp. » et « Présents », ainsi que le chiffre de l'onglet, étaient
+    calculés à partir de cette même liste locale (0).
+- **Correction** :
+  - les fiches des salariés de la page affichée sont chargées depuis le serveur (`/api/v1/employes/complets`, sans
+    photo, dans le périmètre et avec le masquage appliqués) ;
+  - les cartes, l'onglet et la barre de progression reprennent les chiffres du serveur (comptes d'anomalies, présents
+    et attendus du jour) ;
+  - pendant le calcul, « Calcul en cours sur le serveur… » remplace « Bravo » ;
+  - une anomalie traitée disparaît de la liste immédiatement.
+- **Preuve** (navigateur, 6 000 salariés) :
+  - avant : liste vide, « Bravo », cartes à 0, onglet « (0) », alors que la puce « Tout » affichait 5 400 ;
+  - après : 40 anomalies affichées, onglet et carte à 5 400 ;
+  - « Confirmer l'absence » retire la carte, et le total du serveur passe à 5 399.
