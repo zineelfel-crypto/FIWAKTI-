@@ -293,3 +293,23 @@ savoir si l'appareil n'avait rien renvoyé ou si les badgeages avaient été éc
   événements d'accès (minor 0) indique les types que l'appareil enregistre réellement. Ces types sont à ajouter dans
   « Types d'événements lus » de la fiche.
 - **Essai** (faux appareil, badgeages de type 39) : l'export signale « autres types : 39 (2) ».
+
+**Badgeages d'un identifiant inconnu, rattachés après la création du salarié** (essai sur site : matricule 200 badgé
+sur la Hikvision avant d'exister dans FIWAKTI).
+
+- **Constat** :
+  - ces badgeages restent en attente (« identifiant inconnu ») ;
+  - une nouvelle collecte les voit comme déjà enregistrés ;
+  - le rejeu n'existait que par une commande d'administration (`/api/v1/ingestion/rejouer`), sans bouton ;
+  - ce rejeu ne lisait que les 5 000 premiers badgeages en attente, dans un ordre quelconque : sur l'essai, 26 400
+    inconnus masquaient ceux du salarié créé ;
+  - il remettait aussi tous les inconnus en attente sous une nouvelle réception.
+- **Correction** :
+  - `ingestion.js` : le rejeu regroupe par appareil et par identifiant, et ne rejoue que les identifiants qui
+    correspondent désormais à un salarié (matricule, badge ou code, selon le mode de l'appareil) ;
+  - `principal.js` : une tâche planifiée « rattachement-badgeages-en-attente » le lance automatiquement après chaque
+    changement de la liste des salariés, au plus toutes les 2 minutes.
+- **Preuve** (26 400 badgeages en attente sans salarié) :
+  - 2 badgeages du matricule 300, alors inconnu, ont été mis en attente ;
+  - après la création du salarié, ils ont été rattachés en 110 s ;
+  - les 26 400 autres sont restés en attente sans être retraités.

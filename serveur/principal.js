@@ -2280,6 +2280,15 @@ async function demarrer(){
   if (CONFIG.installe) setTimeout(async ()=>{ try { const du = ajoutJours(aujourdhui(), -45);
     const mats = (await B.all("SELECT DISTINCT mat FROM calc_jour WHERE d>=? AND nano>0", du)).map(r=>r.mat);
     const n = await WF.synchroniser(mats, du, aujourdhui()); if (n) journal("cycle de vie : "+n+" journée(s) à anomalie initialisée(s)"); } catch(e){ journal("cycle de vie : "+e.message); } }, 8000);
+  /* 56.33.11 : badgeages en attente (identifiant inconnu de FIWAKTI) rattachés automatiquement quand le salarié est créé ou
+     que son badge / code est renseigné — vérifié à chaque changement de la liste des salariés, au plus toutes les 2 minutes */
+  let REJEU_EMPS = null;
+  PLAN.planifier("rattachement-badgeages-en-attente", {intervalle:120000, priorite:2, delai:90000, actif:()=>!!(CONFIG.installe && ING), fn:async ()=>{
+    const emps = await D.employes(); if (emps === REJEU_EMPS) return "salariés inchangés";
+    const n = Number(((await B.get("SELECT COUNT(*) n FROM normalized_events WHERE statut='PENDING_REVIEW'")) || {}).n) || 0;
+    if (!n){ REJEU_EMPS = emps; return "aucun badgeage en attente"; }
+    const r = await ING.rejouer("systeme"); REJEU_EMPS = emps;
+    return r.rejoues ? r.acceptes+" badgeage(s) rattaché(s)" : n+" en attente, sans salarié correspondant"; }});
   PLAN.planifier("reprise-file-ingestion", {intervalle:30000, priorite:1, delai:60000, actif:()=>!!(CONFIG.installe && ING), fn:async ()=>{ const n = await ING.reprendre(); return n ? n+" repris" : "file à jour"; }});
   PLAN.demarrer();
   /* calcul d'avance et préchauffage au démarrage (une seule fois, visible dans le planificateur) */

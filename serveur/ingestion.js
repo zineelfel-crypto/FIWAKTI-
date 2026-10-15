@@ -276,25 +276,35 @@ function creer(o){
 
   /* ---------- rejeu des événements en attente de revue (ex. badge rattaché ensuite à un employé) ---------- */
   async function rejouer(login){
-    const l = await B.all("SELECT n.id, n.raw_event_id, r.payload_raw, r.device_id, r.raw_employee_id, r.event_ts_local, r.ingestion_source FROM normalized_events n JOIN raw_events r ON r.raw_event_id = n.raw_event_id WHERE n.statut='PENDING_REVIEW' LIMIT 5000");
-    const ref = await D.referentielLecture() || {}; let n = 0;
+    /* 56.33.11 : regroupement par appareil et identifiant d'abord, puis seuls les identifiants qui correspondent désormais à
+       un salarié sont rejoués (avant : les 5 000 premiers événements en attente, quels qu'ils soient — ceux d'un salarié
+       créé ensuite pouvaient ne jamais être pris si d'autres inconnus les précédaient — et les inconnus étaient remis en
+       attente sous une nouvelle réception à chaque rejeu) */
+    const grp = await B.all("SELECT COALESCE(r.device_id, '') d, r.raw_employee_id u, COUNT(*) n FROM normalized_events n JOIN raw_events r ON r.raw_event_id = n.raw_event_id WHERE n.statut='PENDING_REVIEW' GROUP BY COALESCE(r.device_id, ''), r.raw_employee_id");
+    const ref = await D.referentielLecture() || {}; let n = 0, attente = 0, rejoues = 0;
     const parTerm = new Map();
-    l.forEach(x=>{ const k = x.device_id || ""; if (!parTerm.has(k)) parTerm.set(k, []); parTerm.get(k).push(x); });
-    for (const [tid, xs] of parTerm){
+    grp.forEach(x=>{ if (!parTerm.has(x.d)) parTerm.set(x.d, []); parTerm.get(x.d).push(x); });
+    for (const [tid, us] of parTerm){
       const T = (ref.terms||[]).find(t=>t.id === tid) || null;
-      /* le rejeu crée de nouvelles réceptions (source « rejeu ») ; l'ancien événement normalisé reste, marqué remplacé
-         (sa clé est libérée pour que la nouvelle réception ne soit pas prise pour un doublon) */
-      for (const x of xs){
-        const k = await B.get("SELECT idempotency_key FROM normalized_events WHERE id=?", x.id);
-        await B.run("UPDATE normalized_events SET statut='REPLAYED', motif=?, idempotency_key=idempotency_key || ? WHERE id=? AND statut='PENDING_REVIEW'", "rejoué par "+login, "#rejoue-"+x.id, x.id);
-        if (k) await B.run("DELETE FROM event_keys WHERE idempotency_key=?", k.idempotency_key);
+      const corr = await correspondance(T), ok = [];
+      us.forEach(x=>{ if (corr.has(String(x.u == null ? "" : x.u).trim())) ok.push(x.u); else attente += Number(x.n) || 0; });
+      for (let i = 0; i < ok.length; i += 500){
+        const part = ok.slice(i, i + 500);
+        const xs = await B.all("SELECT n.id, n.raw_event_id, r.payload_raw, r.device_id, r.raw_employee_id, r.event_ts_local, r.ingestion_source FROM normalized_events n JOIN raw_events r ON r.raw_event_id = n.raw_event_id WHERE n.statut='PENDING_REVIEW' AND COALESCE(r.device_id, '')=? AND r.raw_employee_id IN ("+part.map(()=>"?").join(",")+")", tid, ...part);
+        if (!xs.length) continue;
+        /* le rejeu crée de nouvelles réceptions (source « rejeu ») ; l'ancien événement normalisé reste, marqué remplacé
+           (sa clé est libérée pour que la nouvelle réception ne soit pas prise pour un doublon) */
+        for (const x of xs){
+          const k = await B.get("SELECT idempotency_key FROM normalized_events WHERE id=?", x.id);
+          await B.run("UPDATE normalized_events SET statut='REPLAYED', motif=?, idempotency_key=idempotency_key || ? WHERE id=? AND statut='PENDING_REVIEW'", "rejoué par "+login, "#rejoue-"+x.id, x.id);
+          if (k) await B.run("DELETE FROM event_keys WHERE idempotency_key=?", k.idempotency_key);
+        }
+        const r = await recevoir("rejeu", T, xs.map(x=>({utilisateur:x.raw_employee_id, horodatage:x.event_ts_local, sens:(()=>{ try { return JSON.parse(x.payload_raw).sens || ""; } catch(e){ return ""; } })(), payload:x.payload_raw})), login);
+        n += r.integres; rejoues += xs.length;
       }
-      const r = await recevoir("rejeu", T, xs.map(x=>({utilisateur:x.raw_employee_id, horodatage:x.event_ts_local, sens:(()=>{ try { return JSON.parse(x.payload_raw).sens || ""; } catch(e){ return ""; } })(), payload:x.payload_raw})), login);
-      n += r.integres;
-
     }
-    await audit(login, "ingestion.rejeu", l.length+" événement(s) en attente de revue rejoué(s), "+n+" accepté(s)");
-    return {rejoues:l.length, acceptes:n};
+    if (rejoues) await audit(login, "ingestion.rejeu", rejoues+" événement(s) en attente de revue rejoué(s), "+n+" accepté(s) ; "+attente+" toujours sans salarié");
+    return {rejoues, acceptes:n, toujoursInconnus:attente};
   }
 
   /* ---------- migration v49 → v50 : chaque badgeage existant devient un événement brut et normalisé ---------- */
