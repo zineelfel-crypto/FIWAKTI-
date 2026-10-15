@@ -241,3 +241,25 @@ ouvert en **consultation** (clic sur son nom).
 
 Revue de tous les écrans en grand effectif : à part Pointage, Employés et États, l'export contient ce que l'écran
 affiche.
+
+**Identifiants des pointeuses illisibles** (essai sur site, Hikvision) : le test de communication échouait avec
+« Unsupported state or unable to authenticate data ».
+
+- **Cause** :
+  - les accès des appareils avaient été chiffrés par une autre installation, avec une autre clé `secrets` ;
+  - les données avaient été reprises sans le trousseau de cette installation ;
+  - le déchiffrement échouait pour tous les appareils, et même l'enregistrement d'un nouveau mot de passe était
+    impossible.
+- **Correction** (`pointeuses.js`) :
+  - le bloc illisible est mis de côté (`meta.pointeuses_secrets_illisibles`), pour être récupéré si l'on importe le
+    trousseau d'origine ;
+  - un événement d'audit le signale ;
+  - les appareils qui demandent un identifiant renvoient un message clair (409), qui demande de ressaisir l'identifiant
+    et le mot de passe ;
+  - la ressaisie est acceptée ;
+  - les appareils Push, qui n'ont pas d'identifiant, ne sont pas touchés.
+- **Preuve** (deux clés différentes) :
+  1. test de communication avant ressaisie : message clair, code 409 ;
+  2. ressaisie du mot de passe : enregistrée, bloc d'origine conservé ;
+  3. test de communication après ressaisie : il atteint l'appareil (« L'appareil refuse la connexion » sur un port
+     fermé).

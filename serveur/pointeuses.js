@@ -130,14 +130,26 @@ function creer(o){
   async function terminal(id){ const ref = await D.referentielLecture() || {}; return (ref.terms||[]).find(x=>x.id === id) || null; }
   /* v45 : les accès (mots de passe, clés) sont chiffrés avec une clé conservée hors de la base :
      une sauvegarde volée ne les livre pas */
+  /* 56.33.11 : accès chiffrés avec une autre clé « secrets » (données reprises d'une autre installation sans son
+     trousseau) : au lieu d'une erreur de déchiffrement sur chaque appareil — et d'un enregistrement impossible —, le bloc
+     illisible est mis de côté (récupérable en important le trousseau d'origine) et les identifiants peuvent être ressaisis */
+  let ILLISIBLES = false;
   async function secrets(){
     const v = await meta("pointeuses_secrets");
-    if (!v) return {};
-    if (v.chiffre) return JSON.parse(coffre.dechiffrerTexte(v.chiffre, "secrets"));
+    if (!v){ ILLISIBLES = false; return {}; }
+    if (v.chiffre){
+      try { const r = JSON.parse(coffre.dechiffrerTexte(v.chiffre, "secrets")); ILLISIBLES = false; return r; }
+      catch(e){
+        if (!ILLISIBLES){ ILLISIBLES = true;
+          if (!(await meta("pointeuses_secrets_illisibles"))) await meta("pointeuses_secrets_illisibles", {chiffre:v.chiffre, le:new Date().toISOString()});
+          await audit("systeme", "pointeuse.secrets.illisibles", "identifiants des appareils chiffrés avec une autre clé : à ressaisir, ou importer le trousseau d'origine"); }
+        return {};
+      }
+    }
     await meta("pointeuses_secrets", {chiffre:coffre.chiffrerTexte(JSON.stringify(v), "secrets")});   /* ancien format en clair : chiffré au passage */
     return v;
   }
-  async function secret(id){ return (await secrets())[id] || {}; }
+  async function secret(id){ const s = await secrets(); return s[id] || (ILLISIBLES ? {_illisible:true} : {}); }
   async function enregistrerSecret(id, valeurs){ const s = await secrets(); s[id] = Object.assign({}, s[id]||{}, valeurs); await meta("pointeuses_secrets", {chiffre:coffre.chiffrerTexte(JSON.stringify(s), "secrets")}); }
   function piloteDe(T){
     if (T.pilote && pilotes[T.pilote]) return pilotes[T.pilote];
@@ -432,6 +444,7 @@ function creer(o){
     if ((P.capacites||ACTIONS).indexOf(action) < 0 && !(action === "info" && (P.capacites||[]).indexOf("diagnostic") >= 0))
       throw Object.assign(new Error("« "+action+" » n'est pas proposé par le pilote "+P.nom+"."), {code:501});
     const S = await secret(T.id);
+    if (S._illisible && !P.push) throw Object.assign(new Error("Identifiant et mot de passe de cet appareil illisibles : ils ont été chiffrés par une autre installation de FIWAKTI (clé différente). Ouvrez la fiche de l'appareil, ressaisissez l'identifiant et le mot de passe puis enregistrez — ou importez le trousseau de clés de l'installation d'origine."), {code:409});
     /* verrou par appareil : l'action manuelle attend l'action automatique en cours (au plus 60 s), puis passe */
     if (!auto){ MANUEL.set(String(id), Date.now()); const enc = OCCUPE.get(String(id)); if (enc) await Promise.race([enc.catch(()=>{}), new Promise(x=>setTimeout(x, 60000))]); }
     let libere; const verrou = new Promise(x=>{ libere = x; }); OCCUPE.set(String(id), verrou);
