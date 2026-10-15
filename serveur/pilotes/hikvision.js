@@ -67,7 +67,16 @@ module.exports = {typesEvenements, isoZ, tzZ,
           if (!ev.length || !j.AcsEvent || j.AcsEvent.responseStatusStrg !== "MORE") break;
         }
       }
-      return Object.assign({lus:tous.length, purge:false}, await ctx.integrer(tous));
+      /* 56.33.11 : rien trouvé avec les types réglés — une page de tous les événements d'accès (minor 0) indique quels types
+         d'identification l'appareil enregistre réellement (à ajouter dans « Types d'événements lus » de la fiche) */
+      let autresTypes;
+      if (!tous.length){ try {
+        const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/AccessControl/AcsEvent?format=json",
+          {AcsEventCond:{searchID:"fiwakti-tous", searchResultPosition:0, maxResults:100, major:5, minor:0, startTime:isoZ(depuis, ctx.fuseau)+tzZ(depuis, ctx.fuseau), endTime:isoZ(fin, ctx.fuseau)+tzZ(fin, ctx.fuseau)}}));
+        const c = {}; ((j.AcsEvent && j.AcsEvent.InfoList) || []).forEach(e=>{ if (e.employeeNoString) c[e.minor] = (c[e.minor]||0) + 1; });
+        autresTypes = Object.keys(c).map(k=>({type:Number(k), nombre:c[k]}));
+      } catch(e){ autresTypes = []; } }
+      return Object.assign({lus:tous.length, purge:false, types:typesEvenements(T), jours:Number(T.joursCollecte)||31}, autresTypes ? {autresTypes} : {}, await ctx.integrer(tous));
     }
     if (action === "utilisateurs-lire"){
       const out = []; let pos = 0;

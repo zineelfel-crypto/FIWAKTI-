@@ -280,3 +280,16 @@ affiche.
   - avant : GET réussi, POST en « socket hang up » ;
   - après : GET et POST réussis ;
   - collecte complète par le pilote : 2 badgeages lus et intégrés, en 14 requêtes.
+
+**Résultat de collecte peu lisible** (essai sur site) : le message « 0 pointage(s) intégré(s) » ne permettait pas de
+savoir si l'appareil n'avait rien renvoyé ou si les badgeages avaient été écartés.
+
+- **Correction** : le message indique maintenant :
+  - le nombre de badgeages lus sur l'appareil, et sur combien de jours ;
+  - les badgeages déjà enregistrés ;
+  - les badgeages non rattachés à un salarié (mode d'identification à vérifier) ;
+  - les badgeages rejetés.
+- **Hikvision** : si aucun badgeage n'est trouvé avec les types d'événements réglés, une recherche de tous les
+  événements d'accès (minor 0) indique les types que l'appareil enregistre réellement. Ces types sont à ajouter dans
+  « Types d'événements lus » de la fiche.
+- **Essai** (faux appareil, badgeages de type 39) : l'export signale « autres types : 39 (2) ».
