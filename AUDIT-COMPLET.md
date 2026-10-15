@@ -263,3 +263,20 @@ affiche.
   2. ressaisie du mot de passe : enregistrée, bloc d'origine conservé ;
   3. test de communication après ressaisie : il atteint l'appareil (« L'appareil refuse la connexion » sur un port
      fermé).
+
+**Collecte Hikvision : « socket hang up »** (essai sur site) : le diagnostic (lecture GET) répondait, mais la collecte
+(recherche POST `/ISAPI/AccessControl/AcsEvent`) était coupée par l'appareil.
+
+- **Cause** (`pilotes/http-util.js`) :
+  - le corps de la requête partait en `Transfer-Encoding: chunked`, que les serveurs embarqués refusent ;
+  - les connexions étaient conservées entre les requêtes, alors que l'appareil ferme la sienne après la réponse 401 du
+    Digest.
+- **Correction** :
+  - le corps est envoyé avec sa longueur (`Content-Length`) ;
+  - une connexion neuve est ouverte pour chaque requête ;
+  - une coupure survenue avant toute réponse est retentée une fois ;
+  - si l'échec persiste, le message indique le port, le protocole et l'activation de l'API ISAPI.
+- **Preuve** (faux appareil qui coupe les corps découpés et ferme sa connexion après un 401) :
+  - avant : GET réussi, POST en « socket hang up » ;
+  - après : GET et POST réussis ;
+  - collecte complète par le pilote : 2 badgeages lus et intégrés, en 14 requêtes.

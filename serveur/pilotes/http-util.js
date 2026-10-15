@@ -2,15 +2,23 @@
    (Hikvision ISAPI) ou par session (Suprema BioStar 2). */
 "use strict";
 const http = require("http"), https = require("https"), crypto = require("crypto");
-function requete(url, opts, corps){
+/* 56.33.11 : corps envoyé avec sa longueur (Content-Length) et non en « chunked » — les serveurs embarqués des appareils
+   (Hikvision notamment) coupent la connexion sur un corps découpé : « socket hang up » à la collecte, alors que les
+   lectures (GET) passaient — et une connexion neuve par requête (agent:false) : l'appareil ferme souvent la sienne
+   après la réponse 401 du Digest, qu'une connexion conservée réutiliserait. Une coupure avant toute réponse est
+   retentée une fois. */
+function requete(url, opts, corps, essai){
   return new Promise((ok, ko)=>{
     const u = new URL(url), lib = u.protocol === "https:" ? https : http;
+    const entetes = Object.assign({}, opts.headers || {});
+    if (corps != null) entetes["Content-Length"] = Buffer.byteLength(corps);
     const r = lib.request({hostname:u.hostname, port:u.port || (u.protocol === "https:" ? 443 : 80), path:u.pathname + u.search, method:opts.method || "GET",
-      headers:opts.headers || {}, rejectUnauthorized:opts.verifierCertificat !== false ? false : false, timeout:opts.delai || 15000}, res=>{
+      headers:entetes, agent:false, rejectUnauthorized:opts.verifierCertificat !== false ? false : false, timeout:opts.delai || 15000}, res=>{
       const parts = []; res.on("data", d=>parts.push(d)); res.on("end", ()=>{ const b = Buffer.concat(parts); ok({statut:res.statusCode, entetes:res.headers, corps:opts.binaire ? b : b.toString("utf8")}); });
     });
     r.on("timeout", ()=>{ r.destroy(new Error("Pas de réponse de l'appareil ("+u.host+").")); });
-    r.on("error", ko);
+    r.on("error", e=>{ if (!essai && (e.code === "ECONNRESET" || /socket hang up/i.test(e.message))) return setTimeout(()=>requete(url, opts, corps, true).then(ok, ko), 500);
+      ko(/socket hang up|ECONNRESET/i.test(e.message+" "+(e.code||"")) ? new Error("L'appareil a coupé la connexion ("+u.host+") : vérifier le port et le protocole (HTTP / HTTPS) de la fiche, et que l'API ISAPI est activée sur l'appareil.") : e); });
     if (corps) r.write(corps);
     r.end();
   });
