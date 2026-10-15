@@ -1595,7 +1595,10 @@ async function traiter(req, res){
       if (!admin){ const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login);
         if (!({lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PAR] || 0)) return erreur(res, 403, "Réservé au paramétrage."); }
       return json(res, 200, await AN.compter(q)); }
-    if (p === "/api/v1/employes/complets" && req.method === "POST"){ const b = await corpsJson(req, 2e6); return json(res, 200, await AN.complets(C.login, Array.isArray(b.mats) ? b.mats : [])); }
+    if (p === "/api/v1/employes/complets" && req.method === "POST"){ const b = await corpsJson(req, 2e6), r = await AN.complets(C.login, Array.isArray(b.mats) ? b.mats : []);
+      /* export de la liste des employés : fiches sans photo (taille) */
+      if (b.sansPhoto) r.lignes = r.lignes.map(e=>{ const o = Object.assign({}, e); delete o.photo; delete o.visage; return o; });
+      return json(res, 200, r); }
     if (p === "/api/v1/employes/lot" && req.method === "POST"){ const b = await corpsJson(req); return json(res, 200, {lignes:await AN.lot(C.login, Array.isArray(b.mats) ? b.mats : [], Array.isArray(b.ids) ? b.ids : [])}); }
     /* v56.8 : fiche salarié 360° — chaque module actif apporte sa rubrique (droits et périmètre appliqués) */
     const m360 = /^\/api\/v1\/employes\/([^/]+)\/360$/.exec(p);

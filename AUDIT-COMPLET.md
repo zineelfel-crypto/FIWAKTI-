@@ -183,3 +183,16 @@ fichier ne contenait que les en-têtes des badgeages bruts.
   | Badgeages | 3 600 | 3 600 badgeages en base |
 
   Les fichiers Excel et CSV donnent le même nombre de lignes.
+
+**Export de l'écran Employés** (même cause) : en annuaire paginé, la liste des salariés n'est pas chargée dans le
+navigateur, et l'export produisait un fichier sans aucune ligne.
+
+- **Correction** : les matricules sont lus page par page, avec la recherche, le statut et le site de l'écran. Les fiches
+  sont ensuite lues par lots de 1 000 (`/api/v1/employes/complets`), dans le périmètre et avec le masquage appliqués
+  par le serveur.
+- **Changement côté serveur** (`principal.js`) : option `sansPhoto`, pour que l'export ne transporte pas les photos.
+- **Preuve** :
+  - 5 880 salariés exportés en 0,4 à 0,7 s (Excel et CSV) ;
+  - avec la recherche « trabelsi », 300 salariés exportés, comme à l'écran.
+
+Revue de tous les écrans en grand effectif : à part Pointage et Employés, l'export contient ce que l'écran affiche.
