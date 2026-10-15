@@ -224,5 +224,20 @@ navigateur, et l'export produisait un fichier sans aucune ligne.
 - Impression : 5 000 lignes, avec un message.
 - *Récapitulatif des éléments variables* exporté en Excel depuis le menu du haut : 5 880 lignes.
 
+Complément après un essai sur site : le menu *Exporter* du haut renvoyait « Ouvrez d'abord un état » quand l'état était
+ouvert en **consultation** (clic sur son nom).
+
+- Ce mode est maintenant reconnu : l'export suit la période, les colonnes et les filtres choisis à l'écran (service,
+  salarié).
+- Un bouton *Excel* est ajouté à côté d'*Exporter CSV*.
+- Côté serveur (`calcul.js`), la sélection accepte le filtre `mat` (un seul salarié).
+- Essai, état *Heures supplémentaires par semaine* :
+
+  | Sélection | Lignes |
+  |---|---|
+  | Tout le personnel | 5 880 |
+  | Un salarié | 1 |
+  | Un service | 20 |
+
 Revue de tous les écrans en grand effectif : à part Pointage, Employés et États, l'export contient ce que l'écran
 affiche.

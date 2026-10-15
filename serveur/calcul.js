@@ -206,7 +206,7 @@ function creer(B, D, opts){
   async function selection(login, q){
     const ref = await (D.referentielLecture || D.referentiel)() || {};
     const {P, emps: tous} = await D.perimetreDe(ref, login);
-    const cleM = [login, q.du || "", auj(), q.dept || "", q.site || "", q.chef || "", q.equipe || "", q.q || ""].join("|"), mm = MEMO_SEL.get(cleM);
+    const cleM = [login, q.du || "", auj(), q.dept || "", q.site || "", q.chef || "", q.equipe || "", q.q || "", q.mat || ""].join("|"), mm = MEMO_SEL.get(cleM);
     if (mm && mm.tous === tous && mm.ref === ref && mm.P === P) return {emps:mm.l.slice(), ref, global:mm.global, mats:mm.mats, parMat:mm.parMat};
     const r = selectionCalcul(ref, P, tous, q);
     r.mats = r.emps.map(e=>String(e.mat)); r.parMat = new Map(r.emps.map(e=>[String(e.mat), e]));
@@ -223,6 +223,7 @@ function creer(B, D, opts){
       l = l.filter(e=>arbre.has(e.deptId));
     }
     if (q.site) l = l.filter(e=>e.siteId === q.site);
+    if (q.mat) l = l.filter(e=>String(e.mat) === String(q.mat));   /* état consulté pour un seul salarié */
     if (q.chef) l = l.filter(e=>String(e.chefMat) === String(q.chef));
     if (q.equipe){
       const eq = new Set(), file = [String(q.equipe)];
@@ -236,7 +237,7 @@ function creer(B, D, opts){
       l = l.filter(e=>(e.nom+" "+e.prenom+" "+e.prenom+" "+e.nom+" "+e.mat).toLowerCase().indexOf(s) >= 0);
     }
     /* v49 : périmètre global sans filtre → aucune liste de matricules dans les requêtes (25 000 paramètres évités) */
-    const global = P.set === null && !q.dept && !q.chef && !q.site && !q.equipe && !(q.q && q.q.length >= 2);
+    const global = P.set === null && !q.dept && !q.chef && !q.site && !q.equipe && !q.mat && !(q.q && q.q.length >= 2);
     return {emps:l, ref, global};
   }
   const ident = e => ({mat:e.mat, nom:e.nom, prenom:e.prenom, deptId:e.deptId, siteId:e.siteId, id:e.id});
