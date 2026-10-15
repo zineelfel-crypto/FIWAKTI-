@@ -329,3 +329,6 @@ l'enregistrement).
   - avant : après « Tester tous », 3 appareils sur 3 en « Non testé » ;
   - après : 3 sur 3 en « Répond » ;
   - après l'enregistrement d'une fiche périmée : toujours « Répond ».
+- **Complément** : sur site, la fiche ouverte affichait encore « Non testé » alors que la liste affichait « Répond ». La
+  fiche affiche maintenant l'état de communication de l'appareil en direct, et non sa copie d'édition.
+  - Essai : fiche ouverte puis modifiée, Diagnostic, Enregistrer → la fiche et la liste affichent « Répond ».
