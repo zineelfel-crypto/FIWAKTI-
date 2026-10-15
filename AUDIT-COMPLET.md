@@ -156,3 +156,30 @@ calculées.
    - Styles en ligne autorisés par la CSP (`style-src 'unsafe-inline'`), nécessaires à l'interface. Les injections
      d'attributs sont désormais bloquées à la source.
    - Compteurs « à traiter » de Recrutement et HSE globaux : des nombres seulement, sans nom.
+
+## Correction après installation (essai sur site, 15/10/2026)
+
+**Export de l'écran Pointage** (Excel, CSV, texte, PDF) : sur les onglets *Journées*, *Semaines* et *Badgeages*, le
+fichier ne contenait que les en-têtes des badgeages bruts.
+
+- **Cause** :
+  - l'export reprenait la liste des badgeages, quel que soit l'onglet ;
+  - en mode grand effectif, cette liste n'est pas chargée dans le navigateur.
+- **Correction** (`app/app.js`) :
+  - chaque onglet exporte ses propres colonnes ;
+  - les onglets calculés par le serveur (*Journées*, *Synthèse*, *Badgeages* en annuaire paginé) sont lus page par
+    page, avec les filtres de l'écran et dans la limite du périmètre de l'utilisateur, jusqu'à 100 000 lignes ;
+    au-delà, un message renvoie vers les États ;
+  - si un calcul est en cours sur le serveur, l'export attend sa fin (2 min au plus) puis signale un fichier
+    éventuellement incomplet ;
+  - les heures sont écrites en décimal avec une virgule (lisibles par Excel en français) et les dates en jj/mm/aaaa ;
+  - un onglet vide affiche un message au lieu de produire un fichier vide.
+- **Preuve** : essai avec 6 000 salariés et 30 000 badgeages.
+
+  | Onglet | Lignes exportées | Contrôle (base) |
+  |---|---|---|
+  | Journées | 41 160 | 41 160 journées calculées en base |
+  | Synthèse | 11 760 | 5 880 salariés sur 2 semaines |
+  | Badgeages | 3 600 | 3 600 badgeages en base |
+
+  Les fichiers Excel et CSV donnent le même nombre de lignes.
