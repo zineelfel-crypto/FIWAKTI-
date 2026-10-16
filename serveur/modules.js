@@ -15,7 +15,7 @@ const CATALOGUE = [
     vues:["emp","org","champs"], lettre:""},
   {id:"FW-Time", nom:"Temps et présence", categorie:"metier", version:"55.0", implemente:true, deps:["FW-Core","FW-RH"], lettre:"P",
     vues:["ptg","cal","jou","tt","arit","rgv","suivi","valj","cloture","dmd","circuits","bord","mgr"],
-    donnees:["cals","jours","tt","arits","reglesV","circuits","convs","clotures"], colls:["ptg","abs","dmd","corrections","ajust"],
+    donnees:["cals","feries","jours","tt","arits","reglesV","circuits","convs","clotures"], colls:["ptg","abs","dmd","corrections","ajust"],
     routes:["/api/v1/calcul","/api/v1/journees","/api/v1/registre-anomalies","/api/v1/ajustements","/api/v1/recalculs","/api/v1/pointeuses","/api/v1/evenements","/api/v1/ingestion","/api/v1/moteur"]},
   {id:"FW-Acces", nom:"Contrôle des accès", categorie:"metier", version:"55.0", implemente:true, deps:["FW-Core","FW-RH","FW-Time"], lettre:"A",
     vues:["zones","acces","aplages","aplans"], donnees:["zones","aplages","aplans"]},

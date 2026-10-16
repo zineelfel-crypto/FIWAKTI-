@@ -15,7 +15,7 @@ const AJOUT_LIBRE = ["notifs","audit","journal"];
 /* droit nécessaire pour modifier chaque collection : [module, rang minimal] */
 const ECRITURE = {
   emps:["EMP",2], ptg:["PTG",2], corrections:["PTG",2], dmd:["ABS",2], abs:["ABS",2], notifs:["ABS",0], audit:["PTG",0],
-  cals:["CAL",4], jours:["CAL",4], tt:["CAL",4], arits:["CAL",4], convs:["PAR",4], etats:["ETA",4],
+  cals:["CAL",4], feries:["CAL",4], jours:["CAL",4], tt:["CAL",4], arits:["CAL",4], convs:["PAR",4], etats:["ETA",4],
   sites:["PAR",4], depts:["PAR",4], champs:["PAR",4], impMod:["PAR",2],
   terms:["TER",4], zones:["TER",4], aplages:["TER",4], aplans:["TER",4], bio:["TER",2], bioRegles:["TER",4], msgp:["TER",2],
   reglesV:["CAL",4], etablissements:["PAR",4], corbeilleCfg:["SYS",4], users:["SYS",4], profils:["SYS",4], circuits:["SYS",4], regles:["SYS",4], journal:["SYS",0], corbeille:["SYS",4], clotures:["PTG",4]

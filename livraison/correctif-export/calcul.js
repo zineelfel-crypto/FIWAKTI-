@@ -6,7 +6,7 @@ const path = require("path");
 /* 56.33.11 : comparateur créé une fois (même ordre que localeCompare sans paramètre, ~10 fois plus rapide sur 50 000
    salariés) */
 const COLL = new Intl.Collator();
-const REF_GLOBALES = ["cals","jours","tt","arits","convs","sites","depts","champs","clotures","params","secu","regles","circuits","reglesV","etablissements"];
+const REF_GLOBALES = ["cals","feries","jours","tt","arits","convs","sites","depts","champs","clotures","params","secu","regles","circuits","reglesV","etablissements"];
 function creer(B, D, opts){
   let GENERATION = 0;
   /* 56.33.11 : deux générations. GENERATION change à chaque modification faite par un utilisateur (correction,

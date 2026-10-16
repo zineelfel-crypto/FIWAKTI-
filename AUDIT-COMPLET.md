@@ -522,3 +522,52 @@ salarié absent).
     touché ;
   - petit effectif (démo) : inchangé, 5 salariés à modifier sur 5 ;
   - 54 écrans sans erreur.
+
+**Jours fériés : table unique, heures fériées payées, férié travaillé sans double comptage** (besoin exprimé sur
+site).
+
+- **Constat** (version d'origine) :
+  - un jour férié était une exception posée à la main dans chaque calendrier, et chaque année. Un calendrier oublié
+    rendait les salariés absents injustifiés ;
+  - `db.feries` était cité mais jamais utilisé ;
+  - un férié travaillé était compté deux fois : en heures fériées (HFERIE) et en heures supplémentaires (HSJ1 / HSJ2),
+    avec l'anomalie « heures sup. 480 min » à valider ;
+  - aucune heure payée n'était comptée pour un férié chômé (seulement le nombre de jours, NBFERIE).
+- **Ajouts** (`app/app.js`, moteur partagé par le navigateur et le serveur) :
+  1. **écran *Temps & présence › Jours fériés*** (FR / EN / AR) :
+     - liste par année : date, libellé, type « chômé payé » ou « chômé non payé », sites (aucun = tous) ;
+     - bouton « Jours fériés tunisiens {année} », qui ajoute les 8 dates fixes. Les fêtes religieuses se saisissent
+       chaque année, avec des libellés proposés (Aïd el-Fitr, Aïd el-Idha, Ras el Am el Hejri, Mouled) ;
+     - droit de modification : paramétrage des calendriers (CAL config).
+  2. **application automatique** (`dayInfo`) :
+     - le jour férié s'impose à tous les calendriers et aux salariés des sites concernés ;
+     - **écarté s'il tombe un jour de repos** du calendrier ;
+     - une exception posée dans un calendrier reste prioritaire ;
+     - les fériés posés à la main restent valables ;
+     - le congé ne décompte pas le férié, et la grille du calendrier l'affiche.
+  3. **férié travaillé** :
+     - compté en heures fériées (FERIE_TRAV / HFERIE, avec la majoration R_FERIE_MAJ), **pas** en heures
+       supplémentaires journalières ni hebdomadaires (HPSEM d'origine) ;
+     - pas d'anomalie « heures sup. » ;
+     - la nouvelle règle versionnée `FERIE_HS` (« Férié travaillé compté aussi en heures sup. », Non par défaut)
+       rétablit le double comptage si la convention le prévoit ;
+     - variable `R_FERIE_HS`.
+  4. **férié chômé payé** :
+     - nouvelle variable `FERIE_PAYE` : durée de la journée prévue par le calendrier, 0 si « non payé » ;
+     - nouveau compteur standard `HFERIEPAY` « Heures fériées payées », ajouté automatiquement s'il manque.
+- **Serveur** :
+  - rubrique `feries` autorisée au droit CAL config (`perimetre.js`) ;
+  - rattachée à FW-Time (`modules.js`) ;
+  - sa modification relance tout le calcul (`calcul.js`, REF_GLOBALES).
+- **Preuve** :
+  - démo, calendrier « Administratif » :
+    - 15/10 chômé : jour férié, théorique 0, HFERIEPAY 8 h, aucune anomalie ;
+    - 15/10 travaillé 8 h : HFERIE 8 h, HSJ1 / HSJ2 = 0, aucune anomalie ; avec `FERIE_HS` = Oui, HSJ 2 + 6 et
+      anomalie « heures sup. », comme avant ;
+    - samedi 25/07 : repos dans le calendrier « Production » (férié écarté, 0 h) ; demi-journée dans
+      « Administratif » (HFERIEPAY 4 h) ;
+    - exception de calendrier : journée normale conservée ;
+    - férié limité au site de Hammamet : appliqué aux seuls salariés de ce site ;
+    - congé du 14 au 16/10 : 2 jours décomptés ;
+  - serveur d'essai : liste enregistrée sans refus ; 15/10 recalculé en férié, sans anomalie, absent ou travaillé ;
+  - 55 écrans sans erreur (6 000 salariés) ; journées alternatives et badgeages répétés inchangés.
