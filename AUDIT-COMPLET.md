@@ -571,3 +571,42 @@ site).
     - congé du 14 au 16/10 : 2 jours décomptés ;
   - serveur d'essai : liste enregistrée sans refus ; 15/10 recalculé en férié, sans anomalie, absent ou travaillé ;
   - 55 écrans sans erreur (6 000 salariés) ; journées alternatives et badgeages répétés inchangés.
+
+**Compteurs (Arithmétiques) : assistant de formules** (besoin exprimé sur site : formules peu lisibles, aucune aide
+en cas d'erreur de syntaxe).
+
+- **Constat** (version d'origine) :
+  - le contrôle de la formule n'était pas relancé pendant la saisie. `SI(PRESENCE > 8; PRESENCE - 8 ; 0`, à qui
+    manque une parenthèse, restait affichée « ✓ Formule valide » ;
+  - une variable mal orthographiée (`PRESENSE`) passait le contrôle, et l'erreur n'apparaissait qu'au calcul ;
+  - les messages étaient bruts, sans position ni correction ;
+  - les variables étaient une liste de codes non cliquables, sans catégories ;
+  - une formule invalide pouvait être enregistrée ;
+  - la description de THEORIQUE était écrasée par une autre traduction (« Durée théorique à exprimer entre 0 et 1440
+    minutes »).
+- **Ajouts** (`app/app.js`, `app/app.css`, FR / EN / AR) :
+  - **contrôle pendant la frappe** (`formDiag`, même grammaire que le moteur) :
+    - message clair et partie fautive surlignée dans la formule ;
+    - **bouton « Corriger »** quand la correction est sûre : parenthèses manquantes ou en trop, variable ou fonction
+      mal orthographiée (« Vouliez-vous dire PRESENCE ? »), opérateur ou « ; » en trop ;
+    - nombre d'arguments faux, avec la syntaxe de la fonction ;
+    - argument vide, opérateur manquant, `CUM` sur autre chose qu'un compteur, compteur qui s'utilise lui-même ;
+  - **formule en clair**, par exemple : « si Heures pointées du jour > 8 alors Heures pointées du jour − 8, sinon 0 » ;
+  - **essai immédiat sur une journée type** : un champ par variable utilisée, résultat recalculé à chaque frappe,
+    rien n'est enregistré ;
+  - **palette cliquable** :
+    - variables classées (Temps de présence, Retards et écarts, Heures sup. / nuit / dimanche / férié et taux,
+      Calendrier, Absences, Types d'absence, Autres compteurs) ;
+    - fonctions avec leur syntaxe et un exemple ;
+    - insertion à l'emplacement du curseur ; description au survol ;
+  - **liste** : formules colorées (fonctions, variables, nombres), lecture en clair au survol ; formules invalides
+    signalées avec leur message ;
+  - **enregistrement refusé** si la formule est invalide, avec le message d'erreur ;
+  - libellé de THEORIQUE corrigé (« Heures théoriques du jour »).
+- **Preuve** :
+  - les 37 compteurs existants sont reconnus valides, sans faux positif ;
+  - 10 erreurs types diagnostiquées avec la bonne position, dont 5 corrigées en un clic ;
+  - essai : PRESENCE 10, THEORIQUE 8 → 2 ;
+  - enregistrement d'une formule invalide refusé ;
+  - moteur du serveur inchangé (journées et synthèse calculées) ;
+  - 55 écrans sans erreur.
