@@ -56,3 +56,8 @@ voir INSTALLATION.md). Scripts livrés : `outils/livraison/installer-maj.js` (mi
 Les fichiers `FIWAKTI-maj-*.fwk` sont du JSON signé (`format: fiwakti-maj-1`) contenant chaque fichier en base64
 avec son SHA-256. Ce dépôt a été extrait du paquet 56.33.10 (1 339 fichiers, empreintes vérifiées).
 Un paquet modifié doit être re-signé avec la clé privée de l'éditeur (absente de ce dépôt) pour être accepté.
+
+## Version de démonstration autonome
+`node outils/construire-demo.js` produit `livraison/FIWAKTI-demo.html` : un seul fichier, en mode démo, sans serveur.
+Les modules rejouent `outils/demo/modules-reponses.json`, et leurs enregistrements sont simulés. Le constructeur échoue si
+`demoDemande` change dans `app.js`. Reconstruire après toute modification de `app/` ou des manifestes de modules.

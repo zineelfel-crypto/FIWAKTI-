@@ -378,3 +378,36 @@ site : mise à pied, code 11, réactivation automatique ; maladie longue durée,
   3. absences terminées : mise à pied et congé réactivés automatiquement, avec renvoi mis en file ; maladie longue
      durée toujours bloquée et affichée « absence terminée » dans la liste RH ;
   4. clic sur « Réactiver l'empreinte » : blocage levé par l'administrateur, renvoi mis en file.
+
+**Nouvelle vérification complète et version de démonstration autonome** (16/10/2026).
+
+- **Corrigé** (`app/app.js`) :
+  - accueil d'un salarié, carte « Mes demandes » : l'état était affiché brut (« refusee », « attente »). Il est
+    maintenant traduit : Refusée, Acceptée, En instance, Annulée, en français, en anglais et en arabe ;
+  - le terme interdit « paie » restait dans l'écran *Administration › Recette* : description, période, état mensuel,
+    noms de la convention et de l'état créés par le jeu d'essai. Même chose en anglais (« payroll ») et en arabe
+    (« الأجر »). Il est remplacé par « éléments variables » ou par « période ».
+- **Vérifié, sans défaut trouvé** :
+  - syntaxe des 60 fichiers JavaScript (`node --check`) et des manifestes JSON ;
+  - les 54 écrans en mode serveur, sur deux serveurs d'essai (démonstration et 6 000 salariés) : aucune erreur
+    JavaScript, aucune réponse HTTP en erreur ;
+  - sécurité de l'API, 34 contrôles :
+    - les 17 routes du cœur et des modules refusent l'accès sans session (401) ;
+    - fichiers de données, clés, code et traversée de chemins (`..`, `%2e%2e`, `..%2f`) : 404, avec ou sans session ;
+    - en-têtes CSP, X-Frame-Options, nosniff et Referrer-Policy présents ;
+    - écriture refusée sans jeton CSRF, avec un jeton faux et depuis une autre origine (403) ;
+    - aucun mot de passe ni secret dans `/donnees` ni dans les journaux ;
+  - le terme « Paie » ne reste plus dans le code du serveur, les modules ni les pages publiques. Ses seules traces sont
+    les règles de migration qui convertissent les anciennes données.
+- **Version de démonstration** : `outils/construire-demo.js` produit `livraison/FIWAKTI-demo.html`. C'est un seul
+  fichier de 2 Mo qui s'ouvre sans serveur ni réseau :
+  - le cœur fonctionne sur le jeu d'exemple intégré, et rien n'est enregistré ;
+  - les 10 modules rejouent les réponses de `outils/demo/modules-reponses.json` (52 réponses, enregistrées sur un
+    serveur d'essai rempli de données fictives) ;
+  - les enregistrements faits dans un module sont simulés.
+  - **Preuve** (navigateur, ouverture en `file://`) :
+    - 54 écrans ouverts, 0 erreur, 0 requête réseau ;
+    - arabe en sens droite-à-gauche ; thème sombre ;
+    - export Excel des employés téléchargé ;
+    - première connexion d'un salarié (matricule 10402, changement de mot de passe, puis son accueil) ;
+    - saisie dans le module HSE : « Enregistré ».

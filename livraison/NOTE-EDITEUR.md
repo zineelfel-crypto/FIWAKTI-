@@ -8,7 +8,7 @@ efface à son installation.
 
 | Fichier | Rôle |
 |---|---|
-| `corrections-56.33.10-vers-56.33.11.patch` | Toutes les modifications du code (`serveur/`, `app/`, `public/`), au format `git diff` : 39 fichiers |
+| `corrections-56.33.10-vers-56.33.11.patch` | Toutes les modifications du code (`serveur/`, `app/`, `public/`), au format `git diff` : 40 fichiers |
 | `AUDIT-COMPLET.md` | Pour chaque constat : ce qui a été trouvé, la correction et la preuve. 15 constats critiques ou élevés, environ 35 moyens ou faibles |
 | `PERFORMANCES-GRAND-EFFECTIF.md` | Mesures à 50 000 salariés et 5,5 millions de badgeages, avec les optimisations faites |
 | `ANALYSE-INSTALLATION.md` | Anomalies de l'assistant d'installation, A à M |
