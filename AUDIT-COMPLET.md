@@ -471,3 +471,30 @@ site : badgeages 14:00 et 23:00 → horaire du soir).
     - sans alternative, résultat inchangé (retard 480 min) ;
   - équipe de nuit permanente : avant, deux « oublis » ; après, aucune anomalie et 8,05 h ;
   - 54 écrans sans erreur (démonstration et 6 000 salariés).
+
+**Nouvelle règle « Badgeages répétés »** (besoin exprimé sur site : plusieurs badgeages en quelques minutes rendent le
+salarié absent).
+
+- **Constat** :
+  - FIWAKTI n'écartait que les événements strictement identiques (même badgeage reçu deux fois) ;
+  - quand la pointeuse ne fournit pas le sens, il est déduit par alternance. Deux badgeages à 07:58 et 07:59 deviennent
+    « entrée, sortie », et toute la journée se décale : « oubli de pointage », présence non calculée.
+- **Ajout** (`app/app.js`, moteur partagé par le navigateur et le serveur) :
+  - règle `DOUBLON_MIN` au catalogue de *Administration › Règles*, groupe des tolérances, libellés FR / EN / AR ;
+  - valeur en minutes, par défaut 0 (comportement inchangé) ;
+  - comme les autres règles : pour toute la société, ou par établissement, site, service, équipe, planning,
+    catégorie ou salarié, avec date d'effet ;
+  - les badgeages d'un salarié séparés de N minutes au plus (secondes comprises) forment un seul badgeage : le
+    dernier est compté ;
+  - si le sens a été déduit par alternance, il est recalculé pour la suite de la journée. Si la pointeuse a fourni
+    le sens, celui du dernier badgeage est gardé ;
+  - s'applique à la présence, aux retards, aux anomalies, aux compteurs et au relevé du mois ;
+  - les badgeages reçus ne sont jamais supprimés : ils restent visibles et traçables ;
+  - modifier la règle relance le calcul de toutes les journées (règles = paramétrage global).
+- **Preuve** :
+  - navigateur, sens par alternance, 07:58 E, 07:59 S, 12:01 E, 13:00 S, 17:02 E :
+    - règle à 0 : « oubli », présence non calculée ;
+    - règle à 3 : 07:59 E, 12:01 S, 13:00 E, 17:02 S ; 8,07 h ; aucune anomalie ;
+  - navigateur, sens fourni par l'appareil, double entrée 08:03 et 08:04 : 7,92 h, aucune anomalie ;
+  - serveur d'essai, règle enregistrée comme depuis l'écran Règles : même résultat (8,07 h, aucune anomalie) ;
+  - 54 écrans sans erreur.
