@@ -498,3 +498,27 @@ salarié absent).
   - navigateur, sens fourni par l'appareil, double entrée 08:03 et 08:04 : 7,92 h, aucune anomalie ;
   - serveur d'essai, règle enregistrée comme depuis l'écran Règles : même résultat (8,07 h, aucune anomalie) ;
   - 54 écrans sans erreur.
+
+**Affectation des calendriers en masse (par site, service…) sans effet en grand effectif** (constat sur site).
+
+- **Cause** (version d'origine) : l'écran *Calendrier › Affectation en masse* sélectionnait les salariés parmi ceux
+  chargés dans le navigateur. En grand effectif, l'annuaire est paginé par le serveur : presque aucun salarié n'est
+  chargé, donc la sélection était vide ou partielle, et l'application n'enregistrait rien.
+- **Correction** :
+  - `serveur/principal.js` : nouvelle route `POST /api/v1/employes/calendrier-masse` ;
+    - même sélection que l'écran : sites, services avec sous-services, champs à la date d'effet, calendrier actuel,
+      salariés sortis inclus ou non ;
+    - calculée sur tout le périmètre de l'utilisateur, avec le droit de modification des salariés exigé ;
+    - sans `appliquer` : nombre de salariés, nombre à modifier et aperçu des 60 premiers ;
+    - avec `appliquer` : historique de calendrier complété à la date d'effet (l'ancien calendrier reste avant cette
+      date). L'enregistrement se fait par lots de 500 via la synchronisation : droits, périmètre, versions et conflits.
+      Le calcul est ensuite relancé, et l'opération est tracée au journal d'audit (`calendriers.masse`) ;
+  - `app/app.js` : en annuaire paginé, l'écran interroge cette route à chaque changement de filtre, puis l'appelle
+    pour appliquer. Les fiches déjà ouvertes sont rechargées. En petit effectif, comportement inchangé.
+- **Preuve** (6 000 salariés, vérifié en base) :
+  - avant : population vide ;
+  - après : 5 890 salariés au total, 242 pour le site 1 ; 242 affectés au calendrier choisi à partir du 01/10 ;
+  - historique conservé (ancien calendrier jusqu'au 30/09) ; les 60 sortis du site non modifiés ; aucun autre site
+    touché ;
+  - petit effectif (démo) : inchangé, 5 salariés à modifier sur 5 ;
+  - 54 écrans sans erreur.
