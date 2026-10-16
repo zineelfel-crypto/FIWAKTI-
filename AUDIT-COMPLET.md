@@ -612,3 +612,26 @@ en cas d'erreur de syntaxe).
   - enregistrement d'une formule invalide refusé ;
   - moteur du serveur inchangé (journées et synthèse calculées) ;
   - 55 écrans sans erreur.
+
+**Période « Du / au » : date de début postérieure à la date de fin acceptée sans message** (constat sur site).
+
+- **Constat** (version d'origine) :
+  - les couples de dates (Pointage, états en période, demandes d'absence, validation des journées, recalcul,
+    clôture, délégations, règles versionnées, simulation de solde…) acceptaient une date de début après la date de
+    fin, sans message ;
+  - les écrans calculaient alors sur une période vide ou incohérente.
+- **Correction** (`app/app.js`, contrôle commun à tous les écrans, FR / EN / AR) :
+  - un couple est reconnu par ses attributs (`du` / `au`, `from` / `to`, `valid_from` / `valid_to`, `debut` / `fin`,
+    même indice de ligne) ou ses identifiants (`…Du` / `…Au`) ;
+  - si la date de début est après la date de fin : la saisie est refusée et la valeur précédente rétablie ;
+  - les deux champs sont signalés en rouge et un message précise les deux dates et comment corriger (« modifiez
+    d'abord la date de fin » pour déplacer une période) ;
+  - l'écran ne reçoit jamais la période impossible ;
+  - la saisie clavier jj/mm/aaaa n'est contrôlée qu'une fois la date complète : pas de blocage pendant la frappe.
+- **Preuve** (démo) :
+  - écrans réels : Pointage (`data-ptgp`), Clôture, Règles versionnées, délégation d'un compte → refus, valeur
+    rétablie, message ;
+  - balisage exact des autres écrans (demande, état en période, validation, recalcul, pointages serveur,
+    délégation globale, simulation de solde, plusieurs lignes de délégation) → couple reconnu, début après la fin
+    refusé, période correcte acceptée ;
+  - 55 écrans sans erreur.
