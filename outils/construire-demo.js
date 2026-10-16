@@ -4,7 +4,7 @@
    - données d'exemple de l'application : jeu intégré à app.js (mode « démo », rien n'est enregistré) ;
    - modules FW- : code et styles intégrés ; leurs réponses d'API sont rejouées depuis outils/demo/modules-reponses.json
      (enregistrées sur un serveur d'essai rempli de données fictives). Les enregistrements faits dans un module sont
-     simulés : ils réussissent, mais ne modifient pas les données affichées.
+     appliqués en mémoire (outils/demo/rejeu.js) : la liste se met à jour, rien n'est conservé à la fermeture.
    Usage : node outils/construire-demo.js [--sortie livraison/FIWAKTI-demo.html] */
 "use strict";
 const fs = require("fs"), path = require("path");
@@ -37,25 +37,8 @@ for (const f of fs.readdirSync(dirMan).filter(f => /^FW-[A-Za-z]+\.json$/.test(f
 }
 const REP = JSON.parse(lire("outils/demo/modules-reponses.json"));
 
-/* rejeu des API des modules : correspondance exacte, puis même chemin sans paramètres, puis même chemin avec un
-   autre identifiant final (fiche d'exemple) ; écritures simulées */
-const API = function(REP){
-  const cles = Object.keys(REP);
-  const copie = v => JSON.parse(JSON.stringify(v));
-  return function(chemin, o){
-    const c = "/"+String(chemin || "").replace(/^\.?\//, "");
-    const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
-    if (methode !== "GET"){
-      try { window.dispatchEvent(new CustomEvent("fwk-demo-ecriture", {detail:{chemin:c}})); } catch(e){}
-      return new Promise(ok => setTimeout(() => ok({ok:true, demo:true, id:"demo-"+Date.now().toString(36)}), 150));
-    }
-    const p = c.split("?")[0], parent = p.replace(/\/[^/]+$/, "/");
-    let k = REP[c] !== undefined ? c : cles.find(x => x.split("?")[0] === p);
-    if (!k) k = cles.find(x => { const y = x.split("?")[0]; return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });
-    if (!k) return Promise.reject(Object.assign(new Error("Non disponible dans la version de démonstration."), {status:404}));
-    return new Promise(ok => setTimeout(() => ok(copie(REP[k])), 120));
-  };
-};
+/* rejeu des API des modules et écritures en mémoire : voir outils/demo/rejeu.js */
+const API = lire("outils/demo/rejeu.js").replace(/^\/\*[\s\S]*?\*\/\s*/, "").trim();
 
 const pub = ["ext-aide.js", "ext-pointage-jour.js", "ext-import-renforce.js", "ext-xlsx.js", "anniversaire.js"];
 
@@ -69,7 +52,7 @@ const html = '<!DOCTYPE html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\
   +'<style id="fwSombre">\n'+css(lire("public/theme-sombre.css"))+'\n</style>\n'
   +'</head>\n<body>\n<div id="app" class="fw"><div class="fw-boot">FIWAKTI</div></div>\n<div id="fwprint" aria-hidden="true"></div>\n'
   +'<script>\nwindow.FWK_DEMO={MAN:'+js(JSON.stringify(MAN))+',\nCSS:'+js(JSON.stringify(CSS))+',\nCODE:{\n'+js(CODE.join(",\n"))+'\n},\n'
-  +'api:('+js(API.toString())+')('+js(JSON.stringify(REP))+')};\n</script>\n'
+  +'api:'+js(API)+'('+js(JSON.stringify(REP))+')};\n</script>\n'
   +pub.map(f => '<script>\n'+js(lire("public/"+f))+'\n</script>\n').join("")
   +'<script>\n'+js(app)+'\n</script>\n</body>\n</html>\n';
 

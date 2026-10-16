@@ -59,5 +59,6 @@ Un paquet modifié doit être re-signé avec la clé privée de l'éditeur (abse
 
 ## Version de démonstration autonome
 `node outils/construire-demo.js` produit `livraison/FIWAKTI-demo.html` : un seul fichier, en mode démo, sans serveur.
-Les modules rejouent `outils/demo/modules-reponses.json`, et leurs enregistrements sont simulés. Le constructeur échoue si
+Les modules rejouent `outils/demo/modules-reponses.json` ; leurs écritures sont appliquées en mémoire par
+`outils/demo/rejeu.js` (créations ajoutées aux listes, actions faite / clore / étape…, filtrage par statut). Le constructeur échoue si
 `demoDemande` change dans `app.js`. Reconstruire après toute modification de `app/` ou des manifestes de modules.

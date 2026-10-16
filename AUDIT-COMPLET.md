@@ -404,7 +404,9 @@ site : mise à pied, code 11, réactivation automatique ; maladie longue durée,
   - le cœur fonctionne sur le jeu d'exemple intégré, et rien n'est enregistré ;
   - les 10 modules rejouent les réponses de `outils/demo/modules-reponses.json` (52 réponses, enregistrées sur un
     serveur d'essai rempli de données fictives) ;
-  - les enregistrements faits dans un module sont simulés.
+  - les écritures des modules sont appliquées en mémoire (`outils/demo/rejeu.js`). Une création s'ajoute aux listes,
+    et une action (faite, analyse, clôture, réalisation, étape, tâche cochée) change l'état de l'élément. Les listes sont
+    filtrées par statut comme sur le serveur. Rien n'est conservé à la fermeture.
   - **Preuve** (navigateur, ouverture en `file://`) :
     - 54 écrans ouverts, 0 erreur, 0 requête réseau ;
     - arabe en sens droite-à-gauche ; thème sombre ;

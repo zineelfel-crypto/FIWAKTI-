@@ -26,7 +26,13 @@
 - **Modules** (Santé et sécurité, Médecine du travail, Formation, Compétences, Évaluation, Intégration, Recrutement,
   Visiteurs, Pilotage BI, Migration) :
   - les écrans affichent des exemples enregistrés ;
-  - un enregistrement affiche « Enregistré », mais la liste ne change pas ;
+  - les ajouts apparaissent dans les listes : accident déclaré, visite planifiée, candidat, session de formation, poste,
+    risque, équipement… Les compteurs du tableau de bord Santé et sécurité suivent ;
+  - les actions changent l'état : action corrective faite, événement analysé ou clos, visite réalisée, étape d'un
+    candidat, tâche d'intégration cochée ;
+  - tout repart des exemples à la fermeture ou avec **Quitter la démo** ;
+  - certaines saisies très liées au serveur sont seulement simulées (« Enregistré » sans changement visible) : niveaux
+    de compétences, évaluations, visiteurs, imports de Migration ;
   - les dates des exemples sont celles du 16/10/2026.
 - **Pointeuses** : aucune communication réelle.
 
