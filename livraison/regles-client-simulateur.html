@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Règles client FIWAKTI</title>
+<style>
+:root{
+  --bg:#f5f7f6; --surface:#ffffff; --surface-2:#eef3f1; --text:#16211d; --muted:#5d6b66; --line:#d8e1dd;
+  --accent:#0f6b55; --accent-text:#ffffff; --accent-soft:#e1f1ec; --danger:#b4351f; --danger-soft:#fbe9e5;
+  --warn:#9a5b00; --warn-soft:#fdf1dc; --ok:#1d7a4c; --focus:#2f8f73; --shadow:0 1px 2px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1513; --surface:#161e1b; --surface-2:#1d2824; --text:#e5ece9; --muted:#9aaba5; --line:#2b3934;
+    --accent:#3fb592; --accent-text:#08130f; --accent-soft:#183a30; --danger:#f08a74; --danger-soft:#3a1d17;
+    --warn:#e8b25b; --warn-soft:#3a2c14; --ok:#5fd19a; --focus:#5fd1ab; --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --surface:#161e1b; --surface-2:#1d2824; --text:#e5ece9; --muted:#9aaba5; --line:#2b3934;
+  --accent:#3fb592; --accent-text:#08130f; --accent-soft:#183a30; --danger:#f08a74; --danger-soft:#3a1d17;
+  --warn:#e8b25b; --warn-soft:#3a2c14; --ok:#5fd19a; --focus:#5fd1ab; --shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--surface);border-bottom:1px solid var(--line);padding:14px 16px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+header .wrap{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:0}
+h1{font-size:19px;margin:0}
+h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--muted);font-size:13px}
+.spacer{flex:1}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:16px 0 12px}
+nav.tabs button{border:1px solid var(--line);background:var(--surface);color:var(--text);padding:8px 14px;border-radius:999px;cursor:pointer;font:inherit}
+nav.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+input,select,textarea{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+input[type=checkbox]{width:18px;height:18px;padding:0}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--text);padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.btn.sm{padding:4px 9px;font-size:13px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--danger)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;white-space:nowrap}
+th{background:var(--surface-2);font-weight:600;font-size:13px;color:var(--muted)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td input{width:100%}
+td input.t{width:76px;text-align:center;font-variant-numeric:tabular-nums}
+td input.n{width:70px}
+td.formule{min-width:340px;white-space:normal}
+td.formule input{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+.err{color:var(--danger);font-size:12px;margin-top:3px;white-space:normal}
+.okm{color:var(--ok);font-size:12px;margin-top:3px}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--surface-2);color:var(--muted)}
+.pill.j{background:var(--accent-soft);color:var(--accent)}
+.pill.p{background:var(--warn-soft);color:var(--warn)}
+.note{background:var(--accent-soft);border-radius:10px;padding:10px 12px;font-size:13px}
+.note.warn{background:var(--warn-soft)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--surface-2);border-radius:10px;padding:10px 12px}
+.kpi .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12px;color:var(--muted)}
+tr.dim td{color:var(--muted)}
+tr.we td:first-child{color:var(--warn)}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;background:var(--surface-2);padding:1px 5px;border-radius:5px}
+details summary{cursor:pointer;color:var(--muted);font-size:13px}
+.hidden{display:none}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}
+#toast.on{opacity:1}
+@media print{header .row,nav.tabs,.btn,.noprint{display:none!important}.card{box-shadow:none;break-inside:avoid}body{background:#fff;color:#000}section.hidden{display:block!important}}
+@media (max-width:600px){h1{font-size:17px}.card{padding:12px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div>
+      <h1>Règles client — éléments variables</h1>
+      <div class="sub">Maquette du module FIWAKTI : saisir les règles d'un client, les simuler, exporter le paquet</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="row">
+      <button class="btn" id="bTheme" title="Thème clair / sombre">◐</button>
+      <button class="btn" id="bImporter">Importer…</button>
+      <input type="file" id="fImport" accept=".json,application/json" class="hidden">
+      <button class="btn pri" id="bExporter">Exporter le paquet</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="conv" aria-selected="true">1. Convention</button>
+    <button role="tab" data-tab="cpt" aria-selected="false">2. Compteurs</button>
+    <button role="tab" data-tab="abs" aria-selected="false">3. Absences</button>
+    <button role="tab" data-tab="sim" aria-selected="false">4. Simulation</button>
+    <button role="tab" data-tab="fiche" aria-selected="false">5. Fiche des règles</button>
+  </nav>
+
+  <!-- 1. Convention -->
+  <section data-panel="conv">
+    <div class="card">
+      <h2>Client et convention</h2>
+      <div class="grid">
+        <label class="f">Client<input data-c="client"></label>
+        <label class="f">Convention collective<input data-c="nom"></label>
+        <label class="f">Seuil des heures supplémentaires (h / semaine)<input type="number" step="0.5" data-c="hebdo"></label>
+        <label class="f">Heures au 1er taux (h / semaine)<input type="number" step="0.5" data-c="h1"></label>
+        <label class="f">1er taux (%)<input type="number" data-c="r1"></label>
+        <label class="f">2e taux (%)<input type="number" data-c="r2"></label>
+        <label class="f">Base journalière (h)<input type="number" step="0.5" data-c="baseJour"></label>
+        <label class="f">Période des éléments variables<select data-c="evMode"><option value="calendaire">Mois calendaire</option><option value="glissante">Période glissante</option></select></label>
+        <label class="f">Jour de début de la période (glissante)<input type="number" min="1" max="28" data-c="evStart"></label>
+        <label class="f">Heure de début de journée (retards)<input class="hh" inputmode="numeric" placeholder="hh:mm" maxlength="5" data-c="heureDebut" title="Une arrivée plus de 4 h après cette heure est traitée comme un autre poste, sans retard"></label>
+        <label class="f">Tolérance de retard (min)<input type="number" min="0" data-c="tolRetard"></label>
+        <label class="f">Arrondi des heures travaillées<select data-c="arrondi"><option value="0">Aucun</option><option value="5">5 min (inférieur)</option><option value="15">15 min (inférieur)</option><option value="30">30 min (inférieur)</option></select></label>
+        <label class="f">Heures de nuit : début<input class="hh" inputmode="numeric" placeholder="hh:mm" maxlength="5" data-c="nuitDebut"></label>
+        <label class="f">Heures de nuit : fin<input class="hh" inputmode="numeric" placeholder="hh:mm" maxlength="5" data-c="nuitFin"></label>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Horaire théorique par jour</h2>
+      <div class="sub" style="margin-bottom:8px">Heures prévues par jour de la semaine (0 = repos). Variable <code>THEORIQUE</code>.</div>
+      <div class="grid" id="theoJours"></div>
+    </div>
+    <div class="note">Constantes utilisables dans les formules :
+      <code>HEBDO</code> (seuil des heures supplémentaires), <code>SEUIL1</code> (heures au 1er taux),
+      <code>TAUX1</code>, <code>TAUX2</code>, <code>BASEJOUR</code>.</div>
+  </section>
+
+  <!-- 2. Compteurs -->
+  <section data-panel="cpt" class="hidden">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <h2 style="margin:0">Compteurs (arithmétiques)</h2>
+        <div class="spacer"></div>
+        <select id="biblio" aria-label="Ajouter depuis la bibliothèque"><option value="">+ Ajouter depuis la bibliothèque…</option></select>
+        <button class="btn" id="bAjoutCpt">+ Compteur vide</button>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Code</th><th>Libellé</th><th>Calcul</th><th>Unité</th><th>Formule</th><th></th></tr></thead>
+        <tbody id="tCpt"></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>Écrire une formule</h2>
+      <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">
+        <div><strong>Calcul « par jour »</strong> : évalué chaque jour, puis totalisé.<br>Variables du jour :
+          <code>PRESENCE</code>, <code>THEORIQUE</code>, <code>RETARD</code> (min), <code>NUIT</code>, <code>DIMANCHE</code>, <code>FERIE</code>,
+          <code>JOUROUVRE</code>, <code>ABSENCE</code> (h), <code>ABS_xxx</code> (heures d'absence du code xxx).</div>
+        <div><strong>Calcul « par semaine » ou « par période »</strong> : évalué une fois, en fin de semaine ou de période.<br>
+          <code>CUM(HP)</code> = total du compteur journalier HP sur la semaine ou la période ; un autre compteur de même
+          niveau s'utilise par son code.</div>
+        <div><strong>Fonctions</strong> : <code>SI(condition; alors; sinon)</code>, <code>MIN(a; b)</code>, <code>MAX(a; b)</code>,
+          <code>ET(a; b)</code>, <code>OU(a; b)</code>, <code>ARRONDI(x; décimales)</code>, <code>ABS(x)</code>.<br>
+          Comparaisons : <code>=</code> <code>&lt;&gt;</code> <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code>.
+          Séparateur d'arguments : <code>;</code></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Absences -->
+  <section data-panel="abs" class="hidden">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Types d'absence</h2><div class="spacer"></div><button class="btn" id="bAjoutAbs">+ Type d'absence</button></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Code</th><th>Libellé</th><th>Décompte</th><th class="num">Payée</th><th class="num">Bloque l'empreinte</th><th>Réactivation</th><th></th></tr></thead>
+        <tbody id="tAbs"></tbody>
+      </table></div>
+      <div class="sub" style="margin-top:8px">Chaque code crée la variable <code>ABS_code</code> (heures d'absence du jour), par exemple <code>ABS_040</code>.</div>
+    </div>
+  </section>
+
+  <!-- 4. Simulation -->
+  <section data-panel="sim" class="hidden">
+    <div class="card noprint">
+      <div class="row">
+        <label class="f">Semaine du (lundi)<input type="date" id="simDebut"></label>
+        <label class="f">Nombre de semaines<select id="simSem"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option></select></label>
+        <div class="spacer"></div>
+        <button class="btn" id="bScenario">Scénario d'exemple</button>
+        <button class="btn" id="bVider">Vider les badgeages</button>
+        <button class="btn" id="bCsv">Exporter les résultats (CSV)</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Badgeages du salarié simulé</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Date</th><th class="num">Théorique</th><th>Entrée 1</th><th>Sortie 1</th><th>Entrée 2</th><th>Sortie 2</th><th>Absence</th><th class="num">Férié</th></tr></thead>
+        <tbody id="tSim"></tbody>
+      </table></div>
+    </div>
+    <div id="simErreurs"></div>
+    <div class="card">
+      <h2>Résultats</h2>
+      <div class="kpis" id="kpis"></div>
+      <h2 style="margin-top:14px">Par jour</h2>
+      <div class="tablewrap" id="resJours"></div>
+      <h2 style="margin-top:14px">Par semaine et sur la période</h2>
+      <div class="tablewrap" id="resPeriodes"></div>
+      <div class="note warn" style="margin-top:12px">Simulation indicative pour valider les règles. Dans FIWAKTI, le calcul officiel est
+        fait par le moteur du serveur, avec les journées types, les calendriers et les règles versionnées du client.</div>
+    </div>
+  </section>
+
+  <!-- 5. Fiche -->
+  <section data-panel="fiche" class="hidden">
+    <div class="card">
+      <div class="row noprint" style="margin-bottom:10px"><h2 style="margin:0">Fiche des règles du client</h2><div class="spacer"></div><button class="btn" id="bImprimer">Imprimer / PDF</button></div>
+      <div id="fiche"></div>
+    </div>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ état ------------------------------------------------------------------ */
+const CLE = "fiwakti-regles-client:v1";
+const JOURS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
+const BIBLIO = [
+  {code:"HT", nom:"Heures théoriques", niveau:"jour", unite:"h", f:"THEORIQUE"},
+  {code:"HP", nom:"Heures travaillées", niveau:"jour", unite:"h", f:"PRESENCE"},
+  {code:"RET", nom:"Retard (min)", niveau:"jour", unite:"min", f:"RETARD"},
+  {code:"NBRET", nom:"Jours en retard", niveau:"jour", unite:"j", f:"SI(RETARD > 0; 1; 0)"},
+  {code:"HNUIT", nom:"Heures de nuit", niveau:"jour", unite:"h", f:"NUIT"},
+  {code:"HDIM", nom:"Heures du dimanche", niveau:"jour", unite:"h", f:"DIMANCHE"},
+  {code:"HFER", nom:"Heures travaillées un jour férié", niveau:"jour", unite:"h", f:"FERIE"},
+  {code:"ABSNJ", nom:"Absence non justifiée (h)", niveau:"jour", unite:"h", f:"ABS_040"},
+  {code:"JPRES", nom:"Jours de présence", niveau:"jour", unite:"j", f:"SI(PRESENCE > 0; 1; 0)"},
+  {code:"PANIER", nom:"Panier (journée de plus de 9 h)", niveau:"jour", unite:"j", f:"SI(PRESENCE >= 9; 1; 0)"},
+  {code:"HPSEM", nom:"Heures travaillées de la semaine", niveau:"semaine", unite:"h", f:"CUM(HP)"},
+  {code:"HSBRUT", nom:"Heures supplémentaires brutes", niveau:"semaine", unite:"h", f:"MAX(CUM(HP) - HEBDO; 0)"},
+  {code:"HS1", nom:"Heures supp. au 1er taux", niveau:"semaine", unite:"h", f:"MIN(HSBRUT; SEUIL1)"},
+  {code:"HS2", nom:"Heures supp. au 2e taux", niveau:"semaine", unite:"h", f:"MAX(HSBRUT - SEUIL1; 0)"},
+  {code:"HSVAL", nom:"Heures supp. valorisées (équivalent heures)", niveau:"semaine", unite:"h", f:"HS1 * (1 + TAUX1 / 100) + HS2 * (1 + TAUX2 / 100)"},
+  {code:"PRIMEASS", nom:"Prime d'assiduité (DT)", niveau:"periode", unite:"DT", f:"SI(ET(CUM(NBRET) = 0; CUM(ABSNJ) = 0); 50; 0)"},
+  {code:"PRIMENUIT", nom:"Prime de nuit (DT)", niveau:"periode", unite:"DT", f:"ARRONDI(CUM(HNUIT) * 1,5; 2)"}
+];
+function defaut(){
+  return {
+    conv:{client:"Client exemple", nom:"Convention — régime 48 h", hebdo:48, h1:8, r1:25, r2:50, baseJour:8, evMode:"glissante", evStart:27,
+      heureDebut:"08:00", tolRetard:5, arrondi:"0", nuitDebut:"21:00", nuitFin:"05:00", theo:[8,8,8,8,8,8,0]},
+    compteurs:BIBLIO.filter(c=>["HT","HP","RET","NBRET","HNUIT","HDIM","HFER","ABSNJ","HPSEM","HSBRUT","HS1","HS2","PRIMEASS"].includes(c.code)).map(c=>Object.assign({}, c)),
+    absences:[
+      {code:"030", nom:"Congé annuel", decompte:"jour", payee:true, bloque:true, reactivation:"auto"},
+      {code:"031", nom:"Congé maladie", decompte:"jour", payee:true, bloque:true, reactivation:"auto"},
+      {code:"040", nom:"Absence non justifiée", decompte:"jour", payee:false, bloque:false, reactivation:"auto"},
+      {code:"011", nom:"Mise à pied", decompte:"jour", payee:false, bloque:true, reactivation:"auto"},
+      {code:"060", nom:"Maladie longue durée", decompte:"jour", payee:true, bloque:true, reactivation:"rh"}],
+    sim:{debut:lundiDe(new Date()), semaines:2, jours:{}}
+  };
+}
+function lundiDe(d){ const x = new Date(d); x.setHours(12); x.setDate(x.getDate() - (x.getDay() + 6) % 7); return iso(x); }
+function iso(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function dateAff(k){ const p = k.split("-"); return p[2]+"/"+p[1]+"/"+p[0]; }
+function ajout(k, n){ const d = new Date(k+"T12:00:00"); d.setDate(d.getDate() + n); return iso(d); }
+let E = charger();
+function charger(){
+  try { const t = localStorage.getItem(CLE); if (t){ const o = JSON.parse(t); if (o && o.conv && o.compteurs) return completer(o); } } catch(e){}
+  const d = defaut(); scenario(d); return d;
+}
+function completer(o){ const d = defaut(); o.conv = Object.assign({}, d.conv, o.conv); if (!Array.isArray(o.conv.theo) || o.conv.theo.length !== 7) o.conv.theo = d.conv.theo;
+  o.absences = Array.isArray(o.absences) ? o.absences : d.absences; o.sim = Object.assign({}, d.sim, o.sim || {}); o.sim.jours = o.sim.jours || {}; return o; }
+let tSave = 0;
+function sauver(){ clearTimeout(tSave); tSave = setTimeout(()=>{ try { localStorage.setItem(CLE, JSON.stringify(E)); } catch(e){} }, 250); }
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function toast(m){ const t = document.getElementById("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(()=>t.classList.remove("on"), 2600); }
+
+/* ------------------------------------------------------------- formules (analyse) ------------------------------------------------------------- */
+const FONCTIONS = {SI:3, MIN:-2, MAX:-2, ET:-2, OU:-2, ARRONDI:2, ABS:1, NON:1, CUM:1};
+function lexer(src){
+  const t = [], s = String(src || ""); let i = 0;
+  while (i < s.length){
+    const c = s[i];
+    if (/\s/.test(c)){ i++; continue; }
+    if (/[0-9]/.test(c)){ let j = i; while (j < s.length && /[0-9]/.test(s[j])) j++; if ((s[j] === "," || s[j] === ".") && /[0-9]/.test(s[j+1] || "")){ j++; while (j < s.length && /[0-9]/.test(s[j])) j++; }
+      t.push({k:"n", v:Number(s.slice(i, j).replace(",", "."))}); i = j; continue; }
+    if (/[A-Za-z_À-ÿ]/.test(c)){ let j = i; while (j < s.length && /[A-Za-z0-9_À-ÿ]/.test(s[j])) j++; t.push({k:"id", v:s.slice(i, j).toUpperCase()}); i = j; continue; }
+    const deux = s.slice(i, i+2);
+    if (["<=", ">=", "<>"].includes(deux)){ t.push({k:"op", v:deux}); i += 2; continue; }
+    if ("+-*/()<>=;".includes(c)){ t.push({k:"op", v:c}); i++; continue; }
+    throw new Error("caractère inattendu « "+c+" »");
+  }
+  return t;
+}
+function analyser(src){
+  const t = lexer(src); let p = 0;
+  const voir = () => t[p], prendre = v => { const x = t[p]; if (!x || x.v !== v) throw new Error("« "+v+" » attendu"+(x ? " avant « "+x.v+" »" : " en fin de formule")); p++; };
+  function expr(){ return comp(); }
+  function comp(){ let a = add(); const x = voir(); if (x && x.k === "op" && ["=","<>","<",">","<=",">="].includes(x.v)){ p++; a = {t:"cmp", o:x.v, a, b:add()}; } return a; }
+  function add(){ let a = mul(); for (;;){ const x = voir(); if (x && (x.v === "+" || x.v === "-")){ p++; a = {t:"bin", o:x.v, a, b:mul()}; } else return a; } }
+  function mul(){ let a = un(); for (;;){ const x = voir(); if (x && (x.v === "*" || x.v === "/")){ p++; a = {t:"bin", o:x.v, a, b:un()}; } else return a; } }
+  function un(){ const x = voir(); if (x && x.v === "-"){ p++; return {t:"neg", a:un()}; } return prim(); }
+  function prim(){
+    const x = voir(); if (!x) throw new Error("formule incomplète");
+    if (x.k === "n"){ p++; return {t:"n", v:x.v}; }
+    if (x.v === "("){ p++; const e = expr(); prendre(")"); return e; }
+    if (x.k === "id"){ p++;
+      if (voir() && voir().v === "("){ p++; const args = []; if (voir() && voir().v !== ")"){ args.push(expr()); while (voir() && voir().v === ";"){ p++; args.push(expr()); } } prendre(")");
+        if (!(x.v in FONCTIONS)) throw new Error("fonction inconnue : "+x.v);
+        const n = FONCTIONS[x.v]; if (n > 0 && args.length !== n) throw new Error(x.v+" attend "+n+" argument(s)"); if (n < 0 && args.length < -n) throw new Error(x.v+" attend au moins "+(-n)+" arguments");
+        if (x.v === "CUM" && args[0].t !== "id") throw new Error("CUM attend le code d'un compteur journalier, par exemple CUM(HP)");
+        return {t:"fn", f:x.v, args}; }
+      return {t:"id", v:x.v}; }
+    throw new Error("« "+x.v+" » inattendu");
+  }
+  const a = expr(); if (p < t.length) throw new Error("« "+t[p].v+" » inattendu"); return a;
+}
+function evaluer(n, ctx){
+  switch (n.t){
+    case "n": return n.v;
+    case "neg": return -evaluer(n.a, ctx);
+    case "id": return ctx.val(n.v);
+    case "bin": { const a = evaluer(n.a, ctx), b = evaluer(n.b, ctx); return n.o === "+" ? a + b : n.o === "-" ? a - b : n.o === "*" ? a * b : (b === 0 ? 0 : a / b); }
+    case "cmp": { const a = evaluer(n.a, ctx), b = evaluer(n.b, ctx), e = 1e-9;
+      return (n.o === "=" ? Math.abs(a - b) < e : n.o === "<>" ? Math.abs(a - b) >= e : n.o === "<" ? a < b - e : n.o === ">" ? a > b + e : n.o === "<=" ? a <= b + e : a >= b - e) ? 1 : 0; }
+    case "fn": { const A = n.args;
+      if (n.f === "SI") return evaluer(A[0], ctx) ? evaluer(A[1], ctx) : evaluer(A[2], ctx);
+      if (n.f === "CUM") return ctx.cum(A[0].v);
+      const v = A.map(x=>evaluer(x, ctx));
+      if (n.f === "MIN") return Math.min(...v); if (n.f === "MAX") return Math.max(...v);
+      if (n.f === "ET") return v.every(Boolean) ? 1 : 0; if (n.f === "OU") return v.some(Boolean) ? 1 : 0; if (n.f === "NON") return v[0] ? 0 : 1;
+      if (n.f === "ABS") return Math.abs(v[0]); if (n.f === "ARRONDI"){ const k = Math.pow(10, Math.max(0, Math.round(v[1]))); return Math.round(v[0] * k) / k; } }
+  }
+  return 0;
+}
+function references(n, out){ out = out || {ids:new Set(), cum:new Set()};
+  if (n.t === "id") out.ids.add(n.v); else if (n.t === "fn"){ if (n.f === "CUM") out.cum.add(n.args[0].v); else n.args.forEach(a=>references(a, out)); }
+  else if (n.a){ references(n.a, out); if (n.b) references(n.b, out); } return out; }
+const VARS_JOUR = ["PRESENCE","THEORIQUE","RETARD","NUIT","DIMANCHE","FERIE","JOUROUVRE","ABSENCE"];
+const CONST = ["HEBDO","SEUIL1","TAUX1","TAUX2","BASEJOUR"];
+/* contrôle de l'ensemble des compteurs : syntaxe, variables, niveaux, cycles */
+function controler(){
+  const res = {}, codes = new Map(), absVars = new Set(E.absences.map(a=>"ABS_"+String(a.code).toUpperCase()));
+  E.compteurs.forEach((c, i)=>{ const k = String(c.code || "").toUpperCase(); if (codes.has(k)) res[i] = "code en double : "+k; else codes.set(k, c); });
+  E.compteurs.forEach((c, i)=>{
+    if (res[i]) return; const code = String(c.code || "").toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]{0,19}$/.test(code)){ res[i] = "code invalide (lettres, chiffres, _, 20 caractères au plus, commence par une lettre)"; return; }
+    try {
+      const a = analyser(c.f); c._ast = a; const r = references(a); c._refs = r;
+      for (const v of r.ids){
+        if (CONST.includes(v)) continue;
+        if (c.niveau === "jour"){
+          if (VARS_JOUR.includes(v) || absVars.has(v)) continue;
+          const o = codes.get(v); if (o && o.niveau === "jour" && o !== c) continue;
+          throw new Error(o ? "un compteur par jour ne peut utiliser que des compteurs par jour (« "+v+" » est par "+o.niveau+")" : "variable inconnue : "+v);
+        } else {
+          const o = codes.get(v);
+          if (o && c.niveau === "semaine" && o.niveau === "periode") throw new Error("un compteur par semaine ne peut pas utiliser un compteur par période (« "+v+" »)");
+          if (o && o.niveau !== "jour" && o !== c) continue;
+          if (VARS_JOUR.includes(v) || absVars.has(v) || (o && o.niveau === "jour")) throw new Error("« "+v+" » est une valeur du jour : utilisez CUM("+v+")"+(o ? "" : " après avoir créé un compteur par jour"));
+          throw new Error("variable inconnue : "+v);
+        }
+      }
+      for (const v of r.cum){ const o = codes.get(v); if (!o) throw new Error("CUM("+v+") : compteur inconnu"); if (o.niveau !== "jour") throw new Error("CUM("+v+") : CUM s'applique à un compteur par jour"); }
+      if (c.niveau === "jour" && r.cum.size) throw new Error("CUM n'a pas de sens dans un compteur par jour");
+      if (r.ids.has(code)) throw new Error("le compteur fait référence à lui-même");
+    } catch(e){ res[i] = e.message; }
+  });
+  /* ordre de calcul et cycles */
+  const ordre = [], etat = {};
+  function visiter(code, chemin){ const c = codes.get(code); if (!c || etat[code] === 2) return; if (etat[code] === 1) throw new Error("boucle : "+chemin.concat(code).join(" → "));
+    etat[code] = 1; if (c._refs) for (const v of c._refs.ids) if (codes.has(v)) visiter(v, chemin.concat(code)); etat[code] = 2; ordre.push(c); }
+  E.compteurs.forEach((c, i)=>{ if (res[i]) return; try { visiter(String(c.code).toUpperCase(), []); } catch(e){ res[i] = e.message; } });
+  return {erreurs:res, ordre:ordre.filter(c=>!Object.keys(res).some(i=>E.compteurs[i] === c))};
+}
+
+/* ------------------------------------------------------------- simulation ------------------------------------------------------------- */
+/* heure saisie en 24 h : « 7:45 », « 745 », « 0745 », « 07h45 » → « 07:45 » ; vide si invalide */
+function normH(v){ const t = String(v || "").trim().replace(/[hH.]/, ":"); if (!t) return ""; let m = /^(\d{1,2}):(\d{2})$/.exec(t) || (/^\d{3,4}$/.test(t) ? [t, t.slice(0, -2), t.slice(-2)] : null);
+  if (!m) return null; const h = Number(m[1]), mi = Number(m[2]); return h < 24 && mi < 60 ? String(h).padStart(2, "0")+":"+String(mi).padStart(2, "0") : null; }
+const min = h => { if (!h) return null; const m = /^(\d{1,2}):(\d{2})$/.exec(h); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+function intervalles(j){ const out = []; [["e1","s1"],["e2","s2"]].forEach(([a, b])=>{ let x = min(j[a]), y = min(j[b]); if (x == null || y == null) return; if (y <= x) y += 1440; out.push([x, y]); }); return out; }
+function chevauche(iv, a, b){ /* minutes de [a,b] (fenêtre quotidienne, éventuellement sur minuit) dans les intervalles, sur 2 jours */
+  let t = 0; const fen = b > a ? [[a, b], [a + 1440, b + 1440]] : [[a, 1440], [0, b], [a + 1440, 2880], [1440, b + 1440]];
+  iv.forEach(([x, y])=>fen.forEach(([u, v])=>{ t += Math.max(0, Math.min(y, v) - Math.max(x, u)); })); return t; }
+function journees(){
+  const out = [], n = Number(E.sim.semaines) || 1;
+  for (let i = 0; i < n * 7; i++){ const k = ajout(E.sim.debut, i), w = i % 7; const j = E.sim.jours[k] || {};
+    out.push({k, w, sem:Math.floor(i / 7), theo:j.theo != null && j.theo !== "" ? Number(j.theo) : Number(E.conv.theo[w]) || 0, e1:j.e1||"", s1:j.s1||"", e2:j.e2||"", s2:j.s2||"", abs:j.abs||"", ferie:!!j.ferie}); }
+  return out;
+}
+function variablesDuJour(j){
+  const C = E.conv, iv = intervalles(j), ar = Number(C.arrondi) || 0;
+  let pres = iv.reduce((s, [a, b])=>s + (b - a), 0); if (ar) pres = Math.floor(pres / ar) * ar;
+  const absT = E.absences.find(a=>String(a.code) === String(j.abs));
+  const theo = j.ferie ? 0 : j.theo;
+  const absH = absT ? (absT.decompte === "jour" ? theo : Math.max(0, theo - pres / 60)) : 0;
+  const deb = min(C.heureDebut), e1 = iv.length ? iv[0][0] : null;
+  /* retard : arrivée après l'heure de début + tolérance, dans les 4 h qui suivent (au-delà : autre poste, nuit ou après-midi) */
+  const retard = theo > 0 && e1 != null && deb != null && e1 - deb > (Number(C.tolRetard) || 0) && e1 - deb <= 240 ? e1 - deb : 0;
+  const nuit = chevauche(iv, min(C.nuitDebut) ?? 1260, min(C.nuitFin) ?? 300) / 60;
+  const v = {PRESENCE:pres / 60, THEORIQUE:theo, RETARD:retard, NUIT:nuit, DIMANCHE:j.w === 6 ? pres / 60 : 0, FERIE:j.ferie ? pres / 60 : 0, JOUROUVRE:theo > 0 ? 1 : 0, ABSENCE:absH};
+  E.absences.forEach(a=>{ v["ABS_"+String(a.code).toUpperCase()] = absT === a ? absH : 0; });
+  return v;
+}
+function constantes(){ const C = E.conv; return {HEBDO:Number(C.hebdo)||0, SEUIL1:Number(C.h1)||0, TAUX1:Number(C.r1)||0, TAUX2:Number(C.r2)||0, BASEJOUR:Number(C.baseJour)||0}; }
+function simuler(){
+  const ctl = controler(), K = constantes(), js = journees();
+  const jour = ctl.ordre.filter(c=>c.niveau === "jour"), sem = ctl.ordre.filter(c=>c.niveau === "semaine"), per = ctl.ordre.filter(c=>c.niveau === "periode");
+  const lignes = js.map(j=>{ const V = variablesDuJour(j), R = {};
+    jour.forEach(c=>{ R[c.code.toUpperCase()] = evaluer(c._ast, {val:x=>x in R ? R[x] : x in V ? V[x] : x in K ? K[x] : 0, cum:()=>0}); });
+    return {j, V, R}; });
+  const totalDe = (l, code) => l.reduce((s, x)=>s + (x.R[code] || 0), 0);
+  function niveau(cpts, l, autres){ const R = {}; cpts.forEach(c=>{ R[c.code.toUpperCase()] = evaluer(c._ast, {val:x=>x in R ? R[x] : autres && x in autres ? autres[x] : x in K ? K[x] : 0, cum:x=>totalDe(l, x)}); }); return R; }
+  const nbS = Number(E.sim.semaines) || 1, semaines = [];
+  for (let s = 0; s < nbS; s++){ const l = lignes.filter(x=>x.j.sem === s); semaines.push({du:l[0].j.k, au:l[l.length-1].j.k, R:niveau(sem, l)}); }
+  /* période : les compteurs « par semaine » y sont totalisés, puis les compteurs « par période » sont évalués (ils peuvent les utiliser) */
+  const semTot = {}; sem.forEach(c=>{ const k = c.code.toUpperCase(); semTot[k] = semaines.reduce((s, x)=>s + (x.R[k] || 0), 0); });
+  const P = Object.assign({}, semTot, niveau(per, lignes, semTot));
+  return {ctl, lignes, semaines, P, jour, sem, per};
+}
+const fmt = (v, u) => { if (v == null || isNaN(v)) return "—"; if (u === "h"){ const m = Math.round(v * 60), s = m < 0 ? "−" : ""; return s+Math.floor(Math.abs(m) / 60)+":"+String(Math.abs(m) % 60).padStart(2, "0"); }
+  return (Math.round(v * 100) / 100).toLocaleString("fr-FR"); };
+
+/* ------------------------------------------------------------- rendu ------------------------------------------------------------- */
+function rendreConv(){
+  document.querySelectorAll("[data-c]").forEach(el=>{ el.value = E.conv[el.dataset.c] ?? ""; });
+  document.getElementById("theoJours").innerHTML = JOURS.map((n, i)=>'<label class="f">'+n+'<input type="number" min="0" max="24" step="0.5" data-theo="'+i+'" value="'+esc(E.conv.theo[i])+'"></label>').join("");
+}
+function rendreCpt(){
+  const ctl = controler();
+  document.getElementById("tCpt").innerHTML = E.compteurs.map((c, i)=>'<tr>'+
+    '<td><input data-cp="'+i+'" data-k="code" value="'+esc(c.code)+'" style="width:100px" aria-label="Code"></td>'+
+    '<td><input data-cp="'+i+'" data-k="nom" value="'+esc(c.nom)+'" style="min-width:200px" aria-label="Libellé"></td>'+
+    '<td><select data-cp="'+i+'" data-k="niveau" aria-label="Calcul">'+[["jour","par jour"],["semaine","par semaine"],["periode","par période"]].map(([v, l])=>'<option value="'+v+'"'+(c.niveau === v ? " selected" : "")+'>'+l+'</option>').join("")+'</select></td>'+
+    '<td><select data-cp="'+i+'" data-k="unite" aria-label="Unité">'+["h","min","j","n","DT"].map(u=>'<option'+(c.unite === u ? " selected" : "")+'>'+u+'</option>').join("")+'</select></td>'+
+    '<td class="formule"><input data-cp="'+i+'" data-k="f" value="'+esc(c.f)+'" aria-label="Formule" spellcheck="false">'+(ctl.erreurs[i] ? '<div class="err">⚠ '+esc(ctl.erreurs[i])+'</div>' : '<div class="okm">✓ formule valide</div>')+'</td>'+
+    '<td><button class="btn sm ghost" data-up="'+i+'" title="Monter" aria-label="Monter">↑</button><button class="btn sm ghost danger" data-del="'+i+'" title="Supprimer" aria-label="Supprimer">✕</button></td></tr>').join("");
+  const sel = document.getElementById("biblio");
+  sel.innerHTML = '<option value="">+ Ajouter depuis la bibliothèque…</option>'+BIBLIO.filter(b=>!E.compteurs.some(c=>String(c.code).toUpperCase() === b.code)).map(b=>'<option value="'+b.code+'">'+esc(b.code+" — "+b.nom)+'</option>').join("");
+}
+function rendreAbs(){
+  document.getElementById("tAbs").innerHTML = E.absences.map((a, i)=>'<tr>'+
+    '<td><input data-ab="'+i+'" data-k="code" value="'+esc(a.code)+'" style="width:80px" aria-label="Code"></td>'+
+    '<td><input data-ab="'+i+'" data-k="nom" value="'+esc(a.nom)+'" style="min-width:200px" aria-label="Libellé"></td>'+
+    '<td><select data-ab="'+i+'" data-k="decompte" aria-label="Décompte"><option value="jour"'+(a.decompte === "jour" ? " selected" : "")+'>à la journée</option><option value="heure"'+(a.decompte === "heure" ? " selected" : "")+'>à l\'heure</option></select></td>'+
+    '<td class="num"><input type="checkbox" data-ab="'+i+'" data-k="payee"'+(a.payee ? " checked" : "")+' aria-label="Payée"></td>'+
+    '<td class="num"><input type="checkbox" data-ab="'+i+'" data-k="bloque"'+(a.bloque ? " checked" : "")+' aria-label="Bloque l\'empreinte"></td>'+
+    '<td><select data-ab="'+i+'" data-k="reactivation" aria-label="Réactivation"'+(a.bloque ? "" : " disabled")+'><option value="auto"'+(a.reactivation !== "rh" ? " selected" : "")+'>automatique à la fin</option><option value="rh"'+(a.reactivation === "rh" ? " selected" : "")+'>après validation RH</option></select></td>'+
+    '<td><button class="btn sm ghost danger" data-adel="'+i+'" aria-label="Supprimer">✕</button></td></tr>').join("");
+}
+function rendreSimGrille(){
+  document.getElementById("simDebut").value = E.sim.debut; document.getElementById("simSem").value = String(E.sim.semaines);
+  const opts = '<option value="">—</option>'+E.absences.map(a=>'<option value="'+esc(a.code)+'">'+esc(a.code+" "+a.nom)+'</option>').join("");
+  document.getElementById("tSim").innerHTML = journees().map(j=>'<tr class="'+(j.w >= 5 ? "we" : "")+'">'+
+    '<td>'+JOURS[j.w].slice(0, 3)+' '+dateAff(j.k)+'</td>'+
+    '<td class="num"><input class="n" type="number" min="0" max="24" step="0.5" data-sj="'+j.k+'" data-k="theo" value="'+esc(j.theo)+'" aria-label="Théorique"></td>'+
+    ["e1","s1","e2","s2"].map(k=>'<td><input class="t hh" inputmode="numeric" placeholder="hh:mm" maxlength="5" data-sj="'+j.k+'" data-k="'+k+'" value="'+esc(j[k])+'" aria-label="'+k+'"></td>').join("")+
+    '<td><select data-sj="'+j.k+'" data-k="abs" aria-label="Absence">'+opts.replace('value="'+esc(j.abs)+'"', 'value="'+esc(j.abs)+'" selected')+'</select></td>'+
+    '<td class="num"><input type="checkbox" data-sj="'+j.k+'" data-k="ferie"'+(j.ferie ? " checked" : "")+' aria-label="Férié"></td></tr>').join("");
+}
+function rendreSimRes(){
+  const S = simuler(), errs = Object.entries(S.ctl.erreurs);
+  document.getElementById("simErreurs").innerHTML = errs.length ? '<div class="note warn" style="margin-bottom:14px">⚠ '+errs.length+' compteur(s) en erreur, non calculé(s) : '+errs.map(([i, m])=>esc((E.compteurs[i].code || "?")+" ("+m+")")).join(" ; ")+'</div>' : "";
+  const u = c => c.unite;
+  document.getElementById("resJours").innerHTML = '<table><thead><tr><th>Date</th>'+S.jour.map(c=>'<th class="num" title="'+esc(c.nom)+'">'+esc(c.code)+'</th>').join("")+'</tr></thead><tbody>'+
+    S.lignes.map(l=>'<tr class="'+(l.j.w >= 5 ? "we" : "")+(!l.V.PRESENCE && !l.V.THEORIQUE ? " dim" : "")+'"><td>'+JOURS[l.j.w].slice(0, 3)+' '+dateAff(l.j.k)+(l.j.abs ? ' <span class="pill j">'+esc(l.j.abs)+'</span>' : "")+(l.j.ferie ? ' <span class="pill p">férié</span>' : "")+'</td>'+
+      S.jour.map(c=>'<td class="num">'+fmt(l.R[c.code.toUpperCase()], u(c))+'</td>').join("")+'</tr>').join("")+'</tbody></table>';
+  const cols = S.sem.concat(S.per);
+  document.getElementById("resPeriodes").innerHTML = '<table><thead><tr><th></th>'+cols.map(c=>'<th class="num" title="'+esc(c.nom)+'">'+esc(c.code)+' <span class="pill '+(c.niveau === "periode" ? "p" : "j")+'">'+(c.niveau === "periode" ? "période" : "semaine")+'</span></th>').join("")+'</tr></thead><tbody>'+
+    S.semaines.map((s, i)=>'<tr><td>Semaine '+(i+1)+' <span class="sub">'+dateAff(s.du)+' → '+dateAff(s.au)+'</span></td>'+cols.map(c=>'<td class="num">'+(c.niveau === "semaine" ? fmt(s.R[c.code.toUpperCase()], u(c)) : "")+'</td>').join("")+'</tr>').join("")+
+    '<tr><td><strong>Période simulée</strong></td>'+cols.map(c=>'<td class="num"><strong>'+fmt(S.P[c.code.toUpperCase()], u(c))+'</strong></td>').join("")+'</tr></tbody></table>';
+  const tot = code => S.lignes.reduce((s, l)=>s + (l.R[code] || 0), 0);
+  const k = [];
+  if (S.jour.some(c=>c.code.toUpperCase() === "HP")) k.push([fmt(tot("HP"), "h"), "Heures travaillées"]);
+  if (S.jour.some(c=>c.code.toUpperCase() === "HT")) k.push([fmt(tot("HT"), "h"), "Heures théoriques"]);
+  ["HSBRUT","HS1","HS2","PRIMEASS"].forEach(c=>{ const o = cols.find(x=>x.code.toUpperCase() === c); if (o) k.push([fmt(S.P[c], o.unite)+(o.unite === "DT" ? " DT" : ""), o.nom]); });
+  document.getElementById("kpis").innerHTML = k.map(([v, l])=>'<div class="kpi"><div class="v">'+esc(v)+'</div><div class="l">'+esc(l)+'</div></div>').join("");
+  return S;
+}
+function rendreFiche(){
+  const C = E.conv, ctl = controler();
+  const lib = {jour:"par jour", semaine:"par semaine", periode:"par période"};
+  document.getElementById("fiche").innerHTML =
+    '<p><strong>Client :</strong> '+esc(C.client)+' — <strong>Convention :</strong> '+esc(C.nom)+'<br><span class="sub">Fiche éditée le '+dateAff(iso(new Date()))+'</span></p>'+
+    '<h2>Convention</h2><ul>'+
+    '<li>Heures supplémentaires au-delà de <strong>'+esc(C.hebdo)+' h</strong> par semaine : les <strong>'+esc(C.h1)+'</strong> premières à <strong>'+esc(C.r1)+' %</strong>, les suivantes à <strong>'+esc(C.r2)+' %</strong>.</li>'+
+    '<li>Base journalière : '+esc(C.baseJour)+' h. Horaire théorique : '+JOURS.map((n, i)=>n.slice(0, 3)+' '+esc(C.theo[i])+' h').join(", ")+'.</li>'+
+    '<li>Période des éléments variables : '+(C.evMode === "glissante" ? "du "+esc(C.evStart)+" au "+esc(Number(C.evStart) - 1 || 28)+" du mois suivant" : "mois calendaire")+'.</li>'+
+    '<li>Retard au-delà de '+esc(C.heureDebut)+' + '+esc(C.tolRetard)+' min ; arrondi des heures : '+(Number(C.arrondi) ? esc(C.arrondi)+" min (inférieur)" : "aucun")+' ; heures de nuit de '+esc(C.nuitDebut)+' à '+esc(C.nuitFin)+'.</li></ul>'+
+    '<h2>Compteurs</h2><div class="tablewrap"><table><thead><tr><th>Code</th><th>Libellé</th><th>Calcul</th><th>Unité</th><th>Formule</th><th>État</th></tr></thead><tbody>'+
+    E.compteurs.map((c, i)=>'<tr><td>'+esc(c.code)+'</td><td>'+esc(c.nom)+'</td><td>'+lib[c.niveau]+'</td><td>'+esc(c.unite)+'</td><td class="formule"><code>'+esc(c.f)+'</code></td><td>'+(ctl.erreurs[i] ? '<span class="err">⚠ '+esc(ctl.erreurs[i])+'</span>' : "✓")+'</td></tr>').join("")+'</tbody></table></div>'+
+    '<h2 style="margin-top:14px">Absences</h2><div class="tablewrap"><table><thead><tr><th>Code</th><th>Libellé</th><th>Décompte</th><th>Payée</th><th>Empreinte</th></tr></thead><tbody>'+
+    E.absences.map(a=>'<tr><td>'+esc(a.code)+'</td><td>'+esc(a.nom)+'</td><td>'+(a.decompte === "jour" ? "à la journée" : "à l'heure")+'</td><td>'+(a.payee ? "oui" : "non")+'</td><td>'+(a.bloque ? "bloquée — réactivation "+(a.reactivation === "rh" ? "après validation RH" : "automatique") : "—")+'</td></tr>').join("")+'</tbody></table></div>';
+}
+function toutRendre(){ rendreConv(); rendreCpt(); rendreAbs(); rendreSimGrille(); rendreSimRes(); rendreFiche(); }
+
+/* ------------------------------------------------------------- scénario ------------------------------------------------------------- */
+function scenario(d){
+  const st = d || E, j = {}, k = n => ajout(st.sim.debut, n), norm = {e1:"07:57", s1:"12:00", e2:"13:00", s2:"17:02"};
+  /* semaine 1 : retard mardi, heures supplémentaires jeudi et vendredi, samedi normal, dimanche travaillé (inventaire) */
+  j[k(0)] = Object.assign({}, norm); j[k(1)] = Object.assign({}, norm, {e1:"08:24"}); j[k(2)] = Object.assign({}, norm);
+  j[k(3)] = Object.assign({}, norm, {s2:"20:30"}); j[k(4)] = Object.assign({}, norm, {s2:"19:00"}); j[k(5)] = Object.assign({}, norm); j[k(6)] = {e1:"08:00", s1:"12:00"};
+  /* semaine 2 : nuit lundi (22:00 → 06:00), absence non justifiée mercredi, congé jeudi, férié vendredi */
+  j[k(7)] = {e1:"22:00", s1:"06:00"}; j[k(8)] = Object.assign({}, norm); j[k(9)] = {abs:"040"}; j[k(10)] = {abs:"030"}; j[k(11)] = {ferie:true}; j[k(12)] = Object.assign({}, norm);
+  st.sim.jours = j; st.sim.semaines = Math.max(2, Number(st.sim.semaines) || 2);
+}
+
+/* ------------------------------------------------------------- export / import ------------------------------------------------------------- */
+function paquet(){
+  const ctl = controler(), C = E.conv;
+  return {format:"fiwakti-regles-1", client:C.client, cree:new Date().toISOString(), valide:!Object.keys(ctl.erreurs).length,
+    convention:{nom:C.nom, hebdo:Number(C.hebdo), seuil:Number(C.hebdo), h1:Number(C.h1), r1:Number(C.r1), r2:Number(C.r2), baseJour:Number(C.baseJour), evMode:C.evMode, evStart:Number(C.evStart),
+      heureDebut:C.heureDebut, tolRetard:Number(C.tolRetard), arrondi:Number(C.arrondi), nuit:{debut:C.nuitDebut, fin:C.nuitFin}, theo:C.theo.map(Number)},
+    compteurs:E.compteurs.map(c=>({code:String(c.code).toUpperCase(), nom:c.nom, niveau:c.niveau, unite:c.unite, f:c.f})),
+    absences:E.absences.map(a=>({code:a.code, nom:a.nom, decompte:a.decompte, payee:!!a.payee, blocageBiometrique:a.bloque ? (a.reactivation === "rh" ? "rh" : "auto") : "non"}))};
+}
+function telecharger(nom, texte, type){ const b = new Blob([texte], {type}); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = nom; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(u); a.remove(); }, 1000); }
+const nomFichier = () => String(E.conv.client || "client").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w-]+/g, "_");
+function importer(o){
+  if (!o || o.format !== "fiwakti-regles-1" || !o.convention || !Array.isArray(o.compteurs)) throw new Error("fichier non reconnu (paquet de règles FIWAKTI attendu)");
+  const d = defaut(), cv = o.convention;
+  E = {conv:Object.assign({}, d.conv, {client:o.client || "", nom:cv.nom, hebdo:cv.hebdo, h1:cv.h1, r1:cv.r1, r2:cv.r2, baseJour:cv.baseJour, evMode:cv.evMode, evStart:cv.evStart,
+      heureDebut:cv.heureDebut || d.conv.heureDebut, tolRetard:cv.tolRetard ?? d.conv.tolRetard, arrondi:String(cv.arrondi || 0), nuitDebut:(cv.nuit||{}).debut || d.conv.nuitDebut, nuitFin:(cv.nuit||{}).fin || d.conv.nuitFin,
+      theo:Array.isArray(cv.theo) && cv.theo.length === 7 ? cv.theo : d.conv.theo}),
+    compteurs:o.compteurs.map(c=>({code:c.code, nom:c.nom, niveau:["jour","semaine","periode"].includes(c.niveau) ? c.niveau : "jour", unite:c.unite || "h", f:c.f || "0"})),
+    absences:(o.absences || []).map(a=>({code:a.code, nom:a.nom, decompte:a.decompte === "heure" ? "heure" : "jour", payee:!!a.payee, bloque:a.blocageBiometrique === "auto" || a.blocageBiometrique === "rh", reactivation:a.blocageBiometrique === "rh" ? "rh" : "auto"})),
+    sim:E.sim};
+}
+
+/* ------------------------------------------------------------- événements ------------------------------------------------------------- */
+function onglet(t){ document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected", String(b.dataset.tab === t))); document.querySelectorAll("section[data-panel]").forEach(s=>s.classList.toggle("hidden", s.dataset.panel !== t));
+  try { sessionStorage.setItem(CLE+":onglet", t); } catch(e){} if (t === "sim") rendreSimRes(); if (t === "fiche") rendreFiche(); }
+document.querySelector("nav.tabs").addEventListener("click", e=>{ const b = e.target.closest("button[data-tab]"); if (b) onglet(b.dataset.tab); });
+document.addEventListener("input", e=>{
+  const el = e.target;
+  if (el.classList.contains("hh")){ const v = normH(el.value); if (v && /^\d{1,2}:\d{2}$/.test(el.value.trim())){ if (el.dataset.c) E.conv[el.dataset.c] = v; else if (el.dataset.sj){ const j = E.sim.jours[el.dataset.sj] || (E.sim.jours[el.dataset.sj] = {}); j[el.dataset.k] = v; rendreSimRes(); } sauver(); }
+    else if (el.value.trim() === "" && el.dataset.sj){ const j = E.sim.jours[el.dataset.sj] || (E.sim.jours[el.dataset.sj] = {}); j[el.dataset.k] = ""; sauver(); rendreSimRes(); } return; }
+  if (el.dataset.c){ E.conv[el.dataset.c] = el.value; sauver(); return; }
+  if (el.dataset.theo != null){ E.conv.theo[Number(el.dataset.theo)] = Number(el.value) || 0; sauver(); return; }
+  if (el.dataset.cp != null && el.type !== "checkbox" && el.tagName === "INPUT"){ E.compteurs[Number(el.dataset.cp)][el.dataset.k] = el.value; sauver();
+    clearTimeout(rendreCpt.t); rendreCpt.t = setTimeout(()=>{ const pos = [document.activeElement && document.activeElement.dataset.cp, document.activeElement && document.activeElement.dataset.k, el.selectionStart]; rendreCpt();
+      const r = document.querySelector('[data-cp="'+pos[0]+'"][data-k="'+pos[1]+'"]'); if (r){ r.focus(); try { r.setSelectionRange(pos[2], pos[2]); } catch(x){} } }, 400); return; }
+  if (el.dataset.ab != null && el.tagName === "INPUT" && el.type !== "checkbox"){ E.absences[Number(el.dataset.ab)][el.dataset.k] = el.value; sauver(); return; }
+  if (el.dataset.sj && el.type !== "checkbox" && el.tagName === "INPUT"){ const j = E.sim.jours[el.dataset.sj] || (E.sim.jours[el.dataset.sj] = {}); j[el.dataset.k] = el.value; sauver(); rendreSimRes(); return; }
+});
+document.addEventListener("change", e=>{
+  const el = e.target;
+  if (el.classList && el.classList.contains("hh")){ const v = normH(el.value); el.setCustomValidity(v === null ? "Heure attendue au format hh:mm (00:00 à 23:59)" : ""); el.style.borderColor = v === null ? "var(--danger)" : "";
+    if (v === null){ el.reportValidity(); return; } el.value = v;
+    if (el.dataset.c){ E.conv[el.dataset.c] = v; sauver(); return; }
+    if (el.dataset.sj){ const j = E.sim.jours[el.dataset.sj] || (E.sim.jours[el.dataset.sj] = {}); j[el.dataset.k] = v; sauver(); rendreSimRes(); return; } }
+  if (el.dataset.c && el.tagName === "SELECT"){ E.conv[el.dataset.c] = el.value; sauver(); return; }
+  if (el.dataset.cp != null && el.tagName === "SELECT"){ E.compteurs[Number(el.dataset.cp)][el.dataset.k] = el.value; sauver(); rendreCpt(); return; }
+  if (el.dataset.ab != null){ const a = E.absences[Number(el.dataset.ab)]; a[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; sauver(); rendreAbs(); if (el.dataset.k === "code") rendreCpt(); return; }
+  if (el.dataset.sj){ const j = E.sim.jours[el.dataset.sj] || (E.sim.jours[el.dataset.sj] = {}); j[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; sauver(); rendreSimRes(); return; }
+  if (el.id === "simDebut" && el.value){ E.sim.debut = lundiDe(new Date(el.value+"T12:00:00")); sauver(); rendreSimGrille(); rendreSimRes(); return; }
+  if (el.id === "simSem"){ E.sim.semaines = Number(el.value); sauver(); rendreSimGrille(); rendreSimRes(); return; }
+  if (el.id === "biblio" && el.value){ const b = BIBLIO.find(x=>x.code === el.value); if (b){ E.compteurs.push(Object.assign({}, b)); sauver(); rendreCpt(); toast("Compteur « "+b.code+" » ajouté"); } return; }
+});
+document.addEventListener("click", e=>{
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.del != null){ const c = E.compteurs[Number(b.dataset.del)]; if (confirm("Supprimer le compteur « "+(c.code||"")+" » ?")){ E.compteurs.splice(Number(b.dataset.del), 1); sauver(); rendreCpt(); } return; }
+  if (b.dataset.up != null){ const i = Number(b.dataset.up); if (i > 0){ const x = E.compteurs[i]; E.compteurs[i] = E.compteurs[i-1]; E.compteurs[i-1] = x; sauver(); rendreCpt(); } return; }
+  if (b.dataset.adel != null){ E.absences.splice(Number(b.dataset.adel), 1); sauver(); rendreAbs(); rendreCpt(); return; }
+  switch (b.id){
+    case "bAjoutCpt": E.compteurs.push({code:"NOUVEAU"+(E.compteurs.length+1), nom:"Nouveau compteur", niveau:"jour", unite:"h", f:"0"}); sauver(); rendreCpt(); break;
+    case "bAjoutAbs": E.absences.push({code:"0"+(50 + E.absences.length), nom:"Nouvelle absence", decompte:"jour", payee:true, bloque:false, reactivation:"auto"}); sauver(); rendreAbs(); break;
+    case "bScenario": scenario(); sauver(); rendreSimGrille(); rendreSimRes(); toast("Scénario d'exemple chargé"); break;
+    case "bVider": if (confirm("Vider tous les badgeages de la simulation ?")){ E.sim.jours = {}; sauver(); rendreSimGrille(); rendreSimRes(); } break;
+    case "bExporter": { const p = paquet(); telecharger("regles_"+nomFichier()+".json", JSON.stringify(p, null, 2), "application/json"); toast(p.valide ? "Paquet exporté" : "Paquet exporté — attention : des formules sont en erreur"); break; }
+    case "bImporter": document.getElementById("fImport").click(); break;
+    case "bCsv": { const S = simuler(), cols = S.jour, l = [["Date"].concat(cols.map(c=>c.code)).join(";")];
+      S.lignes.forEach(x=>l.push([dateAff(x.j.k)].concat(cols.map(c=>String(Math.round((x.R[c.code.toUpperCase()]||0)*100)/100).replace(".", ","))).join(";")));
+      l.push(""); l.push(["Période"].concat(S.sem.concat(S.per).map(c=>c.code+"="+String(Math.round((S.P[c.code.toUpperCase()]||0)*100)/100).replace(".", ","))).join(";"));
+      telecharger("simulation_"+nomFichier()+".csv", "﻿"+l.join("\r\n"), "text/csv;charset=utf-8"); break; }
+    case "bImprimer": window.print(); break;
+    case "bTheme": { const r = document.documentElement, sombre = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = sombre ? "light" : "dark"; try { localStorage.setItem(CLE+":theme", r.dataset.theme); } catch(x){} break; }
+  }
+});
+document.getElementById("fImport").addEventListener("change", e=>{
+  const f = e.target.files[0]; if (!f) return; const r = new FileReader();
+  r.onload = () => { try { importer(JSON.parse(r.result)); sauver(); toutRendre(); toast("Paquet « "+(E.conv.client||"")+" » importé"); } catch(x){ alert("Import impossible : "+x.message); } e.target.value = ""; };
+  r.readAsText(f);
+});
+try { const th = localStorage.getItem(CLE+":theme"); if (th) document.documentElement.dataset.theme = th; } catch(e){}
+toutRendre();
+try { const o = sessionStorage.getItem(CLE+":onglet"); if (o) onglet(o); } catch(e){}
+</script>
+</body>
+</html>
