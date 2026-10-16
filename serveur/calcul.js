@@ -307,7 +307,7 @@ function creer(B, D, opts){
     await assurer(mats, q.du, q.au);
     const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(mats));
     /* v49 : nombre total de journées gardé jusqu'au prochain changement (le parcours des pages ne le recompte pas) */
-    const cleT = login+"|"+[q.du, q.au, q.dept||"", q.chef||"", q.site||"", q.q||"", q.equipe||""].join("|"), cT = CACHE_JT.get(cleT);
+    const cleT = login+"|"+[q.du, q.au, q.dept||"", q.chef||"", q.site||"", q.q||"", q.equipe||"", q.mat||""].join("|"), cT = CACHE_JT.get(cleT);
     const mT = marque(), tot = frais(cT, 300000) ? cT.tot : await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d>=? AND d<=?"+f.sql, q.du, q.au, ...f.a);
     if (!frais(cT, 300000)){ CACHE_JT.set(cleT, Object.assign(mT, {tot})); if (CACHE_JT.size > 300) CACHE_JT.clear(); }
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||100));

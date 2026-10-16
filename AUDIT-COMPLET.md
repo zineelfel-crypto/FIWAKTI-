@@ -413,3 +413,24 @@ site : mise à pied, code 11, réactivation automatique ; maladie longue durée,
     - export Excel des employés téléchargé ;
     - première connexion d'un salarié (matricule 10402, changement de mot de passe, puis son accueil) ;
     - saisie dans le module HSE : « Enregistré ».
+
+**« Salarié introuvable. » sur le bouton « Pointage du mois » de la liste Employés** (constat sur site, grand effectif).
+
+- **Cause** (`app/app.js`) : le panneau du mois cherchait le salarié parmi ceux chargés dans le navigateur. En grand
+  effectif, l'annuaire est paginé par le serveur : le salarié n'y est pas, d'où le message. Ensuite, le mois était
+  calculé à partir des badgeages du navigateur, qui ne sont pas chargés dans ce mode : toutes les journées seraient
+  apparues absentes.
+- **Correction** :
+  - `app/app.js` :
+    - la fiche est chargée depuis le serveur (`/api/v1/employes/:mat`) ;
+    - les journées du mois sont lues dans les calculs du serveur (`/api/v1/calcul/journees?mat=`) : horaire,
+      badgeages, heures travaillées et théoriques, retard, absence ;
+    - le changement de mois et l'export CSV du panneau utilisent les mêmes données ;
+  - `serveur/calcul.js` : le total de journées gardé en cache tient compte du matricule. Sans cela, une liste filtrée
+    sur un salarié affichait le total de tout le périmètre.
+- **Preuve** (6 000 salariés) :
+  - avant : « Salarié introuvable. » ;
+  - après : le panneau s'ouvre ; septembre se charge au changement de mois ;
+  - pour le salarié 101001, le 09/10 affiche 07:57 ▸ 17:11 ◂, 7:14 travaillées, −0:46, et le CSV contient la même
+    ligne ;
+  - la modification et l'enregistrement d'une fiche depuis la liste fonctionnaient déjà (« Enregistré »).
