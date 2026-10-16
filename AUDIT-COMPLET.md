@@ -434,3 +434,40 @@ site : mise à pied, code 11, réactivation automatique ; maladie longue durée,
   - pour le salarié 101001, le 09/10 affiche 07:57 ▸ 17:11 ◂, 7:14 travaillées, −0:46, et le CSV contient la même
     ligne ;
   - la modification et l'enregistrement d'une fiche depuis la liste fonctionnaient déjà (« Enregistré »).
+
+**Journées alternatives non appliquées, et faux « oubli de pointage » sur les équipes de nuit** (besoin exprimé sur
+site : badgeages 14:00 et 23:00 → horaire du soir).
+
+- **Constat** (version d'origine 56.33.10, vérifié avec les mêmes badgeages) :
+  - l'écran *Calendrier* enregistre les journées alternatives et les signale (« +1 »), et son aide annonce que le
+    système retient celle qui colle aux badgeages. Mais le calcul (`dayVars`) n'utilise que la journée principale.
+    Exemple : 14:00 → 23:00 avec principale « matin » (06:00–14:00) et alternative « après-midi » (14:00–22:00) donne
+    « matin » et 480 min de retard ;
+  - la détection des anomalies lit les badgeages du jour calendaire. Une nuit 22:00 → 06:00 produit donc deux faux
+    « oublis de pointage » : l'entrée seule le premier jour, la sortie seule le lendemain. Cela vaut aussi pour une
+    équipe de nuit permanente, sans alternative.
+- **Correction** (`app/app.js`, moteur partagé par le navigateur et le serveur) :
+  - **choix de la journée** (`altChoisir`) : parmi la journée principale et ses alternatives, celle dont l'horaire
+    est le plus proche des badgeages (écart à l'entrée + écart à la sortie). À égalité, la principale. Une journée ne
+    peut être retenue que si son premier badgeage tombe le jour même. Sans badgeage, ou sur un jour de repos ou
+    férié, la journée principale s'applique comme avant ;
+  - le choix vaut pour la présence, le retard, le départ anticipé, les heures supplémentaires, les compteurs, les
+    anomalies, le relevé du mois et les états. La journée retenue est affichée, et la principale reste connue
+    (`principale`) ;
+  - **nuit** : les badgeages du matin qui ferment la nuit de la veille (veille retenue en nuit, avec une entrée
+    après midi) sont rattachés à cette nuit, et ne sont plus relus le lendemain ;
+  - **anomalies** : calculées sur les badgeages de la journée de travail retenue, et non plus sur ceux du jour
+    calendaire ;
+  - l'aide de l'écran Calendrier décrit la règle appliquée, avec l'exemple 14:00 / 23:00 (FR, EN, AR).
+- **Recalcul après une mise à jour du moteur** (`serveur/principal.js`) : au démarrage, l'empreinte de `app.js` est
+  comparée à la précédente. Si elle a changé, les journées calculées sont effacées, puis recalculées avec les nouvelles
+  règles. Avant, une correction du moteur ne s'appliquait aux jours déjà calculés qu'après un changement du
+  paramétrage ou un recalcul demandé. Mesure sur 6 000 salariés : 15 jours servis en 64 ms juste après le démarrage.
+- **Preuve** :
+  - navigateur et serveur d'essai, journée principale « matin », alternatives « après-midi » et « nuit » :
+    - 14:00 → 23:00 : après-midi, 9 h, retard 0, 60 min d'heures supplémentaires à valider ;
+    - 22:05 → 06:02 : nuit, 7,95 h, aucune anomalie ; le lendemain, la sortie de 06:02 n'est plus relue ;
+    - 06:10 → 14:00 : matin, retard 10 min, comme avant ;
+    - sans alternative, résultat inchangé (retard 480 min) ;
+  - équipe de nuit permanente : avant, deux « oublis » ; après, aucune anomalie et 8,05 h ;
+  - 54 écrans sans erreur (démonstration et 6 000 salariés).

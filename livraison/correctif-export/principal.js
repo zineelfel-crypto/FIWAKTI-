@@ -157,6 +157,17 @@ async function ouvrirBase(){
   try { await B.run("DELETE FROM sessions WHERE csrf IS NULL OR csrf=''"); } catch(e){}
   D = DONNEES_MOD.creer(B, PERIM);
   if (K) K.arreter();
+  /* 56.33.11 : moteur de calcul (app.js) modifié depuis le dernier démarrage → journées calculées effacées une fois,
+     recalculées avec les nouvelles règles (sans cela, une correction du moteur ne s'appliquait qu'après un changement
+     du paramétrage ou un recalcul demandé) */
+  try {
+    const emp = crypto.createHash("sha256").update(fs.readFileSync(path.join(APP, "app.js"))).digest("hex"), avant = await meta("moteur_empreinte");
+    if (avant !== emp){
+      try { await B.run("DELETE FROM calc_jour"); } catch(e){}
+      if (avant) journal("moteur de calcul mis à jour : journées recalculées");
+      await meta("moteur_empreinte", emp);
+    }
+  } catch(e){ journal("empreinte du moteur : "+e.message); }
   K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
 }
