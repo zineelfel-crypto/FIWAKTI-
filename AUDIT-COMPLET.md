@@ -603,6 +603,8 @@ en cas d'erreur de syntaxe).
     signalées avec leur message ;
   - **enregistrement refusé** si la formule est invalide, avec le message d'erreur ;
   - libellé de THEORIQUE corrigé (« Heures théoriques du jour »).
+  - styles de l'assistant également intégrés à `app.js` : l'affichage reste correct si `app.css` n'a pas été mis à
+    jour (constat sur site : formules sans couleurs).
 - **Preuve** :
   - les 37 compteurs existants sont reconnus valides, sans faux positif ;
   - 10 erreurs types diagnostiquées avec la bonne position, dont 5 corrigées en un clic ;
