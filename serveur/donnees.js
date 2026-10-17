@@ -180,7 +180,7 @@ function creer(B, PERIM){
     const admin = !!P.u && ((opts && opts.admin === true) || (!!P.profil && PERIM.niveauProfil(P.profil) === "admin"));
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
-    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}};
+    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [];
     let nbEcrits = 0;
     await B.transaction(async ()=>{
       const r = paquet.ref || {};
@@ -251,6 +251,11 @@ function creer(B, PERIM){
         const fermee = o => { if (!clotC || !o) return false; if (c === "dmd") return (o.du || o.d || "9999") <= clotC; if (c === "ptg" || c === "abs" || c === "corrections"){ const dd = dateDe(c, o); return !!dd && dd <= clotC; } return false; };
         const libre = c === "notifs" || c === "audit" || c === "journal";
         let refus = 0, clotRefus = false;
+        /* 56.33.11 : unicité du matricule, du badge et du CIN contrôlée sur TOUT le personnel. L'écran ne vérifiait que les
+           salariés chargés dans le navigateur : en grand effectif (annuaire paginé), un badge ou un CIN déjà attribué à un
+           autre salarié était accepté (badgeages attribués au mauvais salarié). Seule une valeur nouvelle ou modifiée est
+           contrôlée : un doublon ancien ne bloque pas l'enregistrement des autres champs. */
+        const UNI = c === "emps" ? indexUnicite(await employes()) : null;
         for (const x of (colls[c].put||[])){
           if (!x || x.id === undefined){ refus++; continue; }
           /* 56.33.11 : identifiant et matricule contrôlés (un identifiant contenant « " » injectait des attributs dans les
@@ -262,6 +267,7 @@ function creer(B, PERIM){
           if (fermee(x) || fermee(avant)){ refus++; clotRefus = true; continue; }
           /* conflit : l'enregistrement a changé sur le serveur depuis que le client l'a lu */
           if (!immuable && avant && Number(avant.__v||0) !== Number(x.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(x.id), mat:avant.mat||""}); continue; }
+          if (UNI){ const d = doublonEmp(UNI, x, avant); if (d){ refus++; refusEmps.push(d); continue; } }
           if (!admin){
             if (avant && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
             if (x.mat && !dansPerim(x.mat) && !(libre && !avant)){ refus++; continue; }
@@ -269,6 +275,7 @@ function creer(B, PERIM){
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
           await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++;
+          if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
           if (!immuable) (nouvellesVersions.colls[c] = nouvellesVersions.colls[c] || {})[String(x.id)] = v.__v;
           [avant, v].forEach(o=>joursDe(c, o).forEach(d=>touches.add(o.mat+"|"+d)));
@@ -290,7 +297,36 @@ function creer(B, PERIM){
         if (refus) ignores.push(c+" ("+refus+" refusé(s)"+(clotRefus ? ", dont période clôturée : ajustement de période antérieure requis" : "")+")");
       }
     });
-    return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions};
+    return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps};
+  }
+  /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
+  const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
+  const normUni = v => String(v == null ? "" : v).trim().toLowerCase();
+  let UNI_CACHE = null;
+  function indexUnicite(l){
+    if (!UNI_CACHE || UNI_CACHE.l !== l){
+      const ix = {l}; UNI_CHAMPS.forEach(k=>{ ix[k] = new Map(); });
+      l.forEach(e=>UNI_CHAMPS.forEach(k=>{ const v = normUni(e[k]); if (v && !ix[k].has(v)) ix[k].set(v, String(e.id)); }));
+      UNI_CACHE = ix;
+    }
+    /* copie de travail : les écritures du lot y sont reportées sans toucher au cache partagé */
+    const w = {}; UNI_CHAMPS.forEach(k=>{ w[k] = new Map(UNI_CACHE[k]); }); return w;
+  }
+  function doublonEmp(UNI, x, avant){
+    for (const k of UNI_CHAMPS){
+      const v = normUni(x[k]); if (!v || v === "•••" || (avant && normUni(avant[k]) === v)) continue;
+      const autre = UNI[k].get(v);
+      if (autre && autre !== String(x.id)) return {id:String(x.id), mat:String(x.mat||""), champ:k, valeur:String(x[k]).trim(),
+        message:"Enregistrement refusé : le "+UNI_LIB[k]+" « "+String(x[k]).trim()+" » est déjà attribué à un autre salarié."};
+    }
+    return null;
+  }
+  /* contrôle préalable (écran salarié) : toutes les valeurs déjà attribuées, sans nommer l'autre salarié */
+  async function unicite(x){
+    const l = await employes(), ix = indexUnicite(l), avant = l.find(e=>String(e.id) === String(x.id)) || null, out = [];
+    UNI_CHAMPS.forEach(k=>{ const v = normUni(x[k]); if (!v || v === "•••" || (avant && normUni(avant[k]) === v)) return;
+      const autre = ix[k].get(v); if (autre && autre !== String(x.id)) out.push({champ:k, valeur:String(x[k]).trim()}); });
+    return out;
   }
   /* 56.33.11 : comptages mémorisés 5 min (écran État du système) : un COUNT(*) sur plusieurs millions de badgeages
      prend plus d'une seconde à chaque ouverture */
@@ -322,7 +358,7 @@ function creer(B, PERIM){
       return n;
     });
   }
-  const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
+  const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
 }
 function controleReglesV(avant, apres, ref){

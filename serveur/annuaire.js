@@ -4,6 +4,11 @@
 "use strict";
 const LEGER = e => ({id:e.id, mat:String(e.mat), nom:e.nom||"", prenom:e.prenom||"", siteId:e.siteId||"", deptId:e.deptId||"", poste:e.poste||"",
   calId:e.calId||"", chefMat:e.chefMat||"", entree:e.entree||"", sortie:e.sortie||"", photo:undefined, _leger:true});
+/* 56.33.11 : ligne de la liste paginée avec les colonnes proposées à l'affichage (CIN, e-mail, téléphone, badge, calendrier,
+   portail, nombre d'accès) — auparavant vides en grand effectif ; données personnelles masquées selon le profil */
+const LIGNE = (e, masque) => Object.assign(LEGER(e), {cin:e.cin||"", email:e.email||"", tel:e.tel||"", badge:e.badge||"", portail:!!e.portail,
+  calHist:Array.isArray(e.calHist) ? e.calHist.slice(-12) : undefined, nbAcc:Array.isArray(e.acces) ? e.acces.length : 0},
+  masque ? {cin:e.cin ? "•••" : "", email:e.email ? "•••" : "", tel:e.tel ? "•••" : "", badge:e.badge ? "•••" : ""} : {});
 function creer(o){
   const {D} = o;
   const auj = () => new Date().toISOString().slice(0, 10);
@@ -12,7 +17,8 @@ function creer(o){
      le périmètre avec localeCompare : 400 à 600 ms par page à 50 000 salariés. Même ordre qu'avant (tri stable). */
   const COLL_NOM = new Intl.Collator("fr"), COLL_MAT = new Intl.Collator("fr", {numeric:true});
   let PREP = null;
-  const texteDe = e => ((e.nom||"")+" "+(e.prenom||"")+" "+e.mat+" "+(e.cin||"")).toLowerCase();
+  /* 56.33.11 : e-mail, téléphone et badge aussi (recherche et filtres de colonnes de la liste des employés) */
+  const texteDe = e => ((e.nom||"")+" "+(e.prenom||"")+" "+e.mat+" "+(e.cin||"")+" "+(e.email||"")+" "+(e.tel||"")+" "+(e.badge||"")).toLowerCase();
   /* mise à jour après quelques fiches modifiées (même position dans la liste, ou ajoutées à la fin) : chaque fiche
      changée est retirée des deux ordres puis réinsérée à sa place (égalité départagée par la position, comme le tri
      stable complet) — quelques millisecondes au lieu d'un tri complet */
@@ -74,10 +80,14 @@ function creer(o){
   const LISTES = new Map();
   function filtrerRapide(tous, set, q){
     const PR = prepare(tous), a = auj(), s = String(q.q||"").trim().toLowerCase(), mots = s ? s.split(/\s+/).filter(Boolean) : [];
-    const ok = e => (set === null || set.has(String(e.mat))) && (!q.site || e.siteId === q.site) && (!q.dept || e.deptId === q.dept) && (!q.fonction || (e.poste||"") === q.fonction)
+    const sites = q.site ? new Set(String(q.site).split(",")) : null, depts = q.dept ? new Set(String(q.dept).split(",")) : null;
+    const ok = e => (set === null || set.has(String(e.mat))) && (!sites || sites.has(e.siteId)) && (!depts || depts.has(e.deptId)) && (!q.fonction || (e.poste||"") === q.fonction)
+      && (!q.chef || String(e.chefMat||"") === String(q.chef))
       && (q.statut !== "actifs" || !e.sortie || e.sortie >= a) && (q.statut !== "sortis" || (e.sortie && e.sortie < a))
       && (!mots.length || (t => t.indexOf(s) >= 0 || mots.every(m=>t.indexOf(m) >= 0))(PR.texte.get(e)));
-    const l = (q.tri === "mat" ? PR.parMat : PR.parNom).filter(ok);
+    let l = (q.tri === "mat" ? PR.parMat : PR.parNom).filter(ok);
+    /* 56.33.11 : matricule, CIN ou badge saisi exactement : ce salarié en tête de liste */
+    if (s && mots.length === 1){ const ex = e => String(e.mat).toLowerCase() === s || String(e.cin||"").toLowerCase() === s || String(e.badge||"").toLowerCase() === s; if (l.some(ex)) l = l.filter(ex).concat(l.filter(e=>!ex(e))); }
     if (mots.length < 2) return l;
     const exacte = e => PR.texte.get(e).indexOf(s) >= 0;
     return l.filter(exacte).concat(l.filter(e=>!exacte(e)));
@@ -85,10 +95,11 @@ function creer(o){
   async function liste(login, q){
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||100));
     const ref = await (D.referentielLecture || D.referentiel)() || {}, {P, emps: tous} = await D.perimetreDe(ref, login);
-    const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.tri === "mat" ? "mat" : "", auj()]);
+    const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.chef||"", q.tri === "mat" ? "mat" : "", auj()]);
     let m = LISTES.get(cle);
     if (!m || m.tous !== tous || m.P !== P){ m = {tous, P, l:filtrerRapide(tous, P.set, q)}; if (LISTES.size > 500) LISTES.clear(); LISTES.set(cle, m); }
-    return {total:m.l.length, offset:off, lignes:m.l.slice(off, off + lim).map(LEGER)};
+    const masque = !!(P.profil && P.profil.persoMasque);
+    return {total:m.l.length, offset:off, lignes:m.l.slice(off, off + lim).map(e=>LIGNE(e, masque))};
   }
   async function fiche(login, mat){ const {emps} = await perimetre(login); return emps.find(e=>String(e.mat) === String(mat)) || null; }
   async function lot(login, mats, ids){ const {emps} = await perimetre(login), s = new Set((mats||[]).slice(0, 500).map(String)), si = new Set((ids||[]).slice(0, 500).map(String));

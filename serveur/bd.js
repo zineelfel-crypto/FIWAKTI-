@@ -112,7 +112,7 @@ async function ouvrir(cfg, dossier){
 function ouvrirSqlite(fichier, dossier){
   const { DatabaseSync } = require("node:sqlite");
   const d = new DatabaseSync(fichier);
-  d.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;");
+  d.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=1000; PRAGMA synchronous=NORMAL;");
   schema("sqlite").forEach(s=>d.exec(s));
   /* v56.2 : colonne « mois » des événements normalisés (installations antérieures) */
   if (!d.prepare("PRAGMA table_info(normalized_events)").all().some(c=>c.name === "mois")) d.exec("ALTER TABLE normalized_events ADD COLUMN mois TEXT");
@@ -126,18 +126,26 @@ function ouvrirSqlite(fichier, dossier){
      transaction within a transaction ») ; une écriture isolée émise entre-temps pouvait ne jamais aboutir. Une requête
      hors transaction s'exécute d'un bloc (node:sqlite est synchrone) dès qu'aucune transaction n'est ouverte. */
   let chaine = Promise.resolve(), ouverte = false;
+  /* 56.33.11 : base occupée par l'autre connexion (moteur de calcul en arrière-plan, p. ex. recalcul complet après une
+     mise à jour) : nouvel essai sans bloquer le serveur, pendant 60 s au plus. Auparavant l'attente était de 5 s
+     (serveur figé pendant ce temps), puis l'enregistrement échouait (« database is locked », erreur 500). La
+     transaction prend le verrou d'écriture dès son ouverture (BEGIN IMMEDIATE) : ses requêtes ne peuvent plus échouer
+     en cours de route. */
+  const occupee = e => /database is locked|SQLITE_BUSY/i.test(String(e && (e.message || e.errstr) || ""));
+  const reessayer = async fn => { const t0 = Date.now(); for (;;){ try { return fn(); } catch(e){ if (!occupee(e) || Date.now() - t0 > 60000) throw e; await new Promise(r=>setTimeout(r, 100 + Math.floor(Math.random() * 150))); } } };
+  const hors = fn => als.getStore() ? fn() : reessayer(fn);
   const attendre = async () => { while (ouverte && !als.getStore()) await chaine; };
   const B = {
     type:"sqlite", fichier, enTravail(fn){ return fn(); },
     partitions:async ()=>({creees:0, ignorees:[], tables:[]}), lignesParDefaut:async ()=>({}),
-    async get(sql, ...a){ await attendre(); return st(sql).get(...a) || null; },
-    async all(sql, ...a){ await attendre(); return st(sql).all(...a); },
-    async run(sql, ...a){ await attendre(); const r = st(sql).run(...a); return {n:r.changes}; },
-    async exec(sql){ await attendre(); d.exec(sql); },
+    async get(sql, ...a){ await attendre(); return hors(()=>st(sql).get(...a) || null); },
+    async all(sql, ...a){ await attendre(); return hors(()=>st(sql).all(...a)); },
+    async run(sql, ...a){ await attendre(); return hors(()=>({n:st(sql).run(...a).changes})); },
+    async exec(sql){ await attendre(); await hors(()=>d.exec(sql)); },
     transaction(fn){
       if (als.getStore()) return fn(B);
       const p = chaine.then(async ()=>{
-        d.exec("BEGIN"); ouverte = true;
+        await reessayer(()=>d.exec("BEGIN IMMEDIATE")); ouverte = true;
         const ctx = {annul:[]};
         try { const r = await als.run(ctx, ()=>fn(B)); d.exec("COMMIT"); return r; }
         catch(e){ try { d.exec("ROLLBACK"); } catch(x){} annuler(ctx); throw e; }

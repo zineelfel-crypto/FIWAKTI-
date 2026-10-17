@@ -635,3 +635,39 @@ en cas d'erreur de syntaxe).
     délégation globale, simulation de solde, plusieurs lignes de délégation) → couple reconnu, début après la fin
     refusé, période correcte acceptée ;
   - 55 écrans sans erreur.
+
+## Audit du sous-menu RH › Employés (vérification écran par écran)
+
+Essais sur un serveur d'essai de 6 010 salariés (grand effectif : annuaire servi par le serveur, 50 lignes par page),
+puis sur un serveur en petit effectif et dans la démonstration autonome. Chaque constat a été reproduit avant
+correction, puis vérifié après.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Recherche par matricule : le salarié exact n'arrivait pas en tête | moyenne | matricule, CIN ou badge exact placé en tête (`serveur/annuaire.js`) |
+| 2 | Recherche « Rechercher… » de l'en-tête : seulement dans les 50 lignes affichées | haute | envoyée au serveur, sur tout l'effectif |
+| 3 | Filtres de colonnes Matricule / Nom / Prénom / CIN : seulement sur la page | haute | envoyés au serveur |
+| 4 | Filtres Département / Site : choix limités aux valeurs de la page | haute | tous les services (avec leurs sous-services) et tous les sites |
+| 5 | Colonnes CIN, e-mail, téléphone, badge, calendrier, accès : vides en grand effectif | moyenne | servies par l'annuaire (masquées si le profil masque les données personnelles) |
+| 6 | Cocher une ligne ouvrait la fiche : sélection multiple impossible | haute | la case ne déclenche plus l'ouverture de la fiche |
+| 7 | **CIN, badge ou matricule déjà attribués à un salarié non affiché acceptés** (badgeages attribués au mauvais salarié) | **critique** | contrôle d'unicité sur tout le personnel avant l'enregistrement (`POST /api/v1/employes/unicite`) **et** imposé par le serveur à chaque enregistrement (`serveur/donnees.js`) ; la fiche refusée est rétablie, message en FR / EN / AR |
+| 8 | Onglet Contrat & horaires : responsable et équipe vides, poste vide | moyenne | responsable lu sur le serveur, équipe et collègues comptés sur le serveur (`chef=` dans l'annuaire), poste repris de la fiche |
+| 9 | Modification du chef hiérarchique : liste limitée aux salariés chargés | haute | recherche sur tout l'effectif (saisie avec suggestions) ; un salarié ne peut pas être son propre responsable |
+| 10 | Export « Fichier netTime » : seulement les 50 lignes de la page | haute | tout l'effectif filtré (5 890 lignes à l'essai) |
+| 11 | Export de la sélection : seulement les salariés chargés dans le navigateur | haute | fiches lues sur le serveur, sélection sur plusieurs pages |
+| 12 | Export CSV/Excel : filtres Département et colonnes ignorés | moyenne | mêmes filtres que la liste |
+| 13 | Colonne E-mail / Téléphone / Badge ajoutée : filtre limité à la page ; Entrée, Sortie… : filtre trompeur | moyenne | e-mail, téléphone et badge cherchés sur le serveur ; pas de filtre de page sur les autres colonnes en grand effectif |
+| 14 | **Congé annuel : heures additionnées affichées en jours** (un jour de congé = « 8 j pris », solde 240 - 8) | **haute** | compteurs livrés corrigés : pris = heures / journée de base, solde = 30 j - pris ; migration unique des installations dont les compteurs sont restés d'origine (un compteur personnalisé n'est pas touché) |
+| 15 | Absences d'un congé validé doublées à l'écran en grand effectif (9,5 j au lieu de 4) | haute | absences régénérées seulement en petit effectif ; en grand effectif elles viennent du serveur (les données du serveur n'étaient pas touchées) |
+| 16 | Enregistrement pendant un recalcul en arrière-plan : « database is locked », erreur 500 (SQLite) | haute | verrou d'écriture pris à l'ouverture de la transaction et nouvel essai sans bloquer le serveur (60 s au plus) : 40 enregistrements sur 40 réussis sous charge de calcul, attente maximale 188 ms |
+| 17 | Nouveau salarié : date d'entrée vide acceptée, aucun avertissement sans calendrier | moyenne | date d'entrée obligatoire (aujourd'hui par défaut) ; avertissement si aucun calendrier |
+| 18 | « Today : » (typographie française en anglais), solde « 20.5 j » | faible | ponctuation selon la langue ; décimales 20,5 en français et en arabe |
+
+Vérifié sans anomalie : les six onglets de la fiche, Fiche de pointage (badgeages et totaux), Historique, Fiche
+complète, modification et enregistrement (persistance vérifiée sur le serveur), annulation avec confirmation,
+contrôles e-mail / date de sortie / matricule verrouillé, « Enregistrer la vue », choix des colonnes, pagination,
+sélecteur de site, cloisonnement par périmètre (un responsable ne voit que ses 7 salariés ; fiche, lot, comptage,
+fiches complètes et écriture hors périmètre refusés), libellés anglais et arabes, Pointage du mois.
+
+Non modifié (choix de conception) : un salarié ne se supprime pas depuis la liste ou la fiche ; on renseigne sa date
+de sortie (les calculs s'arrêtent, l'historique est conservé).

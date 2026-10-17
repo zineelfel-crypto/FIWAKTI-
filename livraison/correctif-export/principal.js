@@ -168,6 +168,29 @@ async function ouvrirBase(){
       await meta("moteur_empreinte", emp);
     }
   } catch(e){ journal("empreinte du moteur : "+e.message); }
+  /* 56.33.11 : compteurs de congé livrés d'origine — « Congé annuel pris » (unité : jours) additionnait les heures
+     d'absence (8 par jour) : un jour de congé comptait 8 jours et le solde (240 - pris) baissait d'autant. Corrigés une
+     seule fois, et seulement s'ils sont restés tels que livrés : pris = heures / durée de la journée de base ; solde
+     = 30 jours (les 240 heures d'origine) - pris. Un compteur modifié par le client n'est jamais touché. */
+  try {
+    if (!await meta("migration_conges_jours")){
+      const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP);
+      if (r){
+        const ref = JSON.parse(r.valeur), l = Array.isArray(ref.arits) ? ref.arits : [];
+        const pris = l.find(a=>a && a.code === "CONGE" && a.unite === "j" && String(a.f||"").trim() === "TT_030");
+        const solde = l.find(a=>a && a.code === "SOLDECONGE" && a.unite === "j" && String(a.f||"").replace(/\s+/g, " ").trim() === "240 - CUM(CONGE)");
+        if (pris || solde){
+          if (pris) pris.f = "TT_030 / BASEJOUR";
+          if (solde) solde.f = "30 - CUM(CONGE)";
+          ref.__versions = ref.__versions || {}; ref.__versions.arits = Number(ref.__versions.arits || 0) + 1;
+          await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), CLE_APP);
+          try { await B.run("DELETE FROM calc_jour"); } catch(e){}
+          journal("compteurs de congé d'origine corrigés (jours au lieu d'heures)");
+        }
+      }
+      await meta("migration_conges_jours", "1");
+    }
+  } catch(e){ journal("migration des compteurs de congé : "+e.message); }
   K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
 }
@@ -1473,7 +1496,7 @@ async function traiter(req, res){
     if (r.ignores.length) await audit(C.login, "donnees.refusees", r.ignores.join(", "), ip);
     if (r.ecrits) await audit(C.login, "donnees.enregistrees", r.ecrits+" ligne(s)", ip);
     if (r.conflits.length) await audit(C.login, "donnees.conflits", r.conflits.map(x=>x.type === "ref" ? "référentiel:"+x.cle : x.coll+":"+x.id).join(", ").slice(0, 500), ip);
-    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions});
+    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
   /* ---- travaux en arrière-plan ---- */
@@ -1656,6 +1679,10 @@ async function traiter(req, res){
       await audit(C.login, "calendriers.masse", ecrits+" salarié(s) → « "+dst.nom+" » à partir du "+d+(conflits ? " ; "+conflits+" conflit(s)" : ""), ip);
       return json(res, 200, {ok:true, modifies:ecrits, conflits, ignores:Array.from(ignores)});
     }
+    /* 56.33.11 : matricule, badge et CIN déjà attribués (tout le personnel ; l'autre salarié n'est pas nommé) */
+    if (p === "/api/v1/employes/unicite" && req.method === "POST"){
+      if (!admin){ const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login); if (!PERIM.peutEcrire(P.profil, "emps")) return erreur(res, 403, "Droit de modification des salariés requis."); }
+      const b = await corpsJson(req); return json(res, 200, {conflits:await D.unicite({id:String(b.id||""), mat:b.mat, badge:b.badge, cin:b.cin})}); }
     if (p === "/api/v1/employes/lot" && req.method === "POST"){ const b = await corpsJson(req); return json(res, 200, {lignes:await AN.lot(C.login, Array.isArray(b.mats) ? b.mats : [], Array.isArray(b.ids) ? b.ids : [])}); }
     /* v56.8 : fiche salarié 360° — chaque module actif apporte sa rubrique (droits et périmètre appliqués) */
     const m360 = /^\/api\/v1\/employes\/([^/]+)\/360$/.exec(p);
