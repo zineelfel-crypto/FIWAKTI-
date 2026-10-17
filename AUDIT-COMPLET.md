@@ -973,3 +973,19 @@ serveur, et dans la démonstration.
 Vérifié sans anomalie : variable inconnue refusée avec suggestion (« PRESENSE » → « PRESENCE »), auto-référence refusée,
 assistant de formule (coloration, essai, palette), division par zéro sans erreur, libellés FR / EN / AR, démonstration
 autonome (55 écrans, aucune erreur).
+
+## Correctif 2 — règle « Badgeages répétés » (DOUBLON_MIN)
+
+Signalement après installation : règle publiée à 3 min pour toute la société, journée du 17/10 avec 5 badgeages à 19:43
+et 4 à 20:19 (pointeuse qui alterne Entrée / Sortie à chaque passage) : « le système accepte tous les pointages ».
+Reproduit à l'identique sur le grand effectif (6 010 salariés) puis sur le petit effectif.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Sens après regroupement** : chaque groupe gardait le sens de son dernier badgeage ; avec une pointeuse qui alterne, il restait 19:43 Entrée et 20:19 **Entrée** → journée incomplète, heures non comptées (serveur : travaillé vide) | **haute** | un groupe qui mêle entrées et sorties prend le sens attendu après le groupe précédent : 19:43 Entrée, 20:19 Sortie → 0:36 travaillé, journée complète (même moteur navigateur / serveur) |
+| 2 | **Affichage** : le registre (calcul serveur) montrait les 9 badgeages reçus, sans distinguer ceux écartés par la règle — d'où l'impression que la règle était ignorée | moyenne | badgeages retenus seuls, suivis de « (7 répété(s) écarté(s)) » ; dans le Journal, chaque badgeage écarté porte « répété — écarté » (tous restent enregistrés) |
+| 3 | **Contrôles « journée incomplète »** (Régularisation, Hebdomadaire, Journal, Suivi, fiche salarié, tableau de bord…) sur la liste brute : des journées rendues complètes par la règle restaient signalées | moyenne | un seul contrôle, sur les badgeages retenus par la règle ; côté serveur, le nombre de badgeages du statut « incomplet » porte aussi sur les retenus |
+
+Vérifié : serveur 0,6 h (19:43 E, 20:19 S, 7 écartés) ; petit effectif 07:56 E – 16:58 S = 7,03 h, journée absente de la
+Régularisation ; installation simulée (empreintes, démarrage, 16 écrans sans erreur) ; démonstration autonome sans erreur.
+Au premier démarrage, le changement de moteur déclenche le recalcul des journées en arrière-plan.

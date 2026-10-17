@@ -30,7 +30,7 @@ function chargerMoteur(fichierApp){
 ;globalThis.__moteur = {
   get db(){ return db; }, set db(v){ db = v; },
   reinit(){ ptgTouch(); absTouch(); SUIVI_CACHE = []; if (typeof jvVider === "function") jvVider(); if (typeof PERIM_TICK !== "undefined") PERIM_TICK++; },
-  jourVars, convFor, mvtsDe, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff
+  jourVars, convFor, mvtsDe, mvtsCalc, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff
 };`;
   vm.runInContext(code, ctx, {filename:"app.js"});
   ctx.download = (nom, contenu)=>{ if (ctx.__capture) ctx.__capture(nom, contenu); };
@@ -132,6 +132,10 @@ async function calculer(mats, du, au, horodatage, source){
       if ((e.entree && k < e.entree) || (e.sortie && k > e.sortie)) continue;
       let v; try { v = E.M.jourVars(e, k, conv); } catch(x){ continue; }
       const list = E.M.mvtsDe(e.mat, k);
+      /* règle « Badgeages répétés » (DOUBLON_MIN) : badgeages retenus pour le calcul ; les autres restent enregistrés et
+         affichés comme écartés (8e valeur = 1 ; 9e = sens retenu pour le calcul), le nombre de badgeages (statut « incomplet ») porte sur les retenus */
+      let retenus = list; try { retenus = E.M.mvtsCalc(e, k); } catch(x){}
+      const sensRetenu = new Map(retenus.map(m=>[String(m.id), m.sens]));
       const nv = x => (x === E.M.NUL || x === undefined || x === null || isNaN(x)) ? null : x;
       const ht = nv(v.d.HT), hp = nv(v.d.HP), ret = nv(v.d.RET);
       const a = anos[e.mat+"|"+k] || [];
@@ -139,8 +143,8 @@ async function calculer(mats, du, au, horodatage, source){
       lignes.push([String(e.mat), k, e.deptId||"", e.siteId||"", ht, hp, ret, (hp != null && ht != null) ? Math.round((hp-ht)*60) : null,
         a.length, a.map(x=>x.type).join(","), JSON.stringify(a),
         JSON.stringify({jid:v.inf.jid||"", jour:jr ? jr.nom : "", coul:jr ? jr.couleur : "", reel:!!v.inf.reel,
-          mv:list.map(m=>[m.id, String(m.ts).slice(11,16), m.sens, m.dev||"", m.src||"", m.__v||0, String(m.ts).slice(16,19)]), abs:(()=>{ try { return E.M.absLibJour(e.mat, k); } catch(x){ return ""; } })()}),
-        horodatage, list.length, v.inf.jid||"", v.inf.reel ? 1 : 0, a.filter(x=>x.type === "hs").reduce((s, x)=>s + (x.min||0), 0)]);
+          mv:list.map(m=>[m.id, String(m.ts).slice(11,16), m.sens, m.dev||"", m.src||"", m.__v||0, String(m.ts).slice(16,19), sensRetenu.has(String(m.id)) ? 0 : 1, sensRetenu.get(String(m.id)) || ""]), abs:(()=>{ try { return E.M.absLibJour(e.mat, k); } catch(x){ return ""; } })()}),
+        horodatage, retenus.length, v.inf.jid||"", v.inf.reel ? 1 : 0, a.filter(x=>x.type === "hs").reduce((s, x)=>s + (x.min||0), 0)]);
     }
   }
   /* 56.33.11 : journées invalidées après le début de ce calcul (horodatage de la tâche) : résultat retiré, recalculé
