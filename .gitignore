@@ -4,3 +4,8 @@ donnees/
 *.log
 *.fwk
 dist/
+
+# kit éditeur : registre des licences émises et clés privées — jamais dans le dépôt
+outils/editeur/registre-licences.jsonl
+*.pem
+cle-privee*
