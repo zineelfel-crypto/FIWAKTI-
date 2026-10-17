@@ -796,3 +796,31 @@ grand effectif), l'administrateur, en format ordinateur et téléphone, et dans 
 Vérifié sans anomalie : équipe directe (salariés dont la fiche désigne le responsable), statuts du jour, demandes à
 valider avec circuit (acceptation → niveau suivant), refus avec motif obligatoire, oublis de pointage de la veille,
 cloisonnement (le responsable ne voit que son équipe), libellés anglais et arabes.
+
+## Audit du sous-menu RH › Mon espace
+
+Essais avec de vrais comptes de salariés (« 10241 », petit effectif ; « 9004 », grand effectif de 6 010 salariés), un
+responsable (« s.gharbi ») et l'administrateur, en format ordinateur et téléphone, en français, anglais et arabe, et
+dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Badgeages inventés** : en mode serveur, avec le jeu d'exemple, le navigateur générait des badgeages aléatoires dès que moins de 40 pointages étaient chargés, ce qui est toujours le cas d'un salarié. Une journée sans badgeage s'affichait « Présent / En retard » avec des heures différentes à chaque connexion | **critique** | génération réservée à la démonstration autonome (jamais en mode serveur) ; la « simulation » des états est limitée de la même façon. Le portail affiche exactement les pointages enregistrés en base |
+| 2 | **« Pointer entrée / sortie » sur l'accueil** : le pointage s'affichait comme fait (« ✓ Mon statut ») puis était rejeté par le serveur (profil en lecture sur les pointages) | **haute** | boutons affichés seulement si le profil peut réellement saisir un pointage (règle du serveur : PTG ≥ saisie), action refusée avec un message sinon |
+| 3 | Menu « Visiteurs » visible pour le salarié, réponse 403 à l'ouverture | haute | menu masqué selon la règle du serveur (droit VIS, administrateur ou salarié qui reçoit des visites) |
+| 4 | Raccourci « Pointages » de l'accueil vers un écran interdit : retour silencieux à l'accueil | moyenne | redirection vers « Mon espace » ; tout autre écran interdit affiche « Cet écran n'est pas ouvert à votre profil » |
+| 5 | « Mes pointages » : liste brute des 12 derniers badgeages, sans heures travaillées ni journées incomplètes ou absentes | moyenne | tableau par journée sur 14 jours : badgeages, heures travaillées (même calcul que les écrans RH), statut (présent, retard, incomplet, absent, congé) |
+| 6 | « Exporter » produisait un fichier vide | moyenne | export CSV / Excel de mes journées (matricule, date, badgeages, travaillé, statut) |
+| 7 | Type « Absence non justifiée » proposé au salarié dans une demande | moyenne | réservé à la saisie administrative |
+| 8 | Notifications rédigées dans la langue du validateur (un salarié arabophone recevait le texte en français) | moyenne | modèle et paramètres conservés : le message s'affiche dans la langue du lecteur (le texte figé reste le repli et sert à l'e-mail) |
+| 9 | Téléphone : en-tête « Mon espace » haut de 510 px (cadre vide) ; filtre « Tous les sites » affiché au salarié | faible | en-tête ramené à sa hauteur utile (200 px) ; filtre masqué pour un profil salarié sans écran multi-salariés |
+| 10 | Libellés : « Demandes en instance » pour l'état d'une demande ; indicateur « Mes pointages 0 » ambigu | faible | « En instance » ; « Badgeages aujourd'hui » (FR / EN / AR) |
+
+Vérifié sans anomalie : accès limité à sa propre fiche, solde de congés, dépôt d'une demande (seul le salarié lui-même
+est proposé, circuit affiché), suivi des demandes et de leur état, notifications marquées comme lues, grand effectif
+(aucun chargement global), libellés anglais et arabes, démonstration autonome (55 écrans, aucune erreur).
+
+Note : si le jeu d'exemple était actif sur une installation serveur, les badgeages inventés n'étaient affichés que
+dans le navigateur ; ils n'ont été enregistrés que si l'utilisateur avait des droits d'écriture sur les pointages et
+qu'un enregistrement a suivi. Si un salarié signale une journée qu'il n'a pas effectuée, contrôler cette journée dans
+Pointages (terminal et provenance de chaque badgeage).
