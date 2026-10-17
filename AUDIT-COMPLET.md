@@ -653,7 +653,7 @@ correction, puis vérifié après.
 | 7 | **CIN, badge ou matricule déjà attribués à un salarié non affiché acceptés** (badgeages attribués au mauvais salarié) | **critique** | contrôle d'unicité sur tout le personnel avant l'enregistrement (`POST /api/v1/employes/unicite`) **et** imposé par le serveur à chaque enregistrement (`serveur/donnees.js`) ; la fiche refusée est rétablie, message en FR / EN / AR |
 | 8 | Onglet Contrat & horaires : responsable et équipe vides, poste vide | moyenne | responsable lu sur le serveur, équipe et collègues comptés sur le serveur (`chef=` dans l'annuaire), poste repris de la fiche |
 | 9 | Modification du chef hiérarchique : liste limitée aux salariés chargés | haute | recherche sur tout l'effectif (saisie avec suggestions) ; un salarié ne peut pas être son propre responsable |
-| 10 | Export « Fichier netTime » : seulement les 50 lignes de la page | haute | tout l'effectif filtré (5 890 lignes à l'essai) |
+| 10 | Export « Export des données » (fiche des employés) : seulement les 50 lignes de la page | haute | tout l'effectif filtré (5 890 lignes à l'essai) |
 | 11 | Export de la sélection : seulement les salariés chargés dans le navigateur | haute | fiches lues sur le serveur, sélection sur plusieurs pages |
 | 12 | Export CSV/Excel : filtres Département et colonnes ignorés | moyenne | mêmes filtres que la liste |
 | 13 | Colonne E-mail / Téléphone / Badge ajoutée : filtre limité à la page ; Entrée, Sortie… : filtre trompeur | moyenne | e-mail, téléphone et badge cherchés sur le serveur ; pas de filtre de page sur les autres colonnes en grand effectif |
@@ -671,3 +671,14 @@ fiches complètes et écriture hors périmètre refusés), libellés anglais et 
 
 Non modifié (choix de conception) : un salarié ne se supprime pas depuis la liste ou la fiche ; on renseigne sa date
 de sortie (les calculs s'arrêtent, l'historique est conservé).
+
+**Notifications des demandes (constat, non modifié en attente de décision)** :
+- aucun e-mail n'est envoyé par le serveur : il ne contient aucun code d'envoi ; l'écran des paramètres d'envoi
+  (serveur, port, adresse d'expédition) enregistre les réglages, et « Tester l'envoi » affiche « Message de test remis »
+  sans rien envoyer (il vérifie seulement que les champs sont remplis) ;
+- les messages destinés à l'employé (demande acceptée, refusée, rectifiée, niveau franchi) sont créés mais ne sont
+  affichés nulle part ; l'employé voit l'état de ses 5 dernières demandes en ouvrant son portail ;
+- les valideurs, eux, voient les demandes à valider dans la cloche de notifications.
+
+**Libellé** : l'export « Fichier netTime » s'appelle désormais « Export des données » (FR / EN / AR) ; le mot
+n'apparaît plus dans l'application.
