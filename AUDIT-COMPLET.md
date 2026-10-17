@@ -778,3 +778,21 @@ séparation des pouvoirs (seul le valideur du niveau ou son délégué valide ; 
 disponible — choix de conception), modification d'une demande en attente, demande en heures (fin avant début refusée),
 demande de plus d'un an refusée, demi-journée, rectification (modification ou annulation) d'une demande acceptée,
 filtres par état, cloisonnement (le responsable ne voit que son équipe).
+
+## Audit du sous-menu RH › Mon équipe
+
+Essais avec de vrais comptes de responsables (« s.gharbi », 4 salariés, petit effectif ; « chef.demo », 6 salariés,
+grand effectif), l'administrateur, en format ordinateur et téléphone, et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Accepter une demande d'une période clôturée** : « Demande acceptée » affiché et notification « acceptée » envoyée au salarié, alors que le serveur refusait l'écriture (demande toujours en attente) | **haute** | décision impossible sur une période clôturée, dans tous les écrans (Mon équipe, Demandes, notifications) ; la carte l'explique (« corrigez par un ajustement de période antérieure ») |
+| 2 | Cliquer sur un salarié : l'écran basculait vers Employés (interdit au responsable) puis l'Accueil ; en fermant la fiche, on perdait « Mon équipe » | haute | la fiche s'ouvre sur place, sur l'onglet Solde & pointages |
+| 3 | « Corriger » un oubli de pointage ouvrait la fiche d'identité au lieu de la journée | haute | ouvre la correction des pointages de la journée concernée |
+| 4 | Téléphone : la barre d'onglets du bas disparaissait en ouvrant Demandes / Suivi / Moi (aucun retour possible sauf par le menu) | moyenne | barre présente sur ces écrans (petit écran seulement) |
+| 5 | « 0 présent(s) sur 4 » alors que les 4 salariés sont en repos | moyenne | présents sur les salariés attendus (repos, congés, fériés exclus) ; « Personne n'est attendu aujourd'hui » ; absents et oublis en tête de liste |
+| 6 | Compte sans équipe directe (administrateur, RH) : liste arbitraire des salariés chargés en grand effectif, sans explication | faible | explication et accès au Suivi des équipes ; en petit effectif, la liste est intitulée « Votre périmètre » |
+
+Vérifié sans anomalie : équipe directe (salariés dont la fiche désigne le responsable), statuts du jour, demandes à
+valider avec circuit (acceptation → niveau suivant), refus avec motif obligatoire, oublis de pointage de la veille,
+cloisonnement (le responsable ne voit que son équipe), libellés anglais et arabes.
