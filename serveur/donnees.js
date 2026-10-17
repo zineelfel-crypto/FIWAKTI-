@@ -141,7 +141,10 @@ function creer(B, PERIM){
       let sql = "SELECT data FROM enreg WHERE coll=?", a = [c];
       if (DATEES.indexOf(c) >= 0 && du){
         const d0 = (c === "dmd" || c === "notifs") ? depuis : du;
-        sql += " AND (d IS NULL OR d>=?)"; a.push(d0);
+        /* 56.33.11 : une demande encore en attente reste chargée quelle que soit sa date (sinon elle disparaissait de
+           l'écran des valideurs une fois sortie de la fenêtre de chargement, sans jamais être traitée) */
+        if (c === "dmd"){ sql += " AND (d IS NULL OR d>=? OR data LIKE ? OR data NOT LIKE ?)"; a.push(d0, '%"etat":"attente"%', '%"etat":%'); }
+        else { sql += " AND (d IS NULL OR d>=?)"; a.push(d0); }
       }
       /* v56.14 : annuaire servi par page → les badgeages (et données biométriques) ne sont envoyés que pour l'utilisateur
          et son équipe ; le journal complet est servi par page (/api/v1/pointages). Évite ~4 Mo à l'ouverture à 20 000. */

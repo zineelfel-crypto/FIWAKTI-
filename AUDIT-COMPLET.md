@@ -752,3 +752,29 @@ historique de la journée (événements, anomalies, transitions), filtres du reg
 sur journée non clôturée / à écart nul, séparation des pouvoirs (l'auteur d'un ajustement ne peut pas le valider),
 recalcul d'un salarié avec rapport avant / après / écart et rejet, contrôle de période (début après fin refusé),
 cloisonnement par périmètre, libellés anglais et arabes.
+
+## Audit du sous-menu RH › Demandes
+
+Essais en petit effectif (circuit à deux niveaux, valideur réel « s.gharbi »), en grand effectif (6 010 salariés) et dans
+la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Période mal enregistrée** : en saisissant d'abord la date de début (02/11) d'une période future, le contrôle « début après fin » (ajouté le 16/10) refusait la saisie et gardait l'ancienne date ; demande créée du 17/10 au 06/11 (21 jours) au lieu de 02/11 → 06/11 (5 jours) | **critique** (régression) | une date de début placée après la fin repousse la fin (au lendemain dans une demande, pour garder le mode « plage ») avec un message ; une date de fin avant le début reste refusée — dans tous les écrans |
+| 2 | **Chevauchement accepté** : deux congés sur les mêmes jours pour le même salarié (simple avertissement) | **haute** | refus avec le détail de la demande existante (en attente ou acceptée) |
+| 3 | Mode « Journée » : changer la date → « La date de fin précède la date de début » | haute | en mode Journée / Heures, la date de fin suit la date choisie |
+| 4 | Demande déposée sur un jour de repos ou férié (0 jour décompté) | moyenne | refusée : « Aucun jour ouvré dans cette période » |
+| 5 | Grand effectif : durée « 0 j », circuit et valideur introuvables (personne ne pouvait valider), choix du salarié limité aux 50 salariés chargés | **haute** | fiches complètes des demandeurs et de leurs responsables lues sur le serveur ; salarié choisi par recherche sur tout l'effectif (fiche chargée, circuit retenu, jours décomptés) |
+| 6 | Matricule inconnu ou en cours de saisie : l'écran plantait (formulaire fermé) | haute | aucun circuit sans salarié ; message « Salarié inconnu ou hors de votre périmètre » |
+| 7 | Demande encore en attente plus ancienne que la fenêtre de chargement (2 mois) : disparaissait de l'écran des valideurs | haute | les demandes en attente sont toujours chargées |
+| 8 | Annulation d'une demande en attente immédiate, sans confirmation | moyenne | confirmation (type, dates, valideurs informés) |
+| 9 | Boîtes de refus (demandes, corrections, …) : bouton « Supprimer » ; restauration, simulation, retour d'import : « Supprimer » | moyenne | « Refuser », « Restaurer », « Confirmer » |
+| 10 | Export : dates 2026-09-08, statut « attente », ni nom ni durée, toutes les demandes quel que soit le filtre | moyenne | mêmes demandes que la liste (périmètre, site, état), nom, durée, statut en clair, valideur, dates jj/mm/aaaa |
+| 11 | Historique : « Créée par Employé » quand un responsable ou les RH saisissent pour un salarié | faible | nom de l'auteur, origine en commentaire |
+| 12 | Solde de congé dépassé sans avertissement ; « 0.5 j » | faible | avertissement « Solde de congé insuffisant : x j disponibles pour y j demandés » ; décimales selon la langue |
+
+Vérifié sans anomalie : circuit à deux niveaux (validation du responsable → niveau suivant), refus avec motif obligatoire,
+séparation des pouvoirs (seul le valideur du niveau ou son délégué valide ; l'administrateur seulement sans valideur
+disponible — choix de conception), modification d'une demande en attente, demande en heures (fin avant début refusée),
+demande de plus d'un an refusée, demi-journée, rectification (modification ou annulation) d'une demande acceptée,
+filtres par état, cloisonnement (le responsable ne voit que son équipe).
