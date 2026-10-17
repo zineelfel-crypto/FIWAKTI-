@@ -824,3 +824,28 @@ Note : si le jeu d'exemple était actif sur une installation serveur, les badgea
 dans le navigateur ; ils n'ont été enregistrés que si l'utilisateur avait des droits d'écriture sur les pointages et
 qu'un enregistrement a suivi. Si un salarié signale une journée qu'il n'a pas effectuée, contrôler cette journée dans
 Pointages (terminal et provenance de chaque badgeage).
+
+## Audit du sous-menu RH › Organigramme
+
+Essais avec l'administrateur (petit effectif : 8 services, 15 salariés ; grand effectif : 303 services, 6 010 salariés),
+un profil « Gestionnaire RH » (Employés en configuration, Paramétrage en lecture) et un profil en lecture seule, en
+format ordinateur et téléphone, en français, anglais et arabe, et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Responsable de service, grand effectif** : la liste ne proposait que les ~50 salariés chargés dans le navigateur (sur 6 010) ; un responsable non chargé apparaissait « — », et le circuit « Responsable du service » ne le trouvait pas | **haute** | nom du responsable affiché, choix par recherche sur tout le personnel (« Modifier »), fiches des responsables chargées au démarrage : le circuit les résout |
+| 2 | **Responsable enregistré à chaque frappe** : en grand effectif, taper « Z » enregistrait « Z » comme responsable (matricule inexistant) | **haute** | enregistrement à la validation du choix seulement ; matricule vérifié (salarié actif, contrôle serveur en grand effectif) |
+| 3 | **Droits** : le profil « Gestionnaire RH » ouvrait l'écran en écriture ; ajout, suppression, propriétés et responsable affichaient « Enregistré » / « supprimé », puis le serveur refusait (il exige le Paramétrage en configuration) | **haute** | boutons et panneau d'ajout selon la règle du serveur ; explication affichée ; action refusée même si elle est déclenchée autrement |
+| 4 | **Suppression d'un service ayant des salariés** (« Ressources humaines », 2 salariés) : acceptée, les salariés restaient rattachés à un service inexistant | **haute** | suppression refusée tant que des salariés actifs sont rattachés au service ou à ses sous-services (comptes du serveur en grand effectif) |
+| 5 | Impossible de **renommer ou déplacer** un service (seule solution : supprimer et recréer, en perdant les rattachements) | moyenne | « Renommer / déplacer » : nom et service parent, sans possibilité de boucle (un service ne peut pas passer sous l'un de ses sous-services), tracé dans le journal |
+| 6 | **Doublon** : deux « Production » sous le même parent acceptés ; nom vide refusé sans message | moyenne | doublon refusé (casse et espaces ignorés) ; message « Champ obligatoire : Nom » |
+| 7 | La **recherche** de l'en-tête ne filtrait pas l'arbre | moyenne | filtre sur le nom, les propriétés, le responsable et (petit effectif) les salariés, avec les services parents ; « Aucun service ne correspond » |
+| 8 | Service dont le parent a été supprimé : **absent de l'arbre** | moyenne | affiché à la racine |
+| 9 | **Performance grand effectif** : 303 listes de 51 options (15 453 options, 18 824 éléments), affichage 173 ms | moyenne | 304 options, 3 977 éléments, affichage 28 ms |
+| 10 | Effectif : seul le nombre de rattachés directs ; « Direction générale » sans effectif | faible | « directs / avec sous-services » (ex. 0 / 14), infobulle explicative ; sens de lecture conservé en arabe |
+| 11 | Export : parent sous forme d'identifiant seulement, sans responsable ni effectif | faible | colonnes ajoutées (chemin complet, matricule et nom du responsable, effectifs direct et total), anciennes colonnes conservées en tête pour la compatibilité ; tri par chemin |
+| 12 | Liste « Rattaché à » : noms seuls (homonymes indiscernables), identifiants non échappés | faible | chemin complet trié (« Direction générale › Production › … »), valeurs échappées |
+
+Vérifié sans anomalie : pliage / dépliage des branches, propriétés personnalisées (ajout, modification, suppression,
+propagation aux sous-services), corbeille et annulation, salariés listés sous leur service (petit effectif), lecture
+seule, libellés anglais et arabes, téléphone sans débordement, démonstration autonome (55 écrans, aucune erreur).
