@@ -230,6 +230,7 @@ function creer(B, PERIM){
         if (k === "reglesV"){ const motif = controleReglesV(ref.reglesV || [], r.reglesV || [], ref); if (motif){ ignores.push("reglesV ("+motif+")"); continue; } }
         /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
+        if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -366,6 +367,21 @@ function creer(B, PERIM){
   }
   const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
+}
+/* recette Journée type : la définition en vigueur jusqu'à la clôture (théorique, plages, tolérances, nuit) ne change pas */
+function controleJours(avant, apres, ref){
+  const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+  if (!clot || !Array.isArray(apres)) return "";
+  const CH = ["theo","plages","tolIn","tolOut","nuit"];
+  const def = (j, k) => { let o = j; for (const x of (Array.isArray(j.hist) ? j.hist : [])) if (x && x.def && k <= x.jusqu){ o = Object.assign({}, j, x.def); break; }
+    const r = {}; CH.forEach(c=>{ r[c] = o[c] === undefined ? null : o[c]; }); return JSON.stringify(r); };
+  const parId = new Map(apres.map(j=>[j && j.id, j]));
+  for (const a of avant){
+    if (!a) continue; const n = parId.get(a.id); if (!n) continue;
+    const bornes = new Set([clot].concat((a.hist||[]).concat(n.hist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
+    for (const k of bornes) if (def(a, k) !== def(n, k)) return "définition de « "+(a.nom||a.id)+" » modifiée en période clôturée";
+  }
+  return "";
 }
 function controleCals(avant, apres, ref){
   const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");

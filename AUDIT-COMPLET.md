@@ -914,3 +914,22 @@ Vérifié sans anomalie : sélection (clic, Maj+clic, jours de la semaine, tout,
 alternatives, nouveau calendrier (copie ou trame, nom en double refusé), fiche (nom, site), jours fériés de la table
 commune, affectation en masse (aperçu, filtres, application), libellés FR / EN / AR, démonstration autonome (55 écrans,
 aucune erreur).
+
+## Audit du sous-menu Temps & présence › Journée type
+
+Essais avec l'administrateur sur le petit effectif (6 journées types, « Journée normale 8 h » utilisée par 2
+calendriers, clôture au 30/09/2026), en contournant aussi l'écran pour contrôler le serveur, et dans la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Modifier une journée type réécrivait l'historique** : théorique, plages, tolérances et nuit s'appliquaient à toutes les journées passées, périodes clôturées comprises | **critique** | définition datée : à l'enregistrement, la définition en vigueur est conservée pour les journées jusqu'à la clôture (« Définitions antérieures ») ; la modification s'applique à partir du lendemain ; même moteur navigateur / serveur (vérifié : théorique 480 → 420 min, 13/10 = 7 h, 14/09 clôturé = 8 h) |
+| 2 | **Heures non recalculées après modification** : le cache des calculs comparait seulement la longueur du paramétrage (480 → 420 min ou 10 → 15 min ignorés jusqu'au rechargement) | **haute** | signature sur le contenu, relue après chaque enregistrement (journées types, calendriers, conventions, types, règles, fériés) |
+| 3 | Aucune protection serveur : un client pouvait modifier la définition d'une journée type sur la période clôturée | **haute** | refus du serveur (vérifié par contournement : base inchangée) |
+| 4 | **Suppression d'une journée type utilisée** par 2 calendriers : acceptée (jours sans horaire dans la trame) | **haute** | refusée avec la liste des calendriers concernés (trame, trames antérieures, exceptions, journées alternatives) |
+| 5 | Tolérances négatives ou excessives acceptées (−10, 500 min) | moyenne | 0 à 240 minutes |
+| 6 | Pause de −30 min ou de 600 min (plus longue que sa plage de 120 min) acceptée ; limite et pénalité négatives possibles | moyenne | durée entre 1 minute et la longueur de la plage ; limite et pénalité positives |
+| 7 | Théorique de 12 h sur des plages de travail de 8 h accepté sans alerte | moyenne | refusé : le théorique ne peut dépasser la durée des plages de travail (nuit à cheval sur minuit comprise) |
+| 8 | Deux journées types du même nom (« Journée normale 8 h ») acceptées | faible | refusé (casse ignorée) |
+
+Vérifié sans anomalie : création, plages (obligatoire, flexible, pause, nuit), chevauchement refusé, aperçu de la
+bande horaire, couleur, libellés FR / EN / AR, démonstration autonome (55 écrans, aucune erreur).
