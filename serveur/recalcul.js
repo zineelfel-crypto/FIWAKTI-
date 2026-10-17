@@ -10,6 +10,11 @@ function creer(o){
   const maintenant = () => new Date().toISOString();
   const plage = (du, au) => { const l = []; let d = new Date(du+"T12:00:00Z"); const f = new Date(au+"T12:00:00Z"); while (d <= f && l.length < 400){ l.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + 86400000); } return l; };
   const fichier = id => path.join(dossier, "recalcul-"+id+".json");
+  /* 56.33.11 : un recalcul s'exécute dans le processus du serveur : interrompu par un redémarrage (mise à jour, coupure),
+     il restait « en cours » pour toujours, et deux recalculs bloqués empêchaient d'en lancer un autre. Au démarrage, ces
+     recalculs sont marqués en erreur avec la cause ; il suffit de les relancer. */
+  Promise.resolve().then(()=>B.run("UPDATE recalculs SET statut='erreur', erreur=? WHERE statut='en_cours'", "Interrompu par un redémarrage du serveur : relancez le recalcul."))
+    .then(r=>{ if (r && r.n) journal(r.n+" recalcul(s) interrompu(s) par le redémarrage marqué(s) en erreur"); }).catch(()=>{});
   async function clot(){ const ref = await D.referentielLecture() || {}; return (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, ""); }
   async function salaries(portee, cible, dansPerim){
     const ref = await D.referentielLecture() || {}, emps = (await D.employes()).filter(e=>dansPerim(e.mat));

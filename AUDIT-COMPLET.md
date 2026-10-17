@@ -726,3 +726,29 @@ Vérifié sans anomalie : périodes (aujourd'hui, hier, semaine ; hier, 7 jours,
 recherche, sélection de service, correction des pointages d'une journée, justification, confirmation, traitement en
 lot, annulation, indicateurs (présents, anomalies, heures supplémentaires, demandes), cloisonnement (le responsable ne
 voit que les journées de ses 7 salariés, une équipe hors périmètre renvoie 0).
+
+## Audit du sous-menu RH › Validation des journées
+
+Essais en grand effectif (6 010 salariés, 9 004 journées en anomalie), en petit effectif (avec une période clôturée au
+30/09/2026 et un second compte valideur) et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Ajustement de période antérieure validé sans effet** : l'écart était enregistré (variable `AJ_<compteur>`) mais aucune formule ne l'utilisait ; de plus l'écran ne chargeait pas les ajustements | **critique** | l'écart validé est ajouté au compteur ajusté le jour d'imputation (sauf si la formule utilise déjà `AJ_<compteur>`) ; ajustements chargés par l'écran (lecture seule). Preuve : Heures travaillées du 01/10 : 0 → 1,5 après validation |
+| 2 | **Recalcul interrompu par un redémarrage resté « En cours » pour toujours** ; à deux, plus aucun recalcul possible (« Deux recalculs sont déjà en cours ») | **haute** | au démarrage, les recalculs interrompus passent en « Échec » avec la cause ; ils se relancent normalement |
+| 3 | Cocher une journée : « Aucune journée cochée » (régression de la correction des cases de sélection du 17/10) | **haute** | une case qui porte sa propre action la garde ; les cases des listes (Employés) n'ouvrent toujours pas la fiche |
+| 4 | Ajustement accepté pour un matricule inexistant (999999) | haute | salarié existant et en poste à la date d'origine exigés par le serveur |
+| 5 | Journées à valider : seules les 100 premières visibles (9 004 en anomalie) ; registre : 200 sur 9 004 | haute | pagination de 100 en 100 avec « 1–100 sur 9 004 » |
+| 6 | « Exporter » : fichier vide | haute | export de l'onglet affiché (journées de l'état choisi, registre filtré, ajustements), toutes les pages |
+| 7 | Recherche de l'en-tête sans effet | moyenne | nom, prénom ou matricule, sur le serveur (« Gharbi » → 1 499 anomalies sur 9 004) |
+| 8 | Codes techniques affichés (ABSENCE_UNJUSTIFIED, « majeure », « resolue ») | moyenne | libellés en français, anglais et arabe (Absence non justifiée, Majeure, Résolue…), code en infobulle ; nom du salarié dans le registre et l'historique |
+| 9 | Ajustement : « Écart (heures) » et « +1.5 h » pour tous les compteurs (certains sont en minutes ou en jours) ; matricule saisi à la main | moyenne | unité du compteur affichée, recherche du salarié |
+| 10 | Sans période clôturée, formulaire d'ajustement proposé puis refusé par le serveur | faible | explication à la place du formulaire (« corrigez directement la journée ») |
+| 11 | Boutons « Valider » et « Rejeter » affichés sans aucune journée à traiter | faible | affichés seulement s'il y a des journées dans l'état à valider |
+| 12 | Rapport de recalcul : codes des compteurs et « 28.57 » | faible | libellé et unité du compteur, décimales selon la langue ; salarié ciblé choisi par recherche |
+
+Vérifié sans anomalie : validation (responsable, RH) d'une sélection et « Tout valider », rejet avec motif obligatoire,
+historique de la journée (événements, anomalies, transitions), filtres du registre, refus des ajustements sans motif /
+sur journée non clôturée / à écart nul, séparation des pouvoirs (l'auteur d'un ajustement ne peut pas le valider),
+recalcul d'un salarié avec rapport avant / après / écart et rejet, contrôle de période (début après fin refusé),
+cloisonnement par périmètre, libellés anglais et arabes.

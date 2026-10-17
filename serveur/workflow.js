@@ -163,12 +163,16 @@ function creer(o){
     if (!dansPerimetre(mat)) throw Object.assign(new Error("Salarié hors périmètre."), {code:404});
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw Object.assign(new Error("Date d'origine invalide."), {code:400});
     if (!clot || d > clot) throw Object.assign(new Error("Cette journée n'est pas clôturée : corrigez-la normalement (l'ajustement est réservé aux périodes clôturées)."), {code:409});
-    if (!/^[A-Z0-9_]{1,40}$/.test(comp) || !Number.isFinite(delta) || delta === 0) throw Object.assign(new Error("Compteur et écart (en heures, non nul) obligatoires."), {code:400});
+    if (!/^[A-Z0-9_]{1,40}$/.test(comp) || !Number.isFinite(delta) || delta === 0) throw Object.assign(new Error("Compteur et écart (dans l'unité du compteur, non nul) obligatoires."), {code:400});
     if (!String(a.motif||"").trim()) throw Object.assign(new Error("Motif obligatoire."), {code:400});
+    /* 56.33.11 : salarié existant et en poste à la date d'origine (un matricule inconnu était accepté) */
+    const emp = (await D.employes()).find(e=>String(e.mat) === mat);
+    if (!emp) throw Object.assign(new Error("Matricule inconnu : "+mat+"."), {code:400});
+    if ((emp.entree && d < emp.entree) || (emp.sortie && d > emp.sortie)) throw Object.assign(new Error("Le salarié "+mat+" n'était pas en poste le "+d.split("-").reverse().join("/")+"."), {code:400});
     const id = "aj-"+crypto.randomBytes(8).toString("hex"), imput = plus1(clot);
     await B.run("INSERT INTO adjustments(id,mat,d_origine,d_imputation,compteur,delta,avant,apres,motif,justificatif,auteur,cree,statut) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
       id, mat, d, imput, comp, delta, a.avant == null ? null : Number(a.avant), a.apres == null ? null : Number(a.apres), String(a.motif).slice(0, 500), a.justificatif ? String(a.justificatif).slice(0, 500) : null, login, maintenant(), "propose");
-    await audit(login, "ajustement.propose", mat+" "+d+" "+comp+" "+(delta > 0 ? "+" : "")+delta+" h, imputé au "+imput+" — "+a.motif);
+    await audit(login, "ajustement.propose", mat+" "+d+" "+comp+" "+(delta > 0 ? "+" : "")+delta+", imputé au "+imput+" — "+a.motif);
     return B.get("SELECT * FROM adjustments WHERE id=?", id);
   }
   async function validerAjustement(login, id, decision, dansPerimetre, moi){
@@ -182,7 +186,7 @@ function creer(o){
     const st = decision === "refus" ? "refuse" : "valide";
     await B.run("UPDATE adjustments SET statut=?, valide_par=?, valide_le=? WHERE id=?", st, login, maintenant(), id);
     if (st === "valide") await D.ecrire("ajust", {id:x.id, mat:x.mat, d:x.d_imputation, compteur:x.compteur, delta:Number(x.delta), origine:x.d_origine, motif:x.motif});
-    await audit(login, "ajustement."+st, x.mat+" "+x.d_origine+" "+x.compteur+" "+x.delta+" h (imputé au "+x.d_imputation+")");
+    await audit(login, "ajustement."+st, x.mat+" "+x.d_origine+" "+x.compteur+" "+x.delta+" (imputé au "+x.d_imputation+")");
     return {ok:true, statut:st, imputation:x.d_imputation, mat:x.mat};
   }
   return {etatEffectif, synchroniser, valider, bloquantsCloture, ajuster, validerAjustement, clotureJusqu, ETATS_EN_ATTENTE};

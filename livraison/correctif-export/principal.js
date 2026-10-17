@@ -1815,9 +1815,15 @@ async function traiter(req, res){
     const clot = await WF.clotureJusqu(), a = aujourdhui();
     const filtre = mats => (admin || P.set === null) ? {sql:"", a:[]} : D.filtreMat(new Set(mats || Array.from(P.set||[])));
     const fm = f => f.sql.replace(" AND (mat IS NULL OR mat='' OR ", " AND (");
+    /* 56.33.11 : recherche d'un salarié (nom, prénom, matricule) dans les listes de l'écran Validation des journées */
+    const filtreQ = async () => { const q = String(u.searchParams.get("q")||"").trim().toLowerCase();
+      if (q.length < 2) return filtre();
+      const mots = q.split(/\s+/).filter(Boolean);
+      const l = (await D.employes()).filter(e=>dansPerim(e.mat) && (t=>mots.every(m=>t.indexOf(m) >= 0))(((e.nom||"")+" "+(e.prenom||"")+" "+e.mat).toLowerCase())).slice(0, 2000).map(e=>String(e.mat));
+      return D.filtreMat(new Set(l.length ? l : ["\u0000"])); };
     if (p === "/api/v1/journees" && req.method === "GET"){
       const du = dateOk(u.searchParams.get("du")) ? u.searchParams.get("du") : ajoutJours(a, -30), au = dateOk(u.searchParams.get("au")) ? u.searchParams.get("au") : a;
-      const etat = u.searchParams.get("etat") || "", f = filtre(), off = Math.max(0, +u.searchParams.get("offset")||0), lim = Math.min(500, Math.max(1, +u.searchParams.get("limit")||100));
+      const etat = u.searchParams.get("etat") || "", f = await filtreQ(), off = Math.max(0, +u.searchParams.get("offset")||0), lim = Math.min(500, Math.max(1, +u.searchParams.get("limit")||100));
       const comptes = {}; (await B.all("SELECT etat, COUNT(*) n FROM day_states WHERE d>=? AND d<=?"+fm(f)+" GROUP BY etat", du, au, ...f.a)).forEach(r=>{ comptes[r.etat] = Number(r.n); });
       const auto = await B.get("SELECT COUNT(*) n FROM calc_jour c WHERE c.d>=? AND c.d<=? AND c.d<? AND c.nano=0"+fm(f).replace(/mat/g, "c.mat")+" AND NOT EXISTS (SELECT 1 FROM day_states s WHERE s.mat=c.mat AND s.d=c.d)", du, au, a, ...f.a);
       comptes.APPROUVEE_AUTO = Number(auto.n);
@@ -1849,13 +1855,14 @@ async function traiter(req, res){
     }
     if (p === "/api/v1/registre-anomalies"){
       const du = dateOk(u.searchParams.get("du")) ? u.searchParams.get("du") : ajoutJours(a, -30), au = dateOk(u.searchParams.get("au")) ? u.searchParams.get("au") : a;
-      const f = filtre(), cond = [], par = [du, au];
+      const f = await filtreQ(), cond = [], par = [du, au];
       ["statut","gravite","code"].forEach(k=>{ const v = u.searchParams.get(k); if (v){ cond.push(" AND "+k+"=?"); par.push(v); } });
       const off = Math.max(0, +u.searchParams.get("offset")||0), lim = Math.min(500, Math.max(1, +u.searchParams.get("limit")||100));
       const tot = await B.get("SELECT COUNT(*) n FROM anomalies WHERE d>=? AND d<=?"+cond.join("")+fm(f), ...par, ...f.a);
       const l = await B.all("SELECT * FROM anomalies WHERE d>=? AND d<=?"+cond.join("")+fm(f)+" ORDER BY d DESC, mat LIMIT "+lim+" OFFSET "+off, ...par, ...f.a);
       const parG = {}; (await B.all("SELECT gravite, statut, COUNT(*) n FROM anomalies WHERE d>=? AND d<=?"+fm(f)+" GROUP BY gravite, statut", du, au, ...f.a)).forEach(r=>{ parG[r.gravite+"|"+r.statut] = Number(r.n); });
-      return json(res, 200, {total:Number(tot.n), items:l, repartition:parG});
+      const empsR = new Map((await D.employes()).map(e=>[String(e.mat), e]));   /* 56.33.11 : nom du salarié dans le registre */
+      return json(res, 200, {total:Number(tot.n), items:l.map(x=>Object.assign(x, {nom:(empsR.get(String(x.mat))||{}).nom||"", prenom:(empsR.get(String(x.mat))||{}).prenom||""})), repartition:parG});
     }
     if (p === "/api/v1/ajustements" && req.method === "GET"){
       const st = u.searchParams.get("statut"), f = filtre();
