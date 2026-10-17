@@ -933,3 +933,23 @@ calendriers, clôture au 30/09/2026), en contournant aussi l'écran pour contrô
 
 Vérifié sans anomalie : création, plages (obligatoire, flexible, pause, nuit), chevauchement refusé, aperçu de la
 bande horaire, couleur, libellés FR / EN / AR, démonstration autonome (55 écrans, aucune erreur).
+
+## Audit du sous-menu Temps & présence › Type de temps
+
+Essais avec l'administrateur sur le petit effectif (14 types, « Congé annuel » code 030 utilisé par 11 demandes ou
+absences et par la formule CONGE = TT_030 / BASEJOUR, clôture au 30/09/2026), en contournant aussi l'écran pour
+contrôler le serveur, et dans la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Code modifiable** (030 → 300) sans avertissement : la formule du solde de congés (TT_030), la logique liée aux codes système (congé annuel, absence non justifiée, blocages biométriques) et les exports cessaient silencieusement de fonctionner | **critique** | code figé dès la création (lecture seule, explication) ; refusé aussi par le serveur |
+| 2 | **Mode de saisie** « En journées » → « En heures » accepté alors que 11 demandes ou absences existaient en journées (durées réinterprétées) | **haute** | refusé dès qu'une demande ou une absence existe ; créer un nouveau type |
+| 3 | **Classe** (Congé → Productif) et **« Rémunéré »** modifiables alors que le type est utilisé en période clôturée (calcul des périodes clôturées réécrit) | **haute** | refusés si le type est utilisé en période clôturée (2 absences / demandes ici) |
+| 4 | **Suppression** d'un type utilisé par des demandes ou absences, ou d'un type système (030, 031, 034, 035, 040) : acceptée | **haute** | refusée, avec le nombre d'usages ou la mention « type système » |
+| 5 | Aucune protection serveur : un client pouvait changer le code ou le mode de saisie | **haute** | le serveur vérifie sur toute la base (absences et demandes) ; contournement testé : base inchangée |
+| 6 | Passer la classe en « Productif » décochait « Reportable » sans le rétablir au retour (le Congé annuel perdait son report) | moyenne | « Reportable » rétabli quand on revient à une classe d'absence dans la même modification |
+| 7 | « Jours maxi » sans limite haute (99 999) | faible | entre 0 et 3 660 |
+| 8 | Deux types du même nom acceptés ; aucune indication d'usage | faible | nom en double refusé ; le panneau indique l'usage (demandes / absences, dont période clôturée) et les types système |
+
+Vérifié sans anomalie : création, code en double (espaces et casse ignorés), classes, couleur, saisie réservée à
+l'administration, report et jours maxi, libellés FR / EN / AR, démonstration autonome (55 écrans, aucune erreur).

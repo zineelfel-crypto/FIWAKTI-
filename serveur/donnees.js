@@ -231,6 +231,7 @@ function creer(B, PERIM){
         /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
+        if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -367,6 +368,25 @@ function creer(B, PERIM){
   }
   const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
+}
+/* recette Types de temps : code figé ; mode de saisie figé dès qu'une absence ou demande existe ; classe et « rémunéré »
+   figés si le type est utilisé en période clôturée ; suppression refusée pour un type utilisé ou système */
+async function controleTt(B, avant, apres, ref){
+  if (!Array.isArray(apres)) return "";
+  const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+  const SYS = ["030","031","034","035","040"];
+  const usage = async (id, jusqu) => { const motif = '%"tt":'+JSON.stringify(String(id))+'%';
+    const r = await B.get("SELECT COUNT(*) n FROM enreg WHERE coll IN ('abs','dmd') AND data LIKE ?"+(jusqu ? " AND d<=?" : ""), ...(jusqu ? [motif, jusqu] : [motif]));
+    return Number(r && r.n) || 0; };
+  const parId = new Map(apres.map(x=>[x && x.id, x]));
+  for (const a of avant){
+    if (!a) continue; const n = parId.get(a.id);
+    if (!n){ if (SYS.indexOf(String(a.code)) >= 0) return "type système "+a.code+" non supprimable"; if (await usage(a.id)) return "type « "+(a.nom||a.code)+" » utilisé par des absences ou des demandes"; continue; }
+    if (String(n.code) !== String(a.code)) return "code du type « "+(a.nom||a.code)+" » non modifiable";
+    if ((n.saisie||"jour") !== (a.saisie||"jour") && await usage(a.id)) return "mode de saisie de « "+(a.nom||a.code)+" » non modifiable (déjà utilisé)";
+    if (clot && (Number(n.cls) !== Number(a.cls) || !!n.paye !== !!a.paye) && await usage(a.id, clot)) return "classe ou rémunération de « "+(a.nom||a.code)+" » non modifiable (utilisé en période clôturée)";
+  }
+  return "";
 }
 /* recette Journée type : la définition en vigueur jusqu'à la clôture (théorique, plages, tolérances, nuit) ne change pas */
 function controleJours(avant, apres, ref){
