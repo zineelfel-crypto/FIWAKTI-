@@ -238,8 +238,9 @@ function creer(B, D, opts){
       l = l.filter(e=>eq.has(String(e.mat)));
     }
     if (q.q && q.q.length >= 2){
-      const s = q.q.toLowerCase();
-      l = l.filter(e=>(e.nom+" "+e.prenom+" "+e.prenom+" "+e.nom+" "+e.mat).toLowerCase().indexOf(s) >= 0);
+      /* recherche par mots, dans n'importe quel ordre : « khald », « 200 Khaldi Fethi », « Fethi Khaldi » */
+      const mots = q.q.toLowerCase().split(/\s+/).filter(Boolean);
+      l = l.filter(e=>{ const txt = (e.nom+" "+e.prenom+" "+e.mat).toLowerCase(); return mots.every(m=>txt.indexOf(m) >= 0); });
     }
     /* v49 : périmètre global sans filtre → aucune liste de matricules dans les requêtes (25 000 paramètres évités) */
     const global = P.set === null && !q.dept && !q.chef && !q.site && !q.equipe && !q.mat && !(q.q && q.q.length >= 2);

@@ -989,3 +989,17 @@ Reproduit à l'identique sur le grand effectif (6 010 salariés) puis sur le pet
 Vérifié : serveur 0,6 h (19:43 E, 20:19 S, 7 écartés) ; petit effectif 07:56 E – 16:58 S = 7,03 h, journée absente de la
 Régularisation ; installation simulée (empreintes, démarrage, 16 écrans sans erreur) ; démonstration autonome sans erreur.
 Au premier démarrage, le changement de moteur déclenche le recalcul des journées en arrière-plan.
+
+## Correctif 3 — recherche d'un salarié dans le registre (grand effectif)
+
+Signalement : Registre détaillé des pointages › Journées, filtre « khald » dans la colonne Employés → « Rien à afficher »,
+alors que « 1–100 sur 42 007 journées » restait affiché.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Le filtre de la colonne Employés n'était pas transmis au serveur (lu sous une clé « ptg » alors que les tableaux rangent leurs filtres sous « jours », « synthese », « semaines », « regul ») : il ne cherchait que dans la page affichée (100 lignes) | **haute** | filtre Employés / Matricule de l'onglet affiché transmis au serveur ; page 1 à chaque changement de filtre |
+| 2 | Recherche à l'expression exacte : « asma baccouche » ne trouvait pas « Baccouche Asma », « 200 Khaldi Fethi » (valeur choisie dans la liste) ne correspondait pas côté serveur | moyenne | recherche par mots, dans n'importe quel ordre, côté serveur et dans les filtres de colonne de tous les tableaux |
+
+Vérifié sur 6 010 salariés : « bacc » → 2 100 journées ; valeur choisie dans la liste → 7 journées du salarié ;
+« asma baccouche » → résultats ; synthèse filtrée (300 salariés) ; installation simulée et démonstration sans erreur.
+Livraison : FIWAKTI-56.33.11-correctif-3.zip (cumulatif : app.js, moteur.js, calcul.js).
