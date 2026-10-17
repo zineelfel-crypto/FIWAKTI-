@@ -682,3 +682,47 @@ de sortie (les calculs s'arrêtent, l'historique est conservé).
 
 **Libellé** : l'export « Fichier netTime » s'appelle désormais « Export des données » (FR / EN / AR) ; le mot
 n'apparaît plus dans l'application.
+
+## Notifications des demandes : application et e-mail
+
+- **Dans l'application** : les messages destinés à l'employé (demande acceptée, refusée, rectifiée, niveau franchi,
+  demande à valider pour le valideur) s'affichent dans la cloche (« Mes notifications », non lus comptés) et dans le
+  portail ; un clic les marque comme lus (enregistré sur le serveur) et ouvre le portail.
+- **Par e-mail** (`serveur/courriel.js`, sans dépendance externe) : le serveur envoie chaque nouvelle notification à
+  l'adresse de la **fiche du salarié** (onglet Identité & contact). Sans adresse : notification dans l'application seule.
+  - Réglages : Administration › Sécurité › Messagerie (le bloc était masqué en version serveur). Sécurité « aucune »,
+    STARTTLS (587) ou SSL/TLS (465) ; authentification PLAIN ou LOGIN ; certificat du serveur de messagerie vérifié.
+  - Mot de passe du compte d'envoi : saisi à l'écran, gardé **chiffré** sur le serveur (clé « secrets »), jamais renvoyé
+    au navigateur ni journalisé.
+  - « Tester l'envoi » envoie réellement un message à l'adresse indiquée (avant : message « remis » sans aucun envoi).
+  - Case « Envoyer les notifications des demandes par e-mail » ; dernier envoi (nombre, échecs) affiché.
+  - Garde-fous : 60 e-mails par heure au plus par compte, liens retirés du texte (une notification peut être créée par
+    tout utilisateur), adresses masquées dans le journal.
+- Une absence confirmée ou un justificatif saisi par le responsable n'est plus annoncé « Votre demande … a été acceptée »
+  mais « Absence non justifiée enregistrée dans votre dossier pour le 15/10/2026 » ; dates des messages en jj/mm/aaaa.
+- Preuves : serveur de messagerie d'essai — test d'envoi reçu (authentification, accents et arabe corrects), STARTTLS
+  chiffré, certificat non vérifiable refusé ; demande acceptée → e-mail reçu par le salarié, notification visible dans
+  sa cloche et son portail, statut « lu » enregistré ; mot de passe absent des journaux.
+- Au passage : l'envoi du référentiel des pointeuses à l'ouverture de session n'est plus tenté pour les profils sans
+  droit de configuration des terminaux (erreur 403 inutile).
+
+## Audit du sous-menu RH › Suivi des équipes & présences
+
+Essais en grand effectif (6 010 salariés), en petit effectif et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Onglet « Pointages & présences » : statuts et compteurs calculés sur les seuls salariés chargés dans le navigateur (50 absents sur 5 890 attendus) | **haute** | statuts calculés par le serveur (`/api/v1/calcul/presences`) sur tout le périmètre : comptes par statut, page par page, mêmes règles que l'écran |
+| 2 | Onglet « Annuaire & profils » : 50 salariés au lieu de 5 890 ; filtres sur la seule page | **haute** | annuaire du serveur : recherche, service et sous-services, équipe, contrat, sortis ; poste et contrat actuels fournis par le serveur |
+| 3 | Filtre « Équipe de… » : seuls les responsables chargés étaient proposés | moyenne | recherche d'un responsable sur tout l'effectif |
+| 4 | Ouvrir la fiche depuis une ligne du suivi : « Salarié introuvable » pour un salarié non chargé | haute | la fiche est chargée depuis le serveur |
+| 5 | « Afficher plus (10 restantes) » alors qu'il restait 8 971 anomalies | moyenne | nombre restant pris sur le total du serveur |
+| 6 | Bouton « Exporter » : fichier vide « Pas de données tabulaires pour cette vue » | haute | export de l'onglet affiché avec ses filtres : 9 011 anomalies, 35 340 journées, 5 890 salariés (toutes les pages) |
+| 7 | Compteurs inchangés après une décision (« Tout 9011 » après confirmation) | moyenne | relecture des compteurs une fois l'enregistrement transmis (9011 → 9010 → 9007…) |
+| 8 | Annulation d'une décision : message « modifications non enregistrées par le serveur » | moyenne | le journal d'audit est inaltérable : l'annulation y est tracée (type Annulation) au lieu d'effacer la ligne |
+| 9 | Pendant un recalcul de fond (après une mise à jour) : « 0 anomalie — bravo » et « 0 sur 0 attendus » | haute | le serveur signale « calcul en cours » (résultats partiels non mis en cache) ; l'écran l'affiche et se met à jour seul ; les journées du jour sont assurées pour l'accueil |
+
+Vérifié sans anomalie : périodes (aujourd'hui, hier, semaine ; hier, 7 jours, 30 jours), filtres par statut et par type,
+recherche, sélection de service, correction des pointages d'une journée, justification, confirmation, traitement en
+lot, annulation, indicateurs (présents, anomalies, heures supplémentaires, demandes), cloisonnement (le responsable ne
+voit que les journées de ses 7 salariés, une équipe hors périmètre renvoie 0).

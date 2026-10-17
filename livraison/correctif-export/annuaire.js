@@ -6,7 +6,9 @@ const LEGER = e => ({id:e.id, mat:String(e.mat), nom:e.nom||"", prenom:e.prenom|
   calId:e.calId||"", chefMat:e.chefMat||"", entree:e.entree||"", sortie:e.sortie||"", photo:undefined, _leger:true});
 /* 56.33.11 : ligne de la liste paginée avec les colonnes proposées à l'affichage (CIN, e-mail, téléphone, badge, calendrier,
    portail, nombre d'accès) — auparavant vides en grand effectif ; données personnelles masquées selon le profil */
-const LIGNE = (e, masque) => Object.assign(LEGER(e), {cin:e.cin||"", email:e.email||"", tel:e.tel||"", badge:e.badge||"", portail:!!e.portail,
+/* valeur actuelle d'un champ à historique (poste « GRADE », contrat « STATUT ») */
+const champVal = (e, code) => { const a = new Date().toISOString().slice(0, 10); let v = "", d0 = ""; ((e.hist||{})[code]||[]).forEach(h=>{ const d = String(h.d||""); if (d <= a && d >= d0){ d0 = d; v = h.v; } }); return v; };
+const LIGNE = (e, masque) => Object.assign(LEGER(e), {grade:champVal(e, "GRADE"), contrat:champVal(e, "STATUT"), cin:e.cin||"", email:e.email||"", tel:e.tel||"", badge:e.badge||"", portail:!!e.portail,
   calHist:Array.isArray(e.calHist) ? e.calHist.slice(-12) : undefined, nbAcc:Array.isArray(e.acces) ? e.acces.length : 0},
   masque ? {cin:e.cin ? "•••" : "", email:e.email ? "•••" : "", tel:e.tel ? "•••" : "", badge:e.badge ? "•••" : ""} : {});
 function creer(o){
@@ -82,7 +84,7 @@ function creer(o){
     const PR = prepare(tous), a = auj(), s = String(q.q||"").trim().toLowerCase(), mots = s ? s.split(/\s+/).filter(Boolean) : [];
     const sites = q.site ? new Set(String(q.site).split(",")) : null, depts = q.dept ? new Set(String(q.dept).split(",")) : null;
     const ok = e => (set === null || set.has(String(e.mat))) && (!sites || sites.has(e.siteId)) && (!depts || depts.has(e.deptId)) && (!q.fonction || (e.poste||"") === q.fonction)
-      && (!q.chef || String(e.chefMat||"") === String(q.chef))
+      && (!q.chef || String(e.chefMat||"") === String(q.chef)) && (!q.contrat || champVal(e, "STATUT") === q.contrat)
       && (q.statut !== "actifs" || !e.sortie || e.sortie >= a) && (q.statut !== "sortis" || (e.sortie && e.sortie < a))
       && (!mots.length || (t => t.indexOf(s) >= 0 || mots.every(m=>t.indexOf(m) >= 0))(PR.texte.get(e)));
     let l = (q.tri === "mat" ? PR.parMat : PR.parNom).filter(ok);
@@ -95,7 +97,7 @@ function creer(o){
   async function liste(login, q){
     const off = Math.max(0, +q.offset||0), lim = Math.min(500, Math.max(1, +q.limit||100));
     const ref = await (D.referentielLecture || D.referentiel)() || {}, {P, emps: tous} = await D.perimetreDe(ref, login);
-    const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.chef||"", q.tri === "mat" ? "mat" : "", auj()]);
+    const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.chef||"", q.contrat||"", q.tri === "mat" ? "mat" : "", auj()]);
     let m = LISTES.get(cle);
     if (!m || m.tous !== tous || m.P !== P){ m = {tous, P, l:filtrerRapide(tous, P.set, q)}; if (LISTES.size > 500) LISTES.clear(); LISTES.set(cle, m); }
     const masque = !!(P.profil && P.profil.persoMasque);

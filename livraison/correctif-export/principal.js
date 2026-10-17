@@ -34,6 +34,7 @@ try { const dm = path.join(__dirname, "modules");
       const mod = require(path.join(dm, man.serveur)); BD.ajouterModule(mod);
       MODS_SERVEUR.push({id:man.id, routes:(man.routes||[]).filter(r=>MODULES.routeAdmise(r)), mod, inst:null}); } catch(e){ console.error("module "+f+" : "+e.message); } }); } catch(e){}
 const COFFRE = require("./coffre.js");
+const COURRIEL = require("./courriel.js");
 const TOTP = require("./totp.js");
 
 /* 56.33.11 : base SQLite, journaux et sauvegardes réservés au compte du service (empreintes de mots de passe) */
@@ -193,6 +194,42 @@ async function ouvrirBase(){
   } catch(e){ journal("migration des compteurs de congé : "+e.message); }
   K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
+}
+/* 56.33.11 : réglages d'envoi (paramétrage) + mot de passe chiffré ; « surcharge » = réglages saisis à l'écran, pas
+   encore enregistrés (test d'envoi) — jamais le mot de passe */
+async function smtpReglages(surcharge){
+  const ref = await D.referentielLecture() || {}, sm = Object.assign({}, (ref.secu || {}).smtp || {});
+  if (surcharge && typeof surcharge === "object") ["hote","port","securite","auth","user","expediteur","nomExpediteur"].forEach(k=>{ if (surcharge[k] !== undefined) sm[k] = surcharge[k]; });
+  const c = await meta("smtp_mdp"); let mdp = "";
+  if (c) try { mdp = CF.dechiffrerTexte(c, "secrets"); } catch(e){ journal("mot de passe d'envoi illisible (clé « secrets » changée ?)"); }
+  return Object.assign(sm, {mdp});
+}
+/* notification créée (demande acceptée, refusée, rectifiée…) → e-mail à l'adresse de la fiche du salarié, si l'envoi
+   est configuré et activé. Une à une, sans bloquer l'enregistrement ; échecs comptés dans le journal (sans adresse).
+   Garde-fous : un compte ne déclenche pas plus de 60 e-mails par heure ; le texte est tronqué et ses liens retirés
+   (une notification peut être créée par tout utilisateur : la messagerie de l'entreprise ne doit pas servir à diffuser
+   un message ou un lien arbitraire). */
+const COURRIEL_QUOTA = new Map();
+async function notifierParCourriel(notifs, login){
+  const cfg = await smtpReglages();
+  if (!cfg.hote || !cfg.expediteur || cfg.notifMail === false) return;
+  const h = Math.floor(Date.now() / 3600000), q = COURRIEL_QUOTA.get(login) || {h, n:0};
+  if (q.h !== h){ q.h = h; q.n = 0; } COURRIEL_QUOTA.set(login, q);
+  if (COURRIEL_QUOTA.size > 5000) COURRIEL_QUOTA.clear();
+  const propre = t => String(t || "").replace(/[\r\n]+/g, " ").replace(/\b(?:https?|ftp|file):\/\/\S+|\bwww\.\S+/gi, "[lien retiré]").slice(0, 300);
+  const emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
+  let envoyes = 0, sansAdresse = 0, echecs = 0, derniere = "";
+  for (const n of notifs.slice(0, 500)){
+    if (q.n >= 60){ journal("notifications par e-mail : limite horaire atteinte pour le compte "+login); break; }
+    const e = parMat.get(String(n.mat)); const a = e && String(e.email || "").trim();
+    if (!e || e.sortie && e.sortie < aujourdhui() || !COURRIEL.adresseValide(a)){ sansAdresse++; continue; }
+    q.n++;
+    try { await COURRIEL.envoyer(cfg, {a, sujet:"FIWAKTI — "+(propre(n.txt) || "notification").slice(0, 120), texte:propre(n.txt)+"\r\n\r\n"+(e.prenom || "")+" "+(e.nom || "")+" ("+e.mat+")\r\n— FIWAKTI"}); envoyes++; }
+    catch(x){ echecs++; derniere = String(x.message).replace(/[^\s@<>"]+@[^\s@<>"]+/g, "[adresse]"); }
+  }
+  if (envoyes || echecs) await meta("smtp_dernier", {le:new Date().toISOString(), envoyes, echecs, erreur:derniere.slice(0, 200)});
+  if (echecs) journal("notifications par e-mail : "+echecs+" échec(s) — "+derniere);
+  else if (envoyes) journal("notifications par e-mail : "+envoyes+" envoyée(s)"+(sansAdresse ? ", "+sansAdresse+" sans adresse" : ""));
 }
 async function meta(k, v){
   if (v === undefined){ const r = await B.get("SELECT v FROM meta WHERE k=?", k); return r ? JSON.parse(r.v) : null; }
@@ -1488,6 +1525,7 @@ async function traiter(req, res){
       if (JSON.stringify(vus) !== avant){ r.ref.users = docC.users; await B.run("UPDATE kv SET valeur=?, version=version+1 WHERE cle=?", JSON.stringify(r.ref), CLE_APP); }
     }
     try { await K.invalider(r.touches, r.refCles); } catch(e){ journal("invalidation : "+e.message); }
+    if ((r.nouvellesNotifs || []).length) notifierParCourriel(r.nouvellesNotifs, C.login).catch(e=>journal("notifications par e-mail : "+e.message));
     if ((r.refCles||[]).indexOf("terms") >= 0) try { await GERER_PUSH(); } catch(e){}
     if ((r.refCles||[]).indexOf("secu") >= 0){
       const n = (await B.run("DELETE FROM sessions WHERE id<>?", sess.sid)).n;
@@ -1883,6 +1921,7 @@ async function traiter(req, res){
     if (p === "/api/v1/calcul/anomalies") r = await K.anomalies(C.login, q);
     else if (p === "/api/v1/calcul/journees") r = await K.journees(C.login, q);
     else if (p === "/api/v1/calcul/synthese") r = await K.synthese(C.login, q);
+    else if (p === "/api/v1/calcul/presences") r = await K.presences(C.login, q);
     else if (p === "/api/v1/calcul/accueil") r = await K.accueil(C.login);
     else if (p === "/api/v1/calcul/preaudit") r = await K.preaudit(C.login, q);
     else if (p === "/api/v1/calcul/contenu"){
@@ -2071,6 +2110,22 @@ async function traiter(req, res){
       await audit(C.login, "licence.revalidation", JSON.stringify(Object.assign({}, diff, {etat:LV2.e.etat, resultat:"appliquée"}))+(b.reference ? " — réf. "+String(b.reference).slice(0, 60) : ""), ip);
       return json(res, 200, {ok:true, client:r.charge.client, modules:MOD.lettres(), fw:MOD.liste().filter(m=>m.actif).map(m=>m.id), expire:N.fin, changements:diff, licence:licencePublique(LV2)});
     } finally { LIC_VERROU = false; }
+  }
+  /* 56.33.11 : envoi des e-mails (notifications des demandes). Réglages dans Administration › Sécurité ; le mot de passe
+     du compte d'envoi est gardé chiffré sur le serveur, jamais renvoyé au navigateur ni journalisé. */
+  if (p === "/api/v1/systeme/courriel" && req.method === "GET") return json(res, 200, {mdpDefini:!!await meta("smtp_mdp"), dernier:await meta("smtp_dernier") || null});
+  if (p === "/api/v1/systeme/courriel/mot-de-passe" && req.method === "POST"){
+    const b = await corpsJson(req), mdp = String(b.mdp || "");
+    if (mdp.length > 512) return erreur(res, 400, "Mot de passe trop long.");
+    await meta("smtp_mdp", mdp ? CF.chiffrerTexte(mdp, "secrets") : "");
+    await audit(C.login, "courriel.mot_de_passe", mdp ? "défini" : "effacé", ip);
+    return json(res, 200, {ok:true, mdpDefini:!!mdp});
+  }
+  if (p === "/api/v1/systeme/courriel/test" && req.method === "POST"){
+    const b = await corpsJson(req), cfg = await smtpReglages(b.smtp);
+    try { await COURRIEL.envoyer(cfg, {a:b.a, sujet:"FIWAKTI — message de test", texte:"Ce message confirme que FIWAKTI peut envoyer des e-mails avec les réglages enregistrés.\r\n\r\nThis message confirms that FIWAKTI can send e-mails.\r\n\r\nتؤكد هذه الرسالة أن FIWAKTI قادر على إرسال الرسائل الإلكترونية."});
+      await audit(C.login, "courriel.test", "réussi", ip); return json(res, 200, {ok:true}); }
+    catch(e){ await audit(C.login, "courriel.test", "échec : "+e.message, ip); return erreur(res, 400, "Envoi impossible : "+e.message); }
   }
   if (p === "/api/v1/comptes/reinitialiser" && req.method === "POST"){
     const b = await corpsJson(req);

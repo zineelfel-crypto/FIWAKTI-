@@ -180,7 +180,7 @@ function creer(B, PERIM){
     const admin = !!P.u && ((opts && opts.admin === true) || (!!P.profil && PERIM.niveauProfil(P.profil) === "admin"));
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
-    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [];
+    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [];
     let nbEcrits = 0;
     await B.transaction(async ()=>{
       const r = paquet.ref || {};
@@ -275,6 +275,7 @@ function creer(B, PERIM){
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
           await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++;
+          if (c === "notifs" && !avant) nouvellesNotifs.push(v);
           if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
           if (!immuable) (nouvellesVersions.colls[c] = nouvellesVersions.colls[c] || {})[String(x.id)] = v.__v;
@@ -297,7 +298,7 @@ function creer(B, PERIM){
         if (refus) ignores.push(c+" ("+refus+" refusé(s)"+(clotRefus ? ", dont période clôturée : ajustement de période antérieure requis" : "")+")");
       }
     });
-    return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps};
+    return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
   const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
