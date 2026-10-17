@@ -123,7 +123,8 @@ function creer(o){
     const cal = e => (Array.isArray(e.calHist) ? e.calHist : (e.calId ? [{calId:e.calId}] : [])).some(h=>h.calId === id) || e.calId === id;
     const f = {site:e=>e.siteId === id, depts:e=>sub.indexOf(e.deptId) >= 0, rd:e=>(e.rds||[]).indexOf(id) >= 0, tt:e=>(e.tts||[]).indexOf(id) >= 0, cal,
       zone:e=>(e.acces||[]).some(x=>x.zoneId === id), plan:e=>(e.acces||[]).some(x=>(x.hist||[]).some(h=>h.planId === id) || x.planId === id),
-      cf:e=>e.cf && e.cf[id] !== undefined && e.cf[id] !== ""}[q.critere];
+      /* champ employé : les valeurs sont historisées dans e.hist[code] (e.cf n'existe pas : le comptage renvoyait toujours 0) */
+      cf:e=>((e.hist||{})[id]||[]).some(h=>h && h.v !== undefined && h.v !== "")}[q.critere];
     return {n:f ? emps.filter(f).length : 0};
   }
   return {liste, fiche, lot, complets, valeurs, compter, LEGER};

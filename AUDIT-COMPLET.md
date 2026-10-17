@@ -849,3 +849,25 @@ format ordinateur et téléphone, en français, anglais et arabe, et dans la dé
 Vérifié sans anomalie : pliage / dépliage des branches, propriétés personnalisées (ajout, modification, suppression,
 propagation aux sous-services), corbeille et annulation, salariés listés sous leur service (petit effectif), lecture
 seule, libellés anglais et arabes, téléphone sans débordement, démonstration autonome (55 écrans, aucune erreur).
+
+## Audit du sous-menu RH › Champs employés
+
+Essais avec l'administrateur sur le petit effectif (3 champs GRADE, STATUT, CATÉGORIE ; 12 salariés avec historique ;
+profil « Gestionnaire éléments variables » au périmètre filtré sur STATUT = Titulaire) et le grand effectif (6 010
+salariés), en français, anglais et arabe, et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Renommer le code** d'un champ (STATUT → STATUT2) était accepté sans avertissement : les valeurs historisées des salariés restaient sous l'ancien code (champ vide partout), le filtre du profil devenait invisible dans l'écran Profils mais restait appliqué | **critique** | code figé dès la création (lecture seule, explication) ; refusé aussi s'il est modifié autrement ; le nom affiché reste modifiable |
+| 2 | **Retirer une valeur** (« Titulaire ») utilisée par un filtre de périmètre : acceptée ; le profil affichait « Tous » alors que le filtre « Titulaire » restait appliqué | **haute** | retrait refusé tant que la valeur filtre un profil, un compte ou un état (liste des éléments concernés) |
+| 3 | **Décocher « Utilisable comme filtre »** alors qu'un profil filtre sur ce champ : le filtre disparaissait des écrans mais restait appliqué | **haute** | refusé tant que des filtres l'utilisent |
+| 4 | **Suppression** : « Aucun autre enregistrement ne dépend de cet élément » alors que 12 salariés avaient une valeur (comptage sur un champ `cf` inexistant, côté écran et côté serveur) ; suppression possible d'un champ utilisé par un périmètre | **haute** | comptage sur l'historique réel (écran et serveur : 12 au lieu de 0) ; comptes et états filtrants ajoutés aux impacts ; suppression refusée si le champ filtre un périmètre ou un état |
+| 5 | **Codes réservés** acceptés (NOM, SITE, MATRICULE…, ou suffixe _DEPUIS) : ils entraient en conflit avec les colonnes standard de l'import des employés | moyenne | refusés avec explication |
+| 6 | Saisie du code : « Échelon » devenait « CHELON » (lettre accentuée supprimée) | faible | accents convertis (« ECHELON ») |
+| 7 | Valeurs possibles en double (« CDD » deux fois) conservées | faible | doublons retirés (casse ignorée) |
+| 8 | Aucune visibilité sur l'utilisation d'un champ | faible | le panneau indique « Utilisé comme filtre : Profil « … » = valeur » |
+| 9 | Installations existantes : un filtre déjà orphelin (champ supprimé ou valeur retirée avant cette correction) restait appliqué sans être visible | moyenne | encadré « Filtres invisibles à corriger » sur l'écran Champs employés, avec l'élément, le code et la valeur à corriger |
+
+Vérifié sans anomalie : création (code, nom, valeurs, filtrable), doublon de code (casse ignorée), corbeille,
+historique daté dans la fiche employé, export, libellés anglais et arabes, démonstration autonome (55 écrans, aucune
+erreur).
