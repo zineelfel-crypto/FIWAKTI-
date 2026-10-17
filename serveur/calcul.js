@@ -367,12 +367,14 @@ function creer(B, D, opts){
     const page = emps.slice(off, off+lim), mats = page.map(e=>String(e.mat));
     await assurer(mats, q.du, q.au);
     const f = D.filtreMat(new Set(mats));
-    const lignes = await B.all("SELECT mat, d, ht, hp, data FROM calc_jour WHERE d>=? AND d<=?"+f.sql, q.du, q.au, ...f.a);
+    const lignes = await B.all("SELECT mat, d, ht, hp, hs, types, data FROM calc_jour WHERE d>=? AND d<=?"+f.sql, q.du, q.au, ...f.a);
     const cle = k => q.gran === "mois" ? k.slice(0,7) : q.gran === "periode" ? "P" : lundi(k);
     const grp = new Map();
     lignes.forEach(r=>{
       const g = r.mat+"|"+cle(r.d); let o = grp.get(g);
-      if (!o){ o = {mat:r.mat, du:r.d, au:r.d, prevu:0, fait:0, absH:0, absJ:0, jours:0}; grp.set(g, o); }
+      if (!o){ o = {mat:r.mat, du:r.d, au:r.d, prevu:0, fait:0, absH:0, absJ:0, jours:0, hsMin:0, inc:0}; grp.set(g, o); }
+      /* registre, onglet hebdomadaire : dépassements journaliers (minutes) et journées incomplètes */
+      if (r.hs > 0) o.hsMin += r.hs; if (String(r.types||"").indexOf("oubli") >= 0) o.inc++;
       if (r.d < o.du) o.du = r.d; if (r.d > o.au) o.au = r.d;
       const data = JSON.parse(r.data||"{}");
       o.prevu += r.ht || 0; if (data.reel && r.hp) { o.fait += r.hp; if (r.hp > 0) o.jours++; }

@@ -871,3 +871,25 @@ salariés), en français, anglais et arabe, et dans la démonstration autonome.
 Vérifié sans anomalie : création (code, nom, valeurs, filtrable), doublon de code (casse ignorée), corbeille,
 historique daté dans la fiche employé, export, libellés anglais et arabes, démonstration autonome (55 écrans, aucune
 erreur).
+
+## Audit du sous-menu Temps & présence › Registre détaillé des pointages
+
+Essais avec l'administrateur sur le petit effectif (15 salariés, clôture au 30/09/2026) et le grand effectif (6 010
+salariés, calcul serveur), sur les onglets Journées, Journal, Synthèse, Hebdomadaire et Régularisation, leurs filtres,
+l'ajout manuel d'un badgeage et les exports, et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **« Injecter les badgeages simulés »** proposé sur une installation réelle : un clic créait des badgeages fictifs (source « badge ») pour tout le mois, sur tous les salariés sans pointage | **critique** | bouton et action réservés à la démonstration ; refus explicite sinon |
+| 2 | **Ajout manuel d'un badgeage** : période clôturée (« Enregistré » puis refus du serveur), date future (01/12/2026), doublon exact (même minute, même sens) et date hors de la période d'emploi (salarié sorti) étaient acceptés | **haute** | contrôles avant enregistrement, avec message précis (clôture, futur, doublon, période d'emploi) |
+| 3 | **Grand effectif, Régularisation** : « Aucune anomalie — toutes les journées sont complètes » alors que l'écran ne regardait que les badgeages chargés dans le navigateur (aucun en grand effectif) | **haute** | journées incomplètes calculées par le serveur sur tout le périmètre (date, salarié, service, badgeages), bouton « Corriger » vers l'éditeur de journée, pagination, export |
+| 4 | **Grand effectif, Hebdomadaire** : calculé sur la cinquantaine de salariés chargés (sur 6 010) et présenté comme complet | **haute** | totaux hebdomadaires du serveur sur tout le périmètre (jours travaillés, théorique, travaillé, écart après absences justifiées, dépassements journaliers, journées incomplètes) ; la ventilation par taux reste dans les compteurs et les états (note affichée) |
+| 5 | **Grand effectif, Journal** : second sélecteur de dates (hier → aujourd'hui) contredisant la période de l'écran ; « Aucun badgeage » sur 7 jours alors que la base en comptait 84 ; filtres service / équipe / site ignorés ; compteur « 5 890 au total » (nombre de salariés) | **haute** | période, recherche, service, équipe et site de la barre de l'écran (filtres ajoutés au serveur) ; compteur = nombre de badgeages ; 85 badgeages affichés, 68 pour « Atelier montage » |
+| 6 | **Export « Exporter (CSV) »** : tous les badgeages chargés, sans période ni filtre, dates AAAA-MM-JJ ; l'onglet Régularisation exportait les badgeages au lieu de ses lignes | moyenne | chaque onglet exporte ses lignes (période, filtres, recherche), dates jj/mm/aaaa, nom et service ajoutés ; export Régularisation et Hebdomadaire (y compris grand effectif, sur tout le périmètre) |
+| 7 | **Salarié sorti** (sorti le 28/02/2026) listé dans Journées et Hebdomadaire avec des heures théoriques après sa sortie | moyenne | salariés hors contrat sur la période exclus ; jours avant l'entrée et après la sortie ignorés (85 → 79 journées) |
+| 8 | Synthèse : dates DU / AU de l'export au format AAAA-MM-JJ | faible | jj/mm/aaaa |
+| 9 | Pagination hebdomadaire et synthèse en grand effectif : « 50 sur 5 890 journées » au lieu de salariés | faible | « salariés » (FR / EN / AR) |
+
+Vérifié sans anomalie : pagination du Journal (150 lignes par page), dates inversées refusées avec explication,
+filtres de colonnes, filtre service, recherche, Synthèse (semaine, mois, période), éditeur de journée, clôture affichée,
+démonstration autonome (55 écrans, aucune erreur).

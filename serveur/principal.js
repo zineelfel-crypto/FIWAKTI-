@@ -1590,6 +1590,13 @@ async function traiter(req, res){
     const s = String(q.q||"").trim().toLowerCase();
     if (s){ mats = []; for (let i = 0; i < emps.length && mats.length < 500; i++) if (IDX_PTG.mats[i] === s || IDX_PTG.noms[i].indexOf(s) >= 0) mats.push(String(emps[i].mat)); }
     if (P.set !== null) mats = (mats || Array.from(P.set)).filter(m=>P.set.has(m));
+    /* recette : service (avec ses sous-services), équipe directe et site choisis dans la barre du registre */
+    if (q.dept || q.chef || q.site){
+      let arbre = null;
+      if (q.dept){ arbre = new Set([String(q.dept)]); let aj = true; while (aj){ aj = false; (ref.depts||[]).forEach(x=>{ if (x && arbre.has(x.parent) && !arbre.has(x.id)){ arbre.add(x.id); aj = true; } }); } }
+      const ok = new Set(emps.filter(e=>(!arbre || arbre.has(e.deptId)) && (!q.chef || String(e.chefMat) === String(q.chef)) && (!q.site || e.siteId === q.site)).map(e=>String(e.mat)));
+      mats = (mats || Array.from(ok)).filter(m=>ok.has(m));
+    }
     if (mats && !mats.length) return json(res, 200, {total:0, lignes:[], du, au});
     let w = " WHERE coll='ptg' AND d>=? AND d<=?", a = [du, au];
     if (mats){ w += " AND mat IN ("+mats.map(()=>"?").join(",")+")"; a.push(...mats); }
