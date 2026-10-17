@@ -228,6 +228,8 @@ function creer(B, PERIM){
         }
         /* v51 : une version de règle publiée est immuable (invariant protégé par le serveur, même pour un administrateur) */
         if (k === "reglesV"){ const motif = controleReglesV(ref.reglesV || [], r.reglesV || [], ref); if (motif){ ignores.push("reglesV ("+motif+")"); continue; } }
+        /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
+        if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -364,6 +366,21 @@ function creer(B, PERIM){
   }
   const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
+}
+function controleCals(avant, apres, ref){
+  const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+  if (!clot || !Array.isArray(apres)) return "";
+  const trame = (c, k) => { const h = Array.isArray(c.hebdoHist) ? c.hebdoHist : []; for (const x of h) if (x && k <= x.jusqu && x.hebdo) return x.hebdo; return c.hebdo || {}; };
+  const jour = (c, k) => { const e = (c.exc||{})[k]; return e === undefined ? null : (typeof e === "string" ? {j:e, alt:[]} : {j:e && e.j, alt:(e && e.alt)||[]}); };
+  const parId = new Map(apres.map(c=>[c && c.id, c]));
+  for (const a of avant){
+    if (!a) continue; const n = parId.get(a.id); if (!n) continue;   /* suppression : contrôlée par l'écran (historique d'affectation) */
+    const cles = new Set(Object.keys(a.exc||{}).concat(Object.keys(n.exc||{})).filter(k=>k <= clot));
+    for (const k of cles) if (JSON.stringify(jour(a, k)) !== JSON.stringify(jour(n, k))) return "exception du "+k+" en période clôturée";
+    const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
+    for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
+  }
+  return "";
 }
 function controleReglesV(avant, apres, ref){
   const auj = new Date().toISOString().slice(0, 10);

@@ -1688,6 +1688,8 @@ async function traiter(req, res){
       const d = /^\d{4}-\d{2}-\d{2}$/.test(b.from || "") ? b.from : aujourdhui();
       const dst = (ref.cals || []).find(c=>c.id === b.calDst);
       if (b.appliquer && !dst) return erreur(res, 400, "Calendrier à affecter introuvable.");
+      { const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+        if (b.appliquer && clot && d <= clot) return erreur(res, 409, "Date d'effet en période clôturée (jusqu'au "+clot.split("-").reverse().join("/")+") : choisissez une date postérieure."); }
       const histDe = e => (Array.isArray(e.calHist) ? e.calHist.slice() : (e.calId ? [{from:e.entree || "2000-01-01", calId:e.calId}] : [])).sort((x, y)=>x.from < y.from ? -1 : 1);
       const calAt = (e, k) => { let v = ""; for (const h of histDe(e)){ if (h.from <= k) v = h.calId; else break; } return v; };
       const valA = (e, code, k) => { const h = ((e.hist || {})[code] || []).slice().sort((x, y)=>String(x.d).localeCompare(String(y.d))); let v = ""; h.forEach(x=>{ if (x.d <= k) v = x.v; }); return v; };

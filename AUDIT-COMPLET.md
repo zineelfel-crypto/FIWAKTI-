@@ -893,3 +893,24 @@ l'ajout manuel d'un badgeage et les exports, et dans la démonstration autonome.
 Vérifié sans anomalie : pagination du Journal (150 lignes par page), dates inversées refusées avec explication,
 filtres de colonnes, filtre service, recherche, Synthèse (semaine, mois, période), éditeur de journée, clôture affichée,
 démonstration autonome (55 écrans, aucune erreur).
+
+## Audit du sous-menu Temps & présence › Calendrier
+
+Essais avec l'administrateur sur le petit effectif (calendrier « Administratif — 44 h », 6 salariés, clôture au
+30/09/2026) et le grand effectif (6 010 salariés), sur la grille (mois, année, journées principales et alternatives),
+la fiche du calendrier, la trame hebdomadaire, la suppression et l'affectation en masse, et dans la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Trame hebdomadaire sans date d'effet** : passer le lundi en repos transformait aussi tous les lundis passés, périodes clôturées comprises (14/09 : 8 h → 0 h théorique), et faussait les heures déjà validées | **critique** | trame datée : « Trame modifiée applicable à partir du » (par défaut le lendemain de la clôture) ; les journées antérieures gardent la trame en vigueur, listée sous « Trames antérieures » ; même calcul dans le navigateur et sur le serveur (vérifié : 12/10 repos, 14/09 inchangé) |
+| 2 | **Pinceau sur un jour clôturé** (15/09 → repos) : accepté, journée clôturée modifiée (8 h → 0 h) | **haute** | jours clôturés hachurés et verrouillés ; peinture refusée (ou limitée aux jours ouverts, avec le nombre de jours écartés) |
+| 3 | **« Effacer les exceptions » sans sélection** : supprimait toutes les exceptions du calendrier, périodes clôturées comprises | **haute** | seules les exceptions des jours ouverts sont effacées, avec leur nombre |
+| 4 | **Suppression d'un calendrier utilisé** (6 salariés ; 6 010 en grand effectif) : acceptée, les journées passées perdaient leur horaire théorique | **haute** | refusée tant que des salariés l'ont dans leur historique d'affectation (comptage serveur en grand effectif) |
+| 5 | **Affectation en masse avec une date d'effet clôturée** (01/09) : proposée et applicable (petit et grand effectif) | **haute** | refusée dans l'écran (bouton désactivé, explication) et par le serveur (409) |
+| 6 | Aucune protection côté serveur : un client pouvait réécrire un calendrier sur une période clôturée | **haute** | le serveur refuse toute modification d'exception ou de trame en vigueur jusqu'à la clôture (vérifié par un contournement de l'écran : base inchangée) |
+| 7 | Zone « Rechercher… » sans effet sur l'écran Calendriers | faible | retirée |
+
+Vérifié sans anomalie : sélection (clic, Maj+clic, jours de la semaine, tout, rien), vues mois / année, journées
+alternatives, nouveau calendrier (copie ou trame, nom en double refusé), fiche (nom, site), jours fériés de la table
+commune, affectation en masse (aperçu, filtres, application), libellés FR / EN / AR, démonstration autonome (55 écrans,
+aucune erreur).
