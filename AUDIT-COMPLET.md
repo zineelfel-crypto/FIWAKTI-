@@ -953,3 +953,23 @@ contrôler le serveur, et dans la démonstration.
 
 Vérifié sans anomalie : création, code en double (espaces et casse ignorés), classes, couleur, saisie réservée à
 l'administration, report et jours maxi, libellés FR / EN / AR, démonstration autonome (55 écrans, aucune erreur).
+
+## Audit du sous-menu Temps & présence › Arithmétique
+
+Essais avec l'administrateur sur le petit effectif (37 compteurs : heures, heures supplémentaires, congés —
+SOLDECONGE = 30 − CUM(CONGE) —, majorations ; clôture au 30/09/2026), en contournant aussi l'écran pour contrôler le
+serveur, et dans la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Dépendance circulaire acceptée** (A = CUM(B), B = CUM(A)) : TOUS les compteurs cessaient d'être calculés — heures travaillées 8,18 h → 0, solde de congés 30 → 0 — sans autre signe qu'une note sur l'écran | **critique** | refusée à l'enregistrement, avec le chemin de la boucle (« ESSAIB → ESSAIA → ESSAIB ») |
+| 2 | **Formule modifiée = périodes clôturées recalculées** (heures, congés, éléments variables déjà arrêtés) | **critique** | formule datée : la formule en vigueur est conservée pour les journées jusqu'à la clôture (« Formules antérieures ») ; vérifié : HT = THEORIQUE × 2 → 14/09 clôturé reste 8 h, 13/10 = 16 h ; même moteur navigateur / serveur |
+| 3 | **Code renommé** (CONGE → CONGES) accepté : la formule de SOLDECONGE et les états qui l'utilisent étaient cassés | **haute** | code figé dès la création ; refusé aussi par le serveur |
+| 4 | **Suppression** d'un compteur utilisé : « Aucun autre enregistrement ne dépend » alors que SOLDECONGE et l'état « Suivi des congés » l'utilisent (les états étaient cherchés dans le mauvais champ) | **haute** | refusée avec la liste des formules et états concernés ; impacts corrigés |
+| 5 | Unité, périodicité et agrégation modifiables après une clôture (résultats des périodes clôturées changés) | **haute** | refusées après une clôture : créer un nouveau compteur |
+| 6 | Aucune protection serveur (code, formule de la période clôturée, suppression) | **haute** | contrôle serveur ; contournement testé : base inchangée |
+| 7 | Aucune indication des dépendances d'un compteur | faible | le panneau indique « Utilisé par … » |
+
+Vérifié sans anomalie : variable inconnue refusée avec suggestion (« PRESENSE » → « PRESENCE »), auto-référence refusée,
+assistant de formule (coloration, essai, palette), division par zéro sans erreur, libellés FR / EN / AR, démonstration
+autonome (55 écrans, aucune erreur).

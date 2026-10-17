@@ -232,6 +232,7 @@ function creer(B, PERIM){
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
+        if (k === "arits"){ const motif = controleArits(ref.arits || [], r.arits || [], ref, r.etats || ref.etats || []); if (motif){ ignores.push("arits ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -368,6 +369,26 @@ function creer(B, PERIM){
   }
   const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
+}
+/* recette Arithmétique : code figé ; formule en vigueur jusqu'à la clôture inchangée (formule datée) ; unité, période et
+   agrégation figées après une clôture ; suppression refusée si une formule ou un état l'utilise */
+function controleArits(avant, apres, ref, etats){
+  if (!Array.isArray(apres)) return "";
+  const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+  const fAt = (a, k) => { for (const x of (Array.isArray(a.hist) ? a.hist : [])) if (x && x.f && k <= x.jusqu) return String(x.f); return String(a.f||""); };
+  const utilise = code => { const re = new RegExp("(^|[^A-Za-z0-9_])"+String(code).replace(/[^A-Za-z0-9_]/g, "")+"([^A-Za-z0-9_]|$)", "i"); return apres.some(x=>x && x.code !== code && re.test(String(x.f||""))); };
+  const parId = new Map(apres.map(x=>[x && x.id, x]));
+  for (const a of avant){
+    if (!a) continue; const n = parId.get(a.id);
+    if (!n){ if (utilise(a.code) || (etats||[]).some(e=>e && (e.champs||[]).indexOf(a.id) >= 0)) return "compteur "+a.code+" utilisé (formule ou état)"; continue; }
+    if (String(n.code) !== String(a.code)) return "code du compteur "+a.code+" non modifiable";
+    if (clot){
+      const bornes = new Set([clot].concat((a.hist||[]).concat(n.hist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
+      for (const k of bornes) if (fAt(a, k) !== fAt(n, k)) return "formule de "+a.code+" modifiée en période clôturée";
+      for (const c of ["unite","period","agg"]) if (String(a[c]||"") !== String(n[c]||"")) return c+" de "+a.code+" non modifiable (période clôturée)";
+    }
+  }
+  return "";
 }
 /* recette Types de temps : code figé ; mode de saisie figé dès qu'une absence ou demande existe ; classe et « rémunéré »
    figés si le type est utilisé en période clôturée ; suppression refusée pour un type utilisé ou système */
