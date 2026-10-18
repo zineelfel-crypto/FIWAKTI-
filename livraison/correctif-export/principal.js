@@ -989,13 +989,14 @@ function lancerTravail(login, type, params){
   const enCours = Array.from(TRAVAUX.values()).filter(x=>x.login === login && (x.etat === "en_cours" || x.etat === "attente")).length;
   if (enCours >= 2) throw Object.assign(new Error("Deux travaux sont déjà en cours pour vous : attendez leur fin."), {code:429});
   const id = crypto.randomBytes(8).toString("hex");
-  const tr = {id, login, type, titre:params.titre || type, cree:maintenant(), etat:"attente", progression:0, expire:new Date(Date.now()+24*3600000).toISOString()};
+  /* correctif 14 : un aperçu (grand effectif) n'est pas un fichier à télécharger : absent de la liste, gardé 1 h */
+  const tr = {id, login, type, titre:params.titre || type, cree:maintenant(), etat:"attente", progression:0, apercu:!!params.apercu || undefined, expire:new Date(Date.now()+(params.apercu ? 3600000 : 24*3600000)).toISOString()};
   TRAVAUX.set(id, tr); sauverTravaux();
   /* v56.23 : un travail de fond utilise la réserve de connexions à délai long (jamais coupé par le délai des requêtes) */
   B.enTravail(async ()=>{
     tr.etat = "en_cours"; const t0 = Date.now();
     try {
-      const txt = await K.etat(login, params.etat, params.du, params.au, params.filtres || {}, a=>{ tr.progression = a.total ? Math.round(100*a.fait/a.total) : 0; }, params.format);
+      const txt = await K.etat(login, params.etat, params.du, params.au, params.filtres || {}, a=>{ tr.progression = a.total ? Math.round(100*a.fait/a.total) : 0; }, params.format, params.lang);
       fs.writeFileSync(path.join(D_TRAV, id+".csv"), txt, {mode:0o600});
       /* correctif 13 : format « blocs » (JSON, un bloc par salarié) : Excel, impression et aperçu gardent la structure de l'état */
       let nl = 0; if (/^blocs/.test(params.format || "")){ try { nl = JSON.parse(txt).blocs.length; } catch(e){} } else nl = txt.split("\r\n").length - 1;
@@ -1637,7 +1638,9 @@ async function traiter(req, res){
     const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = admin ? null : (P.profil || {});
     if (pr){
       if ((pr.menus || {}).etats === "masque") return erreur(res, 403, "Écran États masqué pour votre profil.");
-      if (((pr.actions || {}).etats || {}).exporter === false) return erreur(res, 403, "Droit d'export des états requis.");
+      /* correctif 14 : droit selon l'usage — aperçu (lecture), impression, export (Excel, texte, CSV) */
+      const usageB = b.format === "blocs-leger" ? "lire" : (b.usage === "imprimer" ? "imprimer" : "exporter");
+      if (usageB !== "lire" && ((pr.actions || {}).etats || {})[usageB] === false) return erreur(res, 403, usageB === "imprimer" ? "Droit d'impression des états requis." : "Droit d'export des états requis.");
       if (Array.isArray(pr.etats) && pr.etats.length && pr.etats.indexOf(String(b.etat.id || "")) < 0) return erreur(res, 403, "État non autorisé pour votre profil.");
     }
     const stocke = (ref.etats || []).find(x=>x && x.id === b.etat.id);
@@ -1649,30 +1652,32 @@ async function traiter(req, res){
     const def = JSON.parse(JSON.stringify(libre ? b.etat : stocke)), arits = new Set((ref.arits || []).map(a=>a.id));
     const PERS = ["jour", "semaine", "semainep", "mois", "ev", "annee", "libre"];
     if (!libre){
-      if (Array.isArray(b.etat.champs)) def.champs = b.etat.champs.map(String);
+      /* correctif 14 : en consultation, les compteurs de l'état enregistré seulement (on peut en retirer, pas en ajouter) */
+      if (Array.isArray(b.etat.champs)) def.champs = Array.from(new Set(b.etat.champs.map(String))).filter(id=>(stocke.champs || []).indexOf(id) >= 0);
       if (PERS.indexOf(b.etat.periode) >= 0) def.periode = b.etat.periode;
       def.plage = !!b.etat.plage;
       ["ref", "from", "to"].forEach(k=>{ if (b.etat[k] === undefined || b.etat[k] === "" || b.etat[k] === null) delete def[k]; else if (dateOk(b.etat[k])) def[k] = b.etat[k]; });
       if (b.etat.stats && typeof b.etat.stats === "object") def.stats = {total:!!b.etat.stats.total, moy:!!b.etat.stats.moy, min:!!b.etat.stats.min, max:!!b.etat.stats.max};
     }
-    def.champs = (def.champs || []).filter(id=>arits.has(id)).slice(0, 200);
+    def.champs = Array.from(new Set((def.champs || []).map(String))).filter(id=>arits.has(id)).slice(0, 200);
     if (!def.champs.length) return erreur(res, 400, "Aucun compteur valide dans l'état.");
     if (PERS.indexOf(def.periode) < 0) def.periode = "mois";
     if (!dateOk(b.du) || !dateOk(b.au) || b.du > b.au) return erreur(res, 400, "Période invalide (dates jj/mm/aaaa, début avant la fin).");
     if (ajoutJours(b.du, 3*366) < b.au) return erreur(res, 400, "Période limitée à 3 ans.");
     const fl = b.filtres && typeof b.filtres === "object" ? b.filtres : {}, filtres = {dept:String(fl.dept || ""), mat:String(fl.mat || ""), site:String(fl.site || "")};
     const format = b.format === "blocs" || b.format === "blocs-leger" ? b.format : "csv";
-    try { const tr = lancerTravail(C.login, "etat", {titre:(def.nom||"État")+" "+b.du.split("-").reverse().join("/")+" → "+b.au.split("-").reverse().join("/"), etat:def, du:b.du, au:b.au, filtres, format}); await audit(C.login, "travail.lance", tr.titre, ip); return json(res, 200, tr); }
+    const lang = ["fr","en","ar"].indexOf(b.lang) >= 0 ? b.lang : "fr";
+    try { const tr = lancerTravail(C.login, "etat", {titre:(def.nom||"État")+" "+b.du.split("-").reverse().join("/")+" → "+b.au.split("-").reverse().join("/"), etat:def, du:b.du, au:b.au, filtres, format, lang, apercu:format === "blocs-leger"}); if (!tr.apercu) await audit(C.login, "travail.lance", tr.titre, ip); return json(res, 200, tr); }
     catch(e){ return erreur(res, e.code === 429 ? 429 : 400, e.message); }
   }
-  if (p === "/api/v1/travaux" && req.method === "GET") return json(res, 200, {travaux:Array.from(TRAVAUX.values()).filter(x=>x.login === C.login).sort((a,b)=>a.cree < b.cree ? 1 : -1).slice(0, 20)});
+  if (p === "/api/v1/travaux" && req.method === "GET") return json(res, 200, {travaux:Array.from(TRAVAUX.values()).filter(x=>x.login === C.login && !x.apercu).sort((a,b)=>a.cree < b.cree ? 1 : -1).slice(0, 20)});
   if ((m = /^\/api\/v1\/travaux\/([0-9a-f]{16})(\/fichier)?$/.exec(p))){
     const tr = TRAVAUX.get(m[1]);
     if (!tr || (tr.login !== C.login && !admin)) return erreur(res, 404, "Travail introuvable.");
     if (!m[2]) return json(res, 200, tr);
     if (tr.etat !== "termine") return erreur(res, 409, "Travail non terminé.");
     const f = path.join(D_TRAV, tr.id+".csv"); if (!fs.existsSync(f)) return erreur(res, 410, "Fichier expiré.");
-    await audit(C.login, "travail.telecharge", tr.titre, ip);
+    if (!tr.apercu) await audit(C.login, "travail.telecharge", tr.titre, ip);
     if (/^blocs/.test(tr.format || "")){ entetes(res, true); res.writeHead(200, {"Content-Type":"application/json; charset=utf-8"}); return fs.createReadStream(f).pipe(res); }
     entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\""+(tr.titre||"etat").replace(/[^A-Za-z0-9._-]+/g, "_")+".csv\""});
     return fs.createReadStream(f).pipe(res);

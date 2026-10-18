@@ -448,13 +448,17 @@ function creer(B, D, opts){
      calculait tout le personnel, lot après lot. */
   /* correctif 13 : les salariés sortis pendant la période sont retenus (sélection à la date de début : auparavant seuls
      les salariés présents aujourd'hui l'étaient) ; format « blocs » : un bloc JSON par salarié (structure de l'état) */
-  async function etat(login, def, du, au, filtres, avancement, format){
+  async function etat(login, def, du, au, filtres, avancement, format, lang){
     const {emps} = await selection(login, Object.assign({}, filtres || {}, {du}));
     const mats = emps.filter(e=>!(e.entree && e.entree > au)).map(e=>String(e.mat)), T = 2000;
-    if (mats.length <= T) return tache({type:"etat", def, mats, du, au, format}, avancement);
+    /* correctif 14 : un état journalier produit une ligne par salarié et par jour ; au-delà de ces volumes le fichier
+       dépasserait la taille maximale d'un texte (≈ 500 millions de caractères) et ne s'ouvrirait plus dans Excel */
+    if (def && def.modele === "jour"){ const lignes = mats.length * nbJours(du, au), lim = format === "csv" ? 3000000 : 1000000;
+      if (lignes > lim) throw new Error("Volume trop important pour un état journalier : "+mats.length+" salariés × "+nbJours(du, au)+" jours ("+lignes.toLocaleString("fr-FR")+" lignes, limite "+lim.toLocaleString("fr-FR")+(format === "csv" ? "" : " ; le CSV en accepte 3 000 000")+"). Réduisez la période ou filtrez par service."); }
+    if (mats.length <= T) return tache({type:"etat", def, mats, du, au, format, lang}, avancement);
     const parts = []; for (let i = 0; i < mats.length; i += T) parts.push(mats.slice(i, i + T));
     const fait = parts.map(()=>0);
-    const res = await Promise.all(parts.map((p, k)=>tache({type:"etat", def, mats:p, du, au, format}, a=>{ fait[k] = a.fait; if (avancement) avancement({fait:fait.reduce((x, y)=>x + y, 0), total:mats.length}); }, true)
+    const res = await Promise.all(parts.map((p, k)=>tache({type:"etat", def, mats:p, du, au, format, lang}, a=>{ fait[k] = a.fait; if (avancement) avancement({fait:fait.reduce((x, y)=>x + y, 0), total:mats.length}); }, true)
       .then(txt=>{ fait[k] = p.length; return txt; })));
     if (format === "blocs" || format === "blocs-leger"){ const out = {blocs:[], du, au}; res.forEach(txt=>{ const j = JSON.parse(txt); out.blocs.push(...j.blocs); if (j.bornes) out.bornes = j.bornes; }); return JSON.stringify(out); }
     let entete = null; const corps = [];

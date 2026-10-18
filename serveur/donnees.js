@@ -209,6 +209,10 @@ function creer(B, PERIM){
          une écriture fondée sur une version dépassée est refusée (conflit signalé) au lieu d'écraser en silence */
       const vers = ref.__versions || (ref.__versions = {});
       const basesRef = paquet.basesRef || {};
+      const peutK = k => Array.isArray(r[k]) && (admin || PERIM.peutEcrire(P.profil, k));
+      let MOTIF_ETATS;
+      const motifEtats = () => MOTIF_ETATS !== undefined ? MOTIF_ETATS : (MOTIF_ETATS = controleEtats(ref.etats || [], r.etats, peutK("arits") ? r.arits : ref.arits, peutK("champs") ? r.champs : ref.champs, peutK("profils") ? r.profils : ref.profils));
+      const etatsRetenus = () => (Array.isArray(r.etats) && peutK("etats") && !motifEtats()) ? r.etats : (ref.etats || []);
       for (const k of Object.keys(r)){
         if (COLLS.indexOf(k) >= 0 || k.indexOf("__") === 0) continue;
         const fusion = (k === "users" && !admin) || (k === "anoDec" && !admin);
@@ -258,7 +262,15 @@ function creer(B, PERIM){
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
-        if (k === "arits"){ const motif = controleArits(ref.arits || [], r.arits || [], ref, r.etats || ref.etats || []); if (motif){ ignores.push("arits ("+motif+")"); continue; } }
+        /* correctif 14 : les états servant au contrôle des compteurs sont ceux qui seront réellement retenus (ceux du
+           paramétrage si l'envoi d'états n'est pas permis ou refusé) — auparavant ceux envoyés par le navigateur, même
+           refusés ensuite : un compteur utilisé par un état pouvait être supprimé */
+        if (k === "arits"){ const motif = controleArits(ref.arits || [], r.arits || [], ref, etatsRetenus()); if (motif){ ignores.push("arits ("+motif+")"); continue; } }
+        /* correctif 14 : contenu des états contrôlé (un élément invalide rendait l'application inutilisable pour tous) */
+        if (k === "etats"){ const motif = motifEtats(); if (motif){ ignores.push("etats ("+motif+")"); continue; } }
+        /* correctif 14 : un champ personnalisé qui filtre un état ne peut pas être supprimé (filtre devenu invisible) */
+        if (k === "champs" && Array.isArray(r.champs)){ const codes = new Set(r.champs.filter(c=>c && typeof c === "object").map(c=>String(c.code))); const et = etatsRetenus().find(e=>e && e.filtres && typeof e.filtres === "object" && Object.keys(e.filtres).some(c=>e.filtres[c] && !codes.has(c)));
+          if (et){ ignores.push("champs (champ utilisé comme filtre par l'état « "+et.nom+" »)"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -407,6 +419,47 @@ function creer(B, PERIM){
 }
 /* recette Arithmétique : code figé ; formule en vigueur jusqu'à la clôture inchangée (formule datée) ; unité, période et
    agrégation figées après une clôture ; suppression refusée si une formule ou un état l'utilise */
+/* correctif 14 : définition des états — seuls les états ajoutés ou modifiés sont contrôlés (un état ancien devenu
+   incomplet ne bloque pas l'enregistrement des autres) ; un état cité par un profil ne peut pas être supprimé */
+function controleEtats(avant, apres, arits, champs, profils){
+  if (!Array.isArray(apres)) return "liste attendue";
+  const DATE = /^\d{4}-\d{2}-\d{2}$/, ID = /^[A-Za-z0-9_.:-]{1,80}$/;
+  const PER = ["jour","semaine","semainep","mois","ev","annee","libre"], MOD = ["jour","cumule"], SCO = ["emp","dept","site"];
+  const aIds = new Set((arits || []).filter(a=>a && typeof a === "object").map(a=>String(a.id)));
+  const cCodes = new Set((champs || []).filter(c=>c && typeof c === "object").map(c=>String(c.code)));
+  const avantId = new Map((avant || []).filter(e=>e && typeof e === "object").map(e=>[String(e.id), JSON.stringify(e)]));
+  const ids = new Set(), noms = new Set();
+  for (const e of apres){
+    if (!e || typeof e !== "object" || Array.isArray(e)) return "élément invalide";
+    if (!ID.test(String(e.id))) return "identifiant invalide";
+    if (ids.has(String(e.id))) return "identifiant en double ("+e.id+")"; ids.add(String(e.id));
+    const nom = typeof e.nom === "string" ? e.nom.trim() : "";
+    if (!nom || nom.length > 120) return "nom vide ou trop long";
+    if (noms.has(nom.toLowerCase())) return "nom en double (« "+nom+" »)"; noms.add(nom.toLowerCase());
+    if (avantId.get(String(e.id)) === JSON.stringify(e)) continue;
+    const l = "état « "+nom+" » : ";
+    if (!Array.isArray(e.champs) || !e.champs.length) return l+"aucun compteur";
+    if (e.champs.length > 200) return l+"trop de compteurs";
+    const inconnu = e.champs.find(id=>!aIds.has(String(id))); if (inconnu !== undefined) return l+"compteur inconnu ("+inconnu+")";
+    if (PER.indexOf(e.periode) < 0) return l+"période inconnue";
+    if (e.modele !== undefined && MOD.indexOf(e.modele) < 0) return l+"modèle inconnu";
+    if (e.scope !== undefined && SCO.indexOf(e.scope) < 0) return l+"regroupement inconnu";
+    for (const k of ["ref","from","to"]) if (e[k] !== undefined && e[k] !== null && e[k] !== "" && !DATE.test(String(e[k]))) return l+"date invalide";
+    if (e.plage || e.periode === "libre"){
+      if (!DATE.test(String(e.from||"")) || !DATE.test(String(e.to||""))) return l+"dates de la plage obligatoires";
+      if (e.from > e.to) return l+"date de début après la date de fin";
+      const max = new Date(+e.from.slice(0,4)+3, +e.from.slice(5,7)-1, +e.from.slice(8,10)-1), au = new Date(+e.to.slice(0,4), +e.to.slice(5,7)-1, +e.to.slice(8,10));
+      if (au > max) return l+"plage de plus de 3 ans";
+    }
+    if (e.filtres !== undefined && (typeof e.filtres !== "object" || e.filtres === null || Array.isArray(e.filtres))) return l+"filtres invalides";
+    const fc = Object.keys(e.filtres || {}).find(c=>e.filtres[c] && !cCodes.has(c)); if (fc) return l+"filtre sur un champ inconnu ("+fc+")";
+  }
+  for (const id of avantId.keys()) if (!ids.has(id)){
+    const p = (profils || []).find(x=>x && Array.isArray(x.etats) && x.etats.indexOf(id) >= 0);
+    if (p) return "état cité par le profil « "+(p.nom || p.id)+" » : retirez-le du profil avant de le supprimer";
+  }
+  return "";
+}
 function controleArits(avant, apres, ref, etats){
   if (!Array.isArray(apres)) return "";
   const clot = (ref.clotures||[]).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");

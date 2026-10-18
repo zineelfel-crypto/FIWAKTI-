@@ -1333,3 +1333,34 @@ ancrage externe (syslog ou export d'audit) toujours optionnel ; la cloche « dem
 aussi celles que l'utilisateur ne peut pas valider.
 
 Livraison : FIWAKTI-56.33.11-correctif-13.zip (cumulatif : correctifs 2 à 12 inclus).
+
+## Correctif 14 — Pilotage › États (seconde analyse)
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Un compte autorisé à écrire les états pouvait enregistrer **n'importe quel contenu** (chaîne, `null`, identifiant `">`, compteur inconnu, période « zz »…) : au chargement suivant, l'application basculait sur les **données de démonstration** chez tous les utilisateurs | **critique** | contrôle serveur des états (`controleEtats` : objet, identifiant, nom unique, compteurs existants, période / modèle / regroupement connus, dates, plage ≤ 3 ans, filtres sur des champs existants, pas de suppression d'un état cité par un profil) ; le navigateur écarte un élément invalide au lieu de tout réinitialiser |
+| 2 | Compteur utilisé par un état supprimable en envoyant des états « nettoyés » (contrôle fait sur les états envoyés, même refusés) | **critique** | contrôle sur les états réellement retenus |
+| 3 | Cache de l'aperçu jamais réutilisé (compteur de rendus dans la clé) : 1,8 à 2,6 s par rendu à 1 000 salariés, à chaque frappe dans l'atelier | **haute** | clé limitée à ce qui change le calcul, plus la langue : 2 à 3 ms après le premier calcul |
+| 4 | Excel, texte et impression ignoraient les filtres de la visualisation (14 salariés au lieu de 1) | **haute** | filtres transmis |
+| 5 | L'atelier permettait de modifier les états sans le droit Paramétrage (ETA) exigé par le serveur : « Enregistré » puis perdu | **haute** | créer / modifier / supprimer suivent le droit du serveur |
+| 6 | État journalier en grand effectif : fichier pouvant dépasser la taille maximale d'un texte | **haute** | volume plafonné (3 000 000 de lignes-jour en CSV, 1 000 000 pour Excel / impression) avec message clair |
+| 7 | Saisie de l'atelier : nom en double, compteur supprimé, plage sans dates / inversée / de plus de 3 ans, période inconnue, filtre orphelin acceptés (corrigés en silence) | moyenne | contrôles à la saisie (mêmes règles que le serveur) |
+| 8 | Champ personnalisé supprimé : son filtre restait appliqué et invisible | moyenne | suppression refusée tant qu'un état filtre sur ce champ (navigateur et serveur) |
+| 9 | Suppression d'un état cité par des profils sans avertissement (comptes privés de tout état) | moyenne | impact affiché, suppression refusée (navigateur et serveur) |
+| 10 | Matrice : actions de l'atelier mal classées ; en grand effectif aperçu et impression impossibles sans le droit d'export | moyenne | `et-*` = modification ; aperçu = lecture, impression = droit Imprimer, Excel / CSV = droit Exporter (contrôlé par le serveur) |
+| 11 | Aperçu serveur affiché comme à jour après un changement de filtre | moyenne | filtres dans la clé de l'aperçu |
+| 12 | Libellés de l'écran restés dans l'ancienne langue ; exports du serveur toujours en français | moyenne | langue dans le cache ; langue de l'utilisateur transmise au moteur |
+| 13 | Rafraîchissement de la liste des travaux toutes les 2 s pendant la saisie (perte du focus) | moyenne | seulement quand la liste est affichée ; suivi de l'aperçu sans perte du focus |
+| 14 | Période entièrement à venir présentée comme du réalisé | moyenne | mention « période à venir » |
+| — | Aperçus listés comme fichiers à télécharger ; compteurs ajoutés par un profil en consultation ; total et indicateurs de la visualisation absents d'Excel / impression | basse | aperçus hors liste (1 h) ; seuls les compteurs de l'état enregistré ; moyenne / min / max exportés |
+
+Vérifié : scripts de preuve de l'analyse rejoués (saisie, matrice, filtres d'export, clé d'aperçu, langue, performances,
+cache dans le navigateur) ; serveur réel (copie) : états invalides refusés, application intacte avec des états corrompus en
+base, renommage accepté, doublon / plage inversée / suppression d'un état cité refusés, contournement des compteurs bloqué,
+droits par usage (aperçu 200, impression 200, Excel / CSV 403 sans export), compteurs ajoutés ignorés, export en anglais ;
+démonstration : 56 écrans sans erreur, écran / Excel / texte identiques (0 écart).
+
+Non traité : duplication d'un état (fonction absente, pas une anomalie) ; fichiers de travaux encore téléchargeables 24 h
+après une réduction de périmètre ; sens de lecture des périodes en arabe.
+
+Livraison : FIWAKTI-56.33.11-correctif-14.zip (cumulatif : correctifs 2 à 13 inclus).

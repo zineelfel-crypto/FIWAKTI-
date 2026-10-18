@@ -31,6 +31,7 @@ function chargerMoteur(fichierApp){
   get db(){ return db; }, set db(v){ db = v; },
   reinit(){ ptgTouch(); absTouch(); SUIVI_CACHE = []; if (typeof jvVider === "function") jvVider(); if (typeof PERIM_TICK !== "undefined") PERIM_TICK++; },
   jourVars, convFor, mvtsDe, mvtsCalc, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
+  langue(l){ try { if (typeof T !== "undefined" && T[l]){ t = T[l]; if (typeof ui !== "undefined") ui.lang = l; } } catch(e){} },
   counterOrder, ordreRestreint, periodBounds, etatBlocs:typeof etatBlocs === "function" ? etatBlocs : null, etatBornesListe:typeof etatBornesListe === "function" ? etatBornesListe : null
 };`;
   vm.runInContext(code, ctx, {filename:"app.js"});
@@ -184,8 +185,11 @@ async function calculer(mats, du, au, horodatage, source){
   return lignes.length;
 }
 /* état (export CSV) calculé par lots d'employés, mêmes règles que l'écran États */
-async function etat(def, mats, du, au, idTache, source, format){
+async function etat(def, mats, du, au, idTache, source, format, lang){
   let entete = null; const corps = [], blocs = [];
+  /* correctif 14 : libellés (en-têtes, horaires, repos) dans la langue de l'utilisateur */
+  E.M.langue(lang || "fr");
+  try {
   const codes = ((JSON.parse((await B.get("SELECT valeur FROM kv WHERE cle=?", "fiwakti:ref:v1")).valeur).arits) || []).filter(a=>(def.champs || []).indexOf(a.id) >= 0).map(a=>a.code);
   for (let i = 0; i < mats.length; i += 500){
     /* v49 : avancement transmis au serveur (travaux en arrière-plan) */
@@ -204,6 +208,7 @@ async function etat(def, mats, du, au, idTache, source, format){
   }
   if (format === "blocs" || format === "blocs-leger") return JSON.stringify({blocs, du, au, bornes:E.M.etatBornesListe(def)});
   return "\uFEFF"+[entete || ""].concat(corps).join("\r\n");
+  } finally { E.M.langue("fr"); }
 }
 /* une tâche à la fois : le moteur travaille sur un seul jeu de données en mémoire
    (deux tâches mêlées calculeraient sur les données l'une de l'autre) */
@@ -226,7 +231,7 @@ if (parentPort) parentPort.on("message", m=>{
       if (m.type === "calculer") r = await calculer(m.mats, m.du, m.au, m.horodatage, m.source);
       else if (m.type === "compteurs") r = await compteurs(m.mats, m.du, m.au, m.source, m.reglesSim);
       else if (m.type === "comparer") r = await comparerSources(m.mats, m.du, m.au);
-      else if (m.type === "etat") r = await etat(m.def, m.mats, m.du, m.au, m.id, m.source, m.format);
+      else if (m.type === "etat") r = await etat(m.def, m.mats, m.du, m.au, m.id, m.source, m.format, m.lang);
       else throw new Error("tâche inconnue");
       parentPort.postMessage({id:m.id, ok:true, r});
     } catch(e){ parentPort.postMessage({id:m.id, ok:false, erreur:e.message, pile:e.stack}); }
