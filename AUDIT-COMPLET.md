@@ -1249,3 +1249,24 @@ lever un blocage, seulement l'API) ; consentement / information des salariés (r
 resynchronisation, la présence des salariés hors périmètre sur l'appareil n'est pas reconstruite (non reproduit).
 
 Livraison : FIWAKTI-56.33.11-correctif-11.zip (cumulatif : correctifs 2 à 10 inclus).
+
+## Correctif 12 — RH › Biométrie suspendue (nouvel écran)
+
+Suite du correctif 11 : la validation RH pouvait lever un blocage biométrique par le serveur, mais aucun écran ne le lui
+permettait (Terminaux et Biométrie relèvent du droit Terminaux).
+
+- Écran **RH › Biométrie suspendue** (`biorh`) : salariés dont la biométrie est suspendue pour une longue absence et dont
+  la réactivation attend les RH — absence (type, code), période, situation, filtres (toutes / à réactiver / absence en
+  cours), recherche, export ; démonstration avec exemples fictifs.
+- Réactivation : immédiate si l'absence est terminée (renvoi aux appareils), sinon autorisée pour la fin de l'absence ;
+  **motif obligatoire**, enregistré dans l'audit (`biometrie.blocage.leve_rh … — motif : …`) avec l'identité RH.
+- Accès : validation RH (EMP ≥ validation) ou paramétrage TER, même règle que le serveur ; niveau de menu « avancé » ;
+  action « Réactiver » rattachée au droit Validation de la matrice ; périmètre appliqué par le serveur (liste et levée).
+- Serveur : motif transmis à l'audit ; liste RH portée de 300 à 2 000 lignes (troncature silencieuse auparavant).
+
+Vérifié sur le serveur réel avec un compte RH (validation, aucun droit Terminaux, site s1) : écran présent dans le menu RH,
+écrans Appareil absents ; 2 salariés du site s1 listés (celui du site s2 exclu) ; confirmation sans motif refusée ;
+réactivation (2 envois en file) puis autorisation différée (fin d'absence) ; audit avec motif et identité ; démonstration
+et export sans erreur ; trilingue.
+
+Livraison : FIWAKTI-56.33.11-correctif-12.zip (cumulatif : correctifs 2 à 11 inclus).

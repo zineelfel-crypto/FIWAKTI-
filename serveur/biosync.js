@@ -311,21 +311,22 @@ function creer(o){
     }
     return res;
   }
-  async function leverBlocage(mat, login){
+  async function leverBlocage(mat, login, motif){
+    const pourquoi = motif ? " — motif : "+String(motif).slice(0, 300) : "";
     const r = await B.get("SELECT * FROM bio_blocages WHERE mat=?", String(mat));
     if (!r || r.statut !== "actif") throw Object.assign(new Error("Aucun blocage biométrique actif pour ce salarié."), {code:404});
     const cfg = await config();
     if ((r.fin || "") >= auj()){
       /* absence encore en cours : la levée est enregistrée, la réactivation suivra la fin de l'absence */
       await B.run("UPDATE bio_blocages SET mode='auto', leve_par=?, maj=? WHERE mat=?", login, maint(), String(mat));
-      await audit(login, "biometrie.blocage.leve_rh", mat+" (prise en compte à la fin de l'absence, le "+r.fin+")");
+      await audit(login, "biometrie.blocage.leve_rh", mat+" (prise en compte à la fin de l'absence, le "+r.fin+")"+pourquoi);
       return {ok:true, differe:true, fin:r.fin, jobs:[]};
     }
     await B.run("UPDATE bio_blocages SET statut='leve', leve_le=?, leve_par=?, maj=? WHERE mat=?", maint(), login, maint(), String(mat));
     BLOQUES.delete(String(mat));
     const terms = await appareils(cfg), emps = await D.employes(), e = emps.find(x=>String(x.mat) === String(mat));
     const jobs = await enfilerDiffusion(mat, perimetre(e, terms, rattaches(emps)), "levee-rh", 3);
-    await audit(login, "biometrie.blocage.leve_rh", mat+" — "+jobs.length+" envoi(s) en file");
+    await audit(login, "biometrie.blocage.leve_rh", mat+" — "+jobs.length+" envoi(s) en file"+pourquoi);
     return {ok:true, jobs};
   }
   /* réconciliation ciblée d'un appareil (remplacé, réinitialisé) : même file, même traitement différentiel */
@@ -465,7 +466,7 @@ function creer(o){
         enAttente:parT[T.id] || 0, derniereSynchro:(et[T.id]||{}).derniereSynchro || null, derniereErreur:(et[T.id]||{}).derniereErreur || null})),
       types:typesAbsence(ref).map(t=>({code:t.code, nom:t.nom})), evenements, blocagesRh:await (async ()=>{
         /* 56.33.11 : salariés bloqués dont la réactivation attend les RH (absence terminée ou en cours) */
-        const l = await B.all("SELECT mat, code, depuis, fin FROM bio_blocages WHERE statut='actif' AND mode='rh' ORDER BY fin, mat LIMIT 300");
+        const l = await B.all("SELECT mat, code, depuis, fin FROM bio_blocages WHERE statut='actif' AND mode='rh' ORDER BY fin, mat LIMIT 2000");
         if (!l.length) return [];
         const parMat = new Map((await D.employes()).map(e=>[String(e.mat), e])), lib = new Map(typesAbsence(ref).map(t=>[String(t.code).toUpperCase(), t.nom||""]));
         return l.map(r=>{ const e = parMat.get(String(r.mat)) || {}; return {mat:r.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), code:r.code, type:lib.get(String(r.code||"").toUpperCase()) || "",

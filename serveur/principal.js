@@ -2312,7 +2312,7 @@ async function traiter(req, res){
       const rh = {aucun:0, lecture:1, saisie:2, validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0;
       if (!admin && rang < 4 && rh < 3) return erreur(res, 403, "Réservé à la validation RH ou au paramétrage des terminaux.");
       if (!admin){ const {P:PL} = await D.perimetreDe(ref, C.login); if (PL.set !== null && !PL.set.has(String(b.mat||"").trim())) return erreur(res, 403, "Salarié hors de votre périmètre."); }
-      try { return json(res, 200, await BS().leverBlocage(String(b.mat||"").trim(), C.login)); } catch(e){ return erreur(res, e.code || 400, e.message); }
+      try { return json(res, 200, await BS().leverBlocage(String(b.mat||"").trim(), C.login, String(b.motif||"").trim())); } catch(e){ return erreur(res, e.code || 400, e.message); }
     }
     /* v56.5 : état des visages enregistrés (métadonnées seulement, jamais les images ni les gabarits) */
     if (action === "visages-etat"){ if (!admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux."); return json(res, 200, {resume:await VIS().resume()}); }
