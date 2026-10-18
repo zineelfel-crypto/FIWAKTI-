@@ -1626,10 +1626,10 @@ async function traiter(req, res){
     if (paquet.import && typeof paquet.import === "object"){
       const im = paquet.import, txt = c => { const x = (r.parColl || {})[c]; return x ? c+" : "+x.crees+" créé(s), "+x.maj+" mis à jour"+(x.suppr ? ", "+x.suppr+" supprimé(s)" : "")+(x.mats.length ? " ("+x.mats.join(", ")+(x.crees+x.maj > x.mats.length ? "…" : "")+")" : "") : ""; };
       const lib = String(im.fichier || "").replace(/[\r\n]/g, " ").slice(0, 120);
-      await audit(C.login, im.annulation ? "import.annule" : "import.execute", (im.cible === "badge" ? "badgeages" : "salariés")+(lib ? " — fichier « "+lib+" »" : "")+" — "+(["emps", "ptg", "users"].map(txt).filter(Boolean).join(" ; ") || "rien d'enregistré")+((r.ignores || []).length ? " — refus : "+r.ignores.join(", ").slice(0, 400) : ""), ip);
+      await audit(C.login, im.annulation ? "import.annule" : "import.execute", (im.cible === "badge" ? "badgeages" : "salariés")+(lib ? " — fichier « "+lib+" »" : "")+" — "+(["emps", "ptg", "users"].map(txt).filter(Boolean).join(" ; ") || "rien d'enregistré")+((r.ignores || []).length || (r.refusEmps || []).length ? " — refus : "+(r.refusEmps || []).map(x=>x && x.message).filter(Boolean).concat((r.ignores || []).filter(x=>!/^emps \(/.test(x) || /refusé\(s\)\)$/.test(x))).join(", ").slice(0, 600) : ""), ip);
     }
     if (r.conflits.length) await audit(C.login, "donnees.conflits", r.conflits.map(x=>x.type === "ref" ? "référentiel:"+x.cle : x.coll+":"+x.id).join(", ").slice(0, 500), ip);
-    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, parColl:r.parColl || {}, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
+    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, parColl:r.parColl || {}, refusPar:r.refusPar || {}, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
   /* ---- correctif 18 : restauration d'un élément de la corbeille par le serveur — l'élément est réinséré avec tous les
@@ -1798,6 +1798,115 @@ async function traiter(req, res){
     return json(res, 200, {anniversaire:ok, prenom:ok && e ? (e.prenom || "") : ""});
   }
   /* ---- v56.14 : journal des badgeages servi par page (grand effectif) ---- */
+  /* ---- correctif 19 : import de badgeages par le serveur, par lots (5 000 lignes au plus par appel). Auparavant tout le
+     fichier partait dans un seul enregistrement global : 100 000 lignes bloquaient le serveur 15 min, une réponse 503
+     arrivait alors que tout était écrit (conflits au renvoi), un badgeage du terminal à la même minute était supprimé ou
+     doublé (identifiants aléatoires), et les refus (clôture, périmètre) n'étaient pas rendus ligne par ligne.
+     Chaque ligne est contrôlée ici (salarié par matricule ou badge, périmètre, présence à la date, période clôturée,
+     horodatage réel et pas dans le futur, doublon dans le fichier ou avec un badgeage existant à ±1 min), puis passe
+     par la chaîne d'ingestion (traçabilité, alternance du sens, date de travail) avec un identifiant stable :
+     réimporter le même fichier ne crée rien en double. ---- */
+  if (p === "/api/v1/pointages/import" && req.method === "POST"){
+    const b = await corpsJson(req, 20e6), lignes = Array.isArray(b.lignes) ? b.lignes : null;
+    if (!lignes || !lignes.length) return erreur(res, 400, "Aucune ligne à importer.");
+    if (lignes.length > 5000) return erreur(res, 413, "5 000 lignes au plus par envoi.");
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
+    const RG = {lecture:1, saisie:2, validation:3, config:4};
+    const acteKo = v => { const m = (pr.menus || {})[v], a = ((pr.actions || {})[v] || {}).creer; return m === "masque" || m === "lecture" || a === false; };
+    if (!admin && (!(RG[(pr.droits || {}).PTG] >= 2) || acteKo("ptg") || acteKo("import"))) return erreur(res, 403, "Droit de saisie des pointages et de création à l'import requis.");
+    const emps = await D.employes(), parMat = new Map(), parBadge = new Map();
+    emps.forEach(e=>{ parMat.set(String(e.mat), e); const bg = String(e.badge || "").trim(); if (bg && !/^BLK:/.test(bg)) parBadge.set(bg, e); });
+    const clot = (ref.clotures || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+    const tzDe = e => { const si = (ref.sites || []).find(s=>s && s.id === e.siteId); return (si && si.tz) || INGESTION.FUSEAU_DEFAUT || "Africa/Tunis"; };
+    const refus = [], vus = new Set(), retenues = [];
+    const jourOk = j => { const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j; };
+    lignes.forEach((x, i)=>{
+      const l = Number.isFinite(+(x && x.l)) ? +x.l : i + 1, ko = m => refus.push({l, motif:m});
+      if (!x || typeof x !== "object") return ko("ligne illisible");
+      const mat = String(x.mat == null ? "" : x.mat).trim(), bg = String(x.badge == null ? "" : x.badge).trim();
+      const e = mat ? parMat.get(mat) : bg ? parBadge.get(bg) : null;
+      if (!mat && !bg) return ko("matricule absent");
+      if (!e || (!admin && P.set !== null && !P.set.has(String(e.mat)))) return ko((mat ? "matricule « "+mat.slice(0, 30) : "badge « "+bg.slice(0, 30))+" » inconnu ou hors de votre périmètre");
+      const tz = tzDe(e), brut = String(x.ts || "").trim();
+      const abs = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})$/i.exec(brut);
+      let local = null;
+      if (abs){ const ms = Date.parse(abs[1]+"T"+abs[2]+(abs[3].toUpperCase() === "Z" ? "Z" : abs[3].slice(0, 3)+":"+abs[3].slice(-2))); if (!isNaN(ms)) local = INGESTION.utcVersLocal(new Date(ms).toISOString(), tz); }
+      else { const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(brut); if (m && +m[2] < 24 && +m[3] < 60 && !(m[4] && +m[4] > 59)) local = m[1]+" "+m[2]+":"+m[3]+":"+(m[4] || "00"); }
+      if (!local || !jourOk(local.slice(0, 10)) || local.slice(0, 4) < "2000") return ko("date ou heure invalide");
+      local = local.slice(0, 16)+":"+(local.slice(17, 19) || "00");
+      if (new Date(INGESTION.localVersUtc(local, tz)).getTime() > Date.now() + 5*60000) return ko("horodatage dans le futur");
+      const d = local.slice(0, 10);
+      if (e.entree && d < e.entree) return ko("badgeage antérieur à l'entrée du salarié ("+e.entree+")");
+      if (e.sortie && d > e.sortie) return ko("badgeage postérieur à la sortie du salarié ("+e.sortie+")");
+      if (clot && d <= clot) return ko("période clôturée jusqu'au "+clot+" : ajustement de période antérieure requis");
+      const sens = x.sens === "E" || x.sens === "S" ? x.sens : null;
+      if (x.sens != null && x.sens !== "" && !sens) return ko("sens inconnu");
+      const cle = e.mat+"|"+local.slice(0, 16); if (vus.has(cle)){ refus.push({l, motif:"doublon dans le fichier", doublon:true}); return; } vus.add(cle);
+      retenues.push({l, e, local, sens, dev:String(x.dev == null ? "" : x.dev).slice(0, 80)});
+    });
+    /* doublons avec les badgeages existants (terminal, saisie, import précédent) : même salarié à ±1 minute */
+    const exist = new Map(), matsJ = Array.from(new Set(retenues.map(r=>String(r.e.mat))));
+    if (retenues.length){
+      const ds = retenues.map(r=>r.local.slice(0, 10)).sort(), du = ds[0], au = ds[ds.length - 1];
+      for (let i = 0; i < matsJ.length; i += 500){
+        const part = matsJ.slice(i, i + 500);
+        (await B.all("SELECT data FROM enreg WHERE coll='ptg' AND mat IN ("+part.map(()=>"?").join(",")+") AND d >= ? AND d <= ?", ...part, du, au)).forEach(r=>{ try { const o = JSON.parse(r.data); const k = String(o.mat)+"|"+String(o.ts || "").slice(0, 10); (exist.get(k) || exist.set(k, []).get(k)).push(o); } catch(e){} });
+      }
+    }
+    const minute = ts => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(ts); return m ? Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5]) / 60000 : NaN; };
+    const lot = [], parId = new Map();
+    let doublons = refus.filter(r=>r.doublon).length;
+    for (const r of retenues){
+      const id = "im"+crypto.createHash("sha1").update(r.e.mat+"|"+r.local+"|"+(r.sens || "")).digest("hex").slice(0, 18);
+      const deja = (exist.get(r.e.mat+"|"+r.local.slice(0, 10)) || []).some(o=>o.id === id || (Math.abs(minute(String(o.ts || "")) - minute(r.local)) <= 1 && (!r.sens || !o.sens || o.sens === r.sens)));
+      if (deja){ doublons++; continue; }
+      parId.set(id, r.l);
+      lot.push({utilisateur:String(r.e.mat), horodatage:r.local, sens:r.sens || undefined, ptgId:id, dev:r.dev, src:"import", source_event_id:"import:"+id});
+    }
+    let ing = {integres:0, doublons:0, rejetes:0, invalides:0};
+    if (lot.length){
+      try { ing = await ING.recevoir("import", null, lot, C.login) || ing; }
+      catch(e){ return erreur(res, e.code === 503 ? 503 : 500, e.message); }
+    }
+    const ids = [], rows = [], ecrits = new Set(), cles = Array.from(parId.keys());
+    for (let i = 0; i < cles.length; i += 500){
+      const part = cles.slice(i, i + 500);
+      (await B.all("SELECT id, data FROM enreg WHERE coll='ptg' AND id IN ("+part.map(()=>"?").join(",")+")", ...part)).forEach(r=>{ let v = 0; try { v = Number(JSON.parse(r.data).__v || 0); } catch(e){} ids.push({id:r.id, v, l:parId.get(r.id)}); ecrits.add(r.id); try { rows.push(JSON.parse(r.data)); } catch(e){} });
+    }
+    parId.forEach((l, id)=>{ if (!ecrits.has(id)) refus.push({l, motif:ing.enFile ? "en file d'attente d'intégration (sera intégré automatiquement)" : "non intégré (doublon ou période clôturée)"}); });
+    const lib = String(b.fichier || "").replace(/[\r\n]/g, " ").slice(0, 120);
+    await audit(C.login, "import.execute", "badgeages"+(lib ? " — fichier « "+lib+" »" : "")+(b.lot ? " — lot "+String(b.lot).slice(0, 20) : "")+" — "+ids.length+" intégré(s), "+doublons+" doublon(s), "+refus.filter(r=>!r.doublon).length+" refusé(s)"+(matsJ.length ? " ("+matsJ.slice(0, 20).join(", ")+(matsJ.length > 20 ? "…" : "")+")" : ""), ip);
+    return json(res, 200, {ok:true, lus:lignes.length, ecrits:ids.length, doublons, refus, ids, rows, enFile:!!ing.enFile});
+  }
+  /* annulation d'un import de badgeages : seules les lignes créées par cet import (identifiant et version connus du
+     navigateur) sont supprimées ; une ligne modifiée depuis (version changée), d'une période clôturée ou hors périmètre
+     est conservée et signalée. Les fiches salariés ne sont jamais touchées. */
+  if (p === "/api/v1/pointages/import/annuler" && req.method === "POST"){
+    const b = await corpsJson(req, 10e6), l = (Array.isArray(b.ids) ? b.ids : []).filter(x=>x && /^im[0-9a-f]{18}$/.test(String(x.id))).slice(0, 200000);
+    if (!l.length) return erreur(res, 400, "Aucune ligne d'import à annuler.");
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
+    const RG = {lecture:1, saisie:2, validation:3, config:4};
+    const acteKo = v => { const m = (pr.menus || {})[v], a = ((pr.actions || {})[v] || {}).supprimer; return m === "masque" || m === "lecture" || a === false; };
+    if (!admin && (!(RG[(pr.droits || {}).PTG] >= 2) || acteKo("ptg") || acteKo("import"))) return erreur(res, 403, "Droit de suppression des pointages à l'import requis.");
+    const clot = (ref.clotures || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+    const conservesIds = [], touches = new Set(); let supprimes = 0, modifies = 0;
+    for (let i = 0; i < l.length; i += 500){
+      const part = l.slice(i, i + 500), vus = new Map((await B.all("SELECT id, data FROM enreg WHERE coll='ptg' AND id IN ("+part.map(()=>"?").join(",")+")", ...part.map(x=>String(x.id)))).map(r=>[r.id, r.data])), suppr = [];
+      part.forEach(x=>{ const dd = vus.get(String(x.id)); if (!dd) return; let o; try { o = JSON.parse(dd); } catch(e){ conservesIds.push(String(x.id)); return; }
+        const ko = o.src !== "import" || (!admin && P.set !== null && !P.set.has(String(o.mat))) || (clot && String(o.ts || "").slice(0, 10) <= clot);
+        if (ko || Number(o.__v || 0) !== Number(x.v || 0)){ if (!ko) modifies++; conservesIds.push(String(x.id)); return; }
+        suppr.push(o); });
+      if (!suppr.length) continue;
+      await B.transaction(async ()=>{
+        await B.run("DELETE FROM enreg WHERE coll='ptg' AND id IN ("+suppr.map(()=>"?").join(",")+")", ...suppr.map(o=>String(o.id)));
+        await ING.tracerAnnulationLot(C.login, suppr);
+      });
+      supprimes += suppr.length; suppr.forEach(o=>touches.add(String(o.mat)+"|"+String(o.ts || "").slice(0, 10)));
+    }
+    try { await K.invalider(Array.from(touches), []); } catch(e){ journal("invalidation : "+e.message); }
+    await audit(C.login, "import.annule", "badgeages — "+supprimes+" supprimé(s), "+conservesIds.length+" conservé(s)"+(modifies ? " dont "+modifies+" modifié(s) depuis l'import" : ""), ip);
+    return json(res, 200, {ok:true, demandes:l.length, supprimes, conserves:conservesIds.length, conservesIds, conflits:modifies});
+  }
   if (p === "/api/v1/pointages" && req.method === "GET"){
     const q = Object.fromEntries(u.searchParams.entries()), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const au = /^\d{4}-\d{2}-\d{2}$/.test(q.au||"") ? q.au : aujourdhui(), du = /^\d{4}-\d{2}-\d{2}$/.test(q.du||"") ? q.du : ajoutJours(au, -1);

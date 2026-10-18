@@ -338,10 +338,12 @@ function creer(B, PERIM){
     /* correctif 18 : matrice des droits par écran appliquée par le serveur pour la création et la suppression des
        salariés et des badgeages (auparavant seulement masquée dans le navigateur) */
     const ECRAN_COLL = {emps:"emp", ptg:"ptg", corrections:"ptg"};
-    const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false; const m = (P.profil.menus || {})[v], a = ((P.profil.actions || {})[v] || {})[acte];
-      return m === "masque" || m === "lecture" || a === false; };
+    const acteEcran = (v, acte) => { const m = (P.profil.menus || {})[v], a = ((P.profil.actions || {})[v] || {})[acte]; return m === "masque" || m === "lecture" || a === false; };
+    /* correctif 19 : un envoi de l'écran Import (marqueur paquet.import) respecte AUSSI la matrice de l'écran Import */
+    const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false;
+      return acteEcran(v, acte) || (!!paquet.import && (c === "emps" || c === "ptg") && acteEcran("import", acte)); };
     const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [];
-    let nbEcrits = 0; const parColl = {};
+    let nbEcrits = 0; const parColl = {}, refusPar = {};
     await B.transaction(async ()=>{
       const r = paquet.ref || {};
       let refModifie = false;
@@ -457,7 +459,12 @@ function creer(B, PERIM){
            contrôlée : un doublon ancien ne bloque pas l'enregistrement des autres champs. */
         const UNI = c === "emps" ? indexUnicite(await employes()) : null;
         let MATS_C = null; const matsConnus = async () => MATS_C || (MATS_C = new Set((await employes()).map(e=>String(e.mat))));
-        for (let x of (colls[c].put||[])){
+        let EPM = null; const empsParMat = async () => EPM || (EPM = new Map((await employes()).map(e=>[String(e.mat), e])));
+        let MATS_L = null; const matsLot = async () => MATS_L || (MATS_L = new Set(Array.from(await matsConnus()).concat(c === "emps" ? (colls[c].put || []).map(e=>e && String(e.mat)) : [])));
+        /* correctif 19 : chaque fiche non écrite est rendue au navigateur avec son motif (auparavant seuls les doublons de
+           CIN/badge l'étaient : l'import annonçait « 6 créés » quand le serveur en avait écrit 2) */
+        const PUTS = colls[c].put || [], IGN0 = [], ECR = new Set();
+        for (let x of PUTS){ IGN0.push(ignores.length);
           if (!x || x.id === undefined){ refus++; continue; }
           /* 56.33.11 : identifiant et matricule contrôlés (un identifiant contenant « " » injectait des attributs dans les
              écrans des valideurs : zone invisible déclenchant une validation) */
@@ -480,14 +487,21 @@ function creer(B, PERIM){
             const mm = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(:\d{2})?$/.exec(String(x.ts || ""));
             if (!mm || !jourReel(mm[1]+"-"+mm[2]+"-"+mm[3]) || +mm[1] < 2000 || +mm[4] > 23 || +mm[5] > 59){ refus++; ignores.push("ptg ("+String(x.mat || "?")+" : horodatage invalide)"); continue; }
             if (!x.mat || !(await matsConnus()).has(String(x.mat))){ refus++; ignores.push("ptg ("+(x.mat ? "matricule inconnu : "+String(x.mat).slice(0, 30) : "matricule absent")+")"); continue; }
+            const eP = (await empsParMat()).get(String(x.mat)), dP = String(x.ts).slice(0, 10), demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+            if (eP && ((eP.entree && dP < eP.entree) || (eP.sortie && dP > eP.sortie))){ refus++; ignores.push("ptg ("+x.mat+" : badgeage hors de la présence du salarié)"); continue; }
+            if (dP > demain){ refus++; ignores.push("ptg ("+x.mat+" : badgeage dans le futur)"); continue; }
+            if (x.sens != null && x.sens !== "E" && x.sens !== "S"){ refus++; ignores.push("ptg ("+x.mat+" : sens inconnu)"); continue; }
           }
+          /* l'origine « badge » (pointeuse) est réservée à la chaîne d'ingestion : un navigateur ne peut pas se faire passer
+             pour un terminal */
+          if (c === "ptg" && x.src === "badge" && (!avant || avant.src !== "badge") && !(opts || {}).recette){ refus++; ignores.push("ptg (origine « badge » réservée aux pointeuses)"); continue; }
           /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
           if (c === "abs" && !admin && !avant){ let okA = false;
             if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat); }
             if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
             if (!okA){ refus++; ignores.push("abs (absence sans demande acceptée)"); continue; } }
           /* correctif 18 : fiche salarié — dates, adresse électronique et rattachements contrôlés */
-          if (c === "emps"){ const m = controleEmp(x, ref, avant); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
+          if (c === "emps"){ const m = controleEmp(x, ref, avant, await matsLot()); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
           /* modification d'une fiche refusée par la matrice ; les droits d'accès aux zones (écran Droits d'accès) restent
              modifiables par leur propre écran */
           if (!admin && avant && c === "emps" && acteRefuse(c, "modifier")){ const sans = o => { const y = Object.assign({}, o); ["acces", "__v"].forEach(k=>delete y[k]); return JSON.stringify(y); };
@@ -512,7 +526,7 @@ function creer(B, PERIM){
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
-          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
+          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; ECR.add(String(v.id)); { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
           if (c === "notifs" && !avant) nouvellesNotifs.push(v);
           if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
@@ -520,6 +534,10 @@ function creer(B, PERIM){
           [avant, v].forEach(o=>joursDe(c, o).forEach(d=>touches.add(o.mat+"|"+d)));
           if (c === "emps") touches.add(v.mat+"|*");
         }
+        if (c === "emps" || c === "ptg"){ IGN0.push(ignores.length); const dejaE = new Set(refusEmps.map(r=>String(r.id))), conf = new Set(conflits.filter(k=>k.coll === c).map(k=>String(k.id)));
+          PUTS.forEach((x, i)=>{ if (!x || x.id === undefined) return; const id = String(x.id); if (ECR.has(id) || conf.has(id) || dejaE.has(id)) return;
+            const m = ignores.slice(IGN0[i], IGN0[i+1]).join(" ; ") || (c === "emps" ? "hors de votre périmètre ou droit insuffisant" : "refusé (périmètre, droit ou période clôturée)");
+            if (c === "emps") refusEmps.push({id, mat:String(x.mat || ""), message:m}); else (refusPar[c] = refusPar[c] || []).push({id, mat:String(x.mat || ""), message:m}); }); }
         for (const id of (colls[c].del||[])){
           if (immuable){ refus++; continue; }
           if (!admin && acteRefuse(c, "supprimer")){ refus++; continue; }
@@ -549,7 +567,7 @@ function creer(B, PERIM){
       rf.__versions = rf.__versions || {}; rf.__versions.corbeille = Number(rf.__versions.corbeille || 0) + 1; nouvellesVersions.ref.corbeille = rf.__versions.corbeille;
       await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(rf), new Date().toISOString(), CLE_APP);
     } catch(e){}
-    return {ok:true, ignores, ecrits:nbEcrits, parColl, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
+    return {ok:true, ignores, ecrits:nbEcrits, parColl, refusPar, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
   const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
@@ -704,7 +722,7 @@ function controleConvs(avant, apres, sites){
 /* correctif 18 : fiche salarié — dates réelles, entrée avant sortie, adresse électronique, site et service existants */
 /* correctif 19 : date réelle aaaa-mm-jj (« 2026-13-45 » levait une exception : erreur 500 au lieu d'un refus) */
 function jourReel(j){ j = String(j == null ? "" : j); if (!/^\d{4}-\d{2}-\d{2}$/.test(j)) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j; }
-function controleEmp(x, ref, avant){
+function controleEmp(x, ref, avant, mats){
   /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
   const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
   const dv = k => !chg(k) || !x[k] || jourReel(x[k]);
@@ -713,6 +731,10 @@ function controleEmp(x, ref, avant){
   if (chg("email") && x.email && x.email !== "•••" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x.email))) return "adresse électronique invalide";
   if (chg("siteId") && x.siteId && !(ref.sites || []).some(s=>s && s.id === x.siteId)) return "site inconnu";
   if (chg("deptId") && x.deptId && !(ref.depts || []).some(d=>d && d.id === x.deptId)) return "service inconnu";
+  /* correctif 19 : nom obligatoire à la création ; responsable existant et différent du salarié */
+  if (!avant && !String(x.nom || "").trim()) return "nom obligatoire";
+  if (chg("chefMat") && x.chefMat){ if (String(x.chefMat) === String(x.mat)) return "un salarié ne peut pas être son propre responsable";
+    if (mats && !mats.has(String(x.chefMat))) return "responsable inconnu ("+String(x.chefMat).slice(0, 30)+")"; }
   return "";
 }
 function controleProfils(avant, apres, P, admin, users, niveau){

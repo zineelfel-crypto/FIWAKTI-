@@ -367,6 +367,20 @@ function creer(o){
       "ACCEPTED", nature+" par "+(login||"?"), String(x.id), prec ? prec.id : null, recu);
     CPT.ACCEPTED++;
   }
+  /* correctif 19 : annulation d'un import de badgeages — même trace qu'une suppression dans l'application
+     (tracerSaisie), écrite par lots (100 000 lignes : une requête par ligne et une recherche du salarié auparavant) */
+  async function tracerAnnulationLot(login, lignes){
+    if (!lignes.length) return;
+    const ref = await D.referentielLecture() || {}, parMat = new Map((await D.employes()).map(e=>[String(e.mat), e])), recu = maintenant();
+    const raws = [], norms = [];
+    lignes.forEach(x=>{ const e = parMat.get(String(x.mat)), tz = ((ref.sites||[]).find(s=>e && s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
+      const utc = x.ts ? localVersUtc(x.ts, tz) : null, rawId = "app-"+crypto.randomBytes(10).toString("hex");
+      raws.push([rawId, x.term || null, x.dev || null, String(x.mat), utc, x.ts || null, recu, "annulation", JSON.stringify({avant:x, apres:null, import:true}), tz, "ACCEPTED", login || null, recu]);
+      norms.push(["n-"+rawId, moisDe(x.ts, recu), rawId, "app-"+rawId, String(x.mat), "CANCEL", "annulation d'import dans l'application", utc, x.ts || null, e ? e.siteId : null, "ACCEPTED", "annulation d'import par "+(login||"?"), String(x.id), null, recu]); });
+    await insererLignes("raw_events", "raw_event_id,device_id,terminal_code,raw_employee_id,event_ts_utc,event_ts_local,reception_ts_utc,ingestion_source,payload_raw,timezone_source,ingestion_status,auteur,created_at", raws);
+    await insererLignes("normalized_events", "id,mois,raw_event_id,idempotency_key,employee_mat,type,methode_type,event_ts_utc,ts_local,site_id,statut,motif,ptg_id,remplace_id,created_at", norms);
+    CPT.ACCEPTED = (CPT.ACCEPTED || 0) + lignes.length;
+  }
   async function etat(){
     const s = {}; (await B.all("SELECT statut, COUNT(*) n FROM normalized_events GROUP BY statut")).forEach(r=>{ s[r.statut] = Number(r.n); });
     const q = {}; (await B.all("SELECT statut, COUNT(*) n, COALESCE(SUM(nb),0) ev FROM ingestion_queue GROUP BY statut")).forEach(r=>{ q[r.statut] = {lots:Number(r.n), evenements:Number(r.ev)}; });
@@ -385,6 +399,6 @@ function creer(o){
     const {emps} = await moteurPret(); const e = emps.find(x=>String(x.mat) === String(mat));
     try { return e ? moteur.M.regleEff(code, e, d).valeur : null; } catch(x){ return null; }
   }
-  return {regle, tracerSaisie, recevoir, reprendre, rejouer, migrer, etat, historique, localVersUtc, utcVersLocal, correspondance};
+  return {regle, tracerSaisie, tracerAnnulationLot, recevoir, reprendre, rejouer, migrer, etat, historique, localVersUtc, utcVersLocal, correspondance};
 }
 module.exports = {creer, localVersUtc, utcVersLocal, FUSEAU_DEFAUT};

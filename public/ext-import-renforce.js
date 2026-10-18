@@ -2,7 +2,7 @@
    contrôle de l'import (aucun poids ajouté au socle). Synthèse, référentiels manquants sur décision explicite, table de
    correspondance, comptes par ligne, rapport. Les libellés sont enregistrés à la première utilisation. */
 function irInit(){ if (irInit.fait) return; irInit.fait = true;
-Object.assign(T.fr, {irProfSens:"{n} compte(s) demandent un profil d'administration : l'import ne l'attribue pas (profil par défaut). Attribuez-le ensuite dans Utilisateurs.", irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synthèse avant import", irCreer:"Salariés à créer", irMaj:"Salariés à mettre à jour", irCols:"Colonnes non reconnues", irSites:"Sites inconnus",
+Object.assign(T.fr, {irComptesSansDroit:"{n} compte(s) demandé(s) non créé(s) : la création de comptes demande le droit Système « configuration ».", irProfSens:"{n} compte(s) demandent un profil d'administration : l'import ne l'attribue pas (profil par défaut). Attribuez-le ensuite dans Utilisateurs.", irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synthèse avant import", irCreer:"Salariés à créer", irMaj:"Salariés à mettre à jour", irCols:"Colonnes non reconnues", irSites:"Sites inconnus",
     irDepts:"Services inconnus", irCals:"Calendriers inconnus", irProfils:"Profils inconnus", irComptes:"Comptes à créer", irErr:"Erreurs bloquantes", irRefs:"Éléments de référentiel à traiter",
     irRefsH:"Rien n'est créé sans votre choix. Un calendrier ou un profil n'est jamais créé par l'import : choisissez un élément existant ou laissez vide.",
     irChoisir:"— à traiter —", irVide:"Ne pas renseigner", irIgnorer:"Ignorer la colonne", irCreerX:"Créer « {v} »", irCreerChamp:"Créer le champ personnalisé « {v} » — saisie libre", irCreerChampL:"Créer le champ personnalisé « {v} » — liste des valeurs du fichier", irTousChamps:"Créer toutes les colonnes non reconnues comme champs personnalisés ({n})", irTousChampsH:"Le type (saisie libre ou liste) est proposé d'après les valeurs du fichier ; il reste modifiable colonne par colonne, puis dans Paramétrage > Champs.",
@@ -10,7 +10,7 @@ Object.assign(T.fr, {irProfSens:"{n} compte(s) demandent un profil d'administrat
     irBloque:"{n} élément(s) à traiter avant l'import.", irHorsPerim:"Matricule existant hors de votre périmètre", irChargement:"Chargement des fiches concernées…",
     irRapport:"Rapport d'import", irRapDl:"Télécharger le rapport", irRefCrees:"Référentiels créés", irAucun:"aucun", irComptesCrees:"Comptes créés",
     irNonHabil:"Seule une personne habilitée au paramétrage peut créer des éléments de référentiel.", irExclu:"Le retour arrière couvre les salariés, badgeages, services, sites, champs et comptes créés par cet import."});
-  Object.assign(T.en, {irProfSens:"{n} account(s) request an administration profile: the import does not assign it (default profile). Assign it afterwards in Users.", irCompteCol:"Create the account (Yes / No)", irSynth:"Summary before import", irCreer:"Employees to create", irMaj:"Employees to update", irCols:"Unrecognised columns", irSites:"Unknown sites",
+  Object.assign(T.en, {irComptesSansDroit:"{n} requested account(s) not created: creating accounts requires the System \"configuration\" right.", irProfSens:"{n} account(s) request an administration profile: the import does not assign it (default profile). Assign it afterwards in Users.", irCompteCol:"Create the account (Yes / No)", irSynth:"Summary before import", irCreer:"Employees to create", irMaj:"Employees to update", irCols:"Unrecognised columns", irSites:"Unknown sites",
     irDepts:"Unknown departments", irCals:"Unknown calendars", irProfils:"Unknown profiles", irComptes:"Accounts to create", irErr:"Blocking errors", irRefs:"Reference items to handle",
     irRefsH:"Nothing is created without your choice. The import never creates a calendar or a profile: pick an existing one or leave empty.",
     irChoisir:"— to handle —", irVide:"Leave empty", irIgnorer:"Ignore the column", irCreerX:"Create “{v}”", irCreerChamp:"Create the custom field “{v}” — free text", irCreerChampL:"Create the custom field “{v}” — list of the file's values", irTousChamps:"Create every unrecognised column as a custom field ({n})", irTousChampsH:"The type (free text or list) is suggested from the file's values; it can be changed column by column, then in Settings > Fields.",
@@ -18,7 +18,7 @@ Object.assign(T.fr, {irProfSens:"{n} compte(s) demandent un profil d'administrat
     irBloque:"{n} item(s) to handle before importing.", irHorsPerim:"Employee number exists outside your scope", irChargement:"Loading the records concerned…",
     irRapport:"Import report", irRapDl:"Download the report", irRefCrees:"Reference items created", irAucun:"none", irComptesCrees:"Accounts created",
     irNonHabil:"Only a person authorised for settings can create reference items.", irExclu:"Rollback covers employees, punches, departments, sites, fields and accounts created by this import."});
-  Object.assign(T.ar, {irProfSens:"{n} حساب يطلب ملف صلاحيات إدارة: لا يمنحه الاستيراد (الملف الافتراضي). امنحه لاحقا في المستخدمين.", irCompteCol:"إنشاء الحساب (نعم / لا)", irSynth:"ملخص قبل الاستيراد", irCreer:"أعوان للإنشاء", irMaj:"أعوان للتحديث", irCols:"أعمدة غير معروفة", irSites:"مواقع غير معروفة",
+  Object.assign(T.ar, {irComptesSansDroit:"{n} حساب مطلوب لم يُنشأ: يتطلب إنشاء الحسابات صلاحية النظام «إعداد».", irProfSens:"{n} حساب يطلب ملف صلاحيات إدارة: لا يمنحه الاستيراد (الملف الافتراضي). امنحه لاحقا في المستخدمين.", irCompteCol:"إنشاء الحساب (نعم / لا)", irSynth:"ملخص قبل الاستيراد", irCreer:"أعوان للإنشاء", irMaj:"أعوان للتحديث", irCols:"أعمدة غير معروفة", irSites:"مواقع غير معروفة",
     irDepts:"مصالح غير معروفة", irCals:"رزنامات غير معروفة", irProfils:"ملفات صلاحيات غير معروفة", irComptes:"حسابات للإنشاء", irErr:"أخطاء مانعة", irRefs:"عناصر مرجعية للمعالجة",
     irRefsH:"لا يُنشأ شيء دون اختياركم. لا ينشئ الاستيراد أبدا رزنامة أو ملف صلاحيات: اختاروا عنصرا موجودا أو اتركوه فارغا.",
     irChoisir:"— للمعالجة —", irVide:"عدم التعبئة", irIgnorer:"تجاهل العمود", irCreerX:"إنشاء «{v}»", irCreerChamp:"إنشاء الحقل الخاص «{v}» — إدخال حر", irCreerChampL:"إنشاء الحقل الخاص «{v}» — قائمة قيم الملف", irTousChamps:"إنشاء كل الأعمدة غير المعروفة كحقول خاصة ({n})", irTousChampsH:"يُقترح النوع (إدخال حر أو قائمة) حسب قيم الملف؛ ويمكن تغييره لكل عمود ثم في الإعدادات > الحقول.",
@@ -40,18 +40,22 @@ function irProfilExistant(v){ const n = irNorm(v).toLowerCase(); const p = (db.p
 const IR_EXIST = {site:irSiteExistant, dept:irDeptExistant, cal:irCalExistant, profil:irProfilExistant};
 const IR_COL = {site:"SITE", dept:"DEPARTEMENT", cal:"CALENDRIER", profil:"PROFIL"};
 /* décision pour une valeur inconnue : {m:"ex", id} | {m:"creer", code, nom, parent} | {m:"vide"} ; null = à traiter */
-function irDecision(type, v){ const w = ui.imp, d = ((w.dec||{})[type]||{})[v]; if (d) return d;
-  const c = irCorresp()[type] && irCorresp()[type][v]; if (c && (type === "dept" ? (db.depts||[]).some(x=>x.id === c) : type === "site" ? (db.sites||[]).some(x=>x.id === c) : type === "cal" ? (db.cals||[]).some(x=>x.id === c) : (db.profils||[]).some(x=>x.id === c))) return {m:"ex", id:c, memo:true};
+/* correctif 19 : lectures par clé propre (une valeur « constructor » ou « __proto__ » lisait une propriété héritée) */
+const irPropre = (o, k) => o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
+function irHors(m){ return !!irPropre(ui.imp && ui.imp.hors, m); }
+function irDroitComptes(){ try { return !SESS || niveauProfil(profilCourant()) === "admin" || droit("SYS") === "config"; } catch(e){ return false; } }
+function irDecision(type, v){ const w = ui.imp, d = irPropre(irPropre(w.dec, type), v); if (d) return d;
+  const c = irPropre(irCorresp()[type], v); if (c && (type === "dept" ? (db.depts||[]).some(x=>x.id === c) : type === "site" ? (db.sites||[]).some(x=>x.id === c) : type === "cal" ? (db.cals||[]).some(x=>x.id === c) : (db.profils||[]).some(x=>x.id === c))) return {m:"ex", id:c, memo:true};
   return null; }
 /* analyse complète : comptes, inconnus, colonnes non reconnues, éléments à traiter */
 function irAnalyse(){
   const w = ui.imp, R = {site:new Set(), dept:new Set(), cal:new Set(), profil:new Set(), comptes:0, cols:[]};
   if (!w || w.cible === "badge" || !w.lignes) return R;
   const mats = new Set((db.emps||[]).map(e=>e.mat)), auto = typeof pcCfg === "function" && pcCfg().auto;
-  w.lignes.forEach(r=>{ const o = impLigne(r); if (!o.MATRICULE || (w.hors||{})[o.MATRICULE]) return;
+  w.lignes.forEach(r=>{ const o = impLigne(r); if (!o.MATRICULE || irHors(o.MATRICULE)) return;
     Object.keys(IR_COL).forEach(ty=>{ const v = irNorm(o[IR_COL[ty]]); if (v && !IR_EXIST[ty](v)) R[ty].add(v); });
     const neuf = !mats.has(o.MATRICULE), oui = /^(1|o|oui|y|yes|x|نعم)$/i.test(irNorm(o.COMPTE));
-    if ((oui || (auto && neuf && irNorm(o.COMPTE) === "")) && !(db.users||[]).some(u=>u.login === o.MATRICULE)){ R.comptes++;
+    if ((oui || (auto && neuf && irNorm(o.COMPTE) === "")) && !(db.users||[]).some(u=>u.login === o.MATRICULE)){ if (!irDroitComptes()){ R.comptesSansDroit = (R.comptesSansDroit || 0) + 1; return; } R.comptes++;
       const pv = irNorm(o.PROFIL), d = pv ? irDecision("profil", pv) : null, pid = pv ? (IR_EXIST.profil(pv) || (d && d.m === "ex" ? d.id : null)) : null;
       if (pid && irProfilSensible((db.profils||[]).find(p=>p.id === pid))) R.profSens = (R.profSens || 0) + 1; } });
   (w.entetes||[]).forEach((h, i)=>{ if (irNorm(h) && !w.map[i]) R.cols.push({i, nom:irNorm(h)}); });
@@ -65,14 +69,19 @@ function irListeConseillee(i){ const v = irValeurs(i), n = (ui.imp.lignes||[]).f
 function irATraiter(R){ let n = 0; ["site", "dept", "cal", "profil"].forEach(ty=>R[ty].forEach(v=>{ if (!irDecision(ty, v)) n++; })); return n; }
 /* grand effectif : les fiches du fichier sont chargées (complètes) avant l'analyse ; un matricule hors périmètre devient une erreur */
 async function irPreparer(){ irInit();
-  const w = ui.imp; if (!w || w.cible === "badge" || !w.lignes || !(typeof ANNUAIRE_PAGINE !== "undefined" && ANNUAIRE_PAGINE)) return;
-  const mats = Array.from(new Set(w.lignes.map(r=>impLigne(r).MATRICULE).filter(Boolean))).filter(m=>!(db.emps||[]).some(e=>e.mat === m && !e._leger));
-  w.hors = w.hors || {};
-  for (let i = 0; i < mats.length; i += 1000){
-    const r = await fetch("api/v1/employes/complets", {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mats:mats.slice(i, i+1000)})});
+  /* correctif 19 : aussi hors grand effectif pour un compte au périmètre limité (un matricule existant hors périmètre
+     était annoncé « à créer » puis refusé) ; recherche par ensemble (20 000 × 20 000 comparaisons auparavant) et
+     trois envois simultanés */
+  const w = ui.imp, limite = typeof perimetreActif === "function" && perimetreActif() && typeof LIC !== "undefined" && LIC.serveur && !DEMO;
+  if (!w || w.cible === "badge" || !w.lignes || !((typeof ANNUAIRE_PAGINE !== "undefined" && ANNUAIRE_PAGINE) || limite)) return;
+  const charges = new Set((db.emps||[]).filter(e=>!e._leger).map(e=>String(e.mat)));
+  const mats = Array.from(new Set(w.lignes.map(r=>impLigne(r).MATRICULE).filter(Boolean))).filter(m=>!charges.has(String(m)));
+  if (!w.hors || Object.getPrototypeOf(w.hors) !== null) w.hors = Object.assign(Object.create(null), w.hors || {});
+  const lots = []; for (let i = 0; i < mats.length; i += 1000) lots.push(mats.slice(i, i+1000));
+  const un = async part => { const r = await fetch("api/v1/employes/complets", {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:JSON.stringify({mats:part})});
     if (!r.ok) throw new Error((await r.json().catch(()=>({}))).message || ("HTTP "+r.status));
-    const j = await r.json(); (j.lignes||[]).forEach(e=>empIntegrer(e)); (j.hors||[]).forEach(m=>{ w.hors[m] = true; });
-  }
+    const j = await r.json(); (j.lignes||[]).forEach(e=>empIntegrer(e)); (j.hors||[]).forEach(m=>{ w.hors[m] = true; }); };
+  for (let i = 0; i < lots.length; i += 3) await Promise.all(lots.slice(i, i+3).map(un));
 }
 function irSelect(type, v){
   const d = irDecision(type, v) || {}, val = d.m === "ex" ? "ex:"+d.id : d.m || "", hab = irHabilite();
@@ -91,7 +100,8 @@ function htmlImpRefs(){ irInit();
   let h = '<div class="fw-card fw-u-p-lg" style="margin:12px 0"><div class="fw-sec" style="margin-top:0">'+esc(t.irSynth)+'</div><div class="fw-kpis">'+
     kv(t.irCols, R.cols.length, 1)+kv(t.irSites, R.site.size, 1)+kv(t.irDepts, R.dept.size, 1)+kv(t.irCals, R.cal.size, 1)+
     (R.profil.size ? kv(t.irProfils, R.profil.size, 1) : "")+kv(t.irComptes, R.comptes)+'</div>'+
-    (R.profSens ? '<div class="fw-note" role="alert" style="margin-top:8px">'+esc(t.irProfSens.replace("{n}", R.profSens))+'</div>' : "");
+    (R.profSens ? '<div class="fw-note" role="alert" style="margin-top:8px">'+esc(t.irProfSens.replace("{n}", R.profSens))+'</div>' : "")+
+    (R.comptesSansDroit ? '<div class="fw-note" style="margin-top:8px">'+esc(t.irComptesSansDroit.replace("{n}", R.comptesSansDroit))+'</div>' : "");
   const lignes = [];
   ["site", "dept", "cal", "profil"].forEach(ty=>R[ty].forEach(v=>lignes.push('<tr><td class="fw-sm">'+esc({site:t.site, dept:t.dept, cal:t.calendar, profil:t.profil}[ty])+'</td><td class="fw-mono fw-sm">'+esc(v)+'</td><td>'+irSelect(ty, v)+'</td></tr>')));
   R.cols.forEach(x=>{ const d = ((w.dec||{}).col||{})[x.i] || {}; lignes.push('<tr><td class="fw-sm">'+esc(t.colonne||"Colonne")+'</td><td class="fw-mono fw-sm">'+esc(x.nom)+'</td><td>'+
@@ -141,7 +151,7 @@ function irCreerChamps(){ irInit();
 function irProfilSensible(pr){ if (!pr) return false; const d = pr.droits || {}; return pr.niveauMenu === "admin" || d.SYS === "saisie" || d.SYS === "validation" || d.SYS === "config"; }
 function irComptes(e, o){
   const oui = /^(1|o|oui|y|yes|x|نعم)$/i.test(irNorm(o.COMPTE)), non = /^(0|n|non|no|لا)$/i.test(irNorm(o.COMPTE));
-  if (non || !oui) return 0; const r = creerCompteEmploye(e); if (!r || !r.u) return 0;
+  if (non || !oui || !irDroitComptes()) return 0; const r = creerCompteEmploye(e); if (!r || !r.u) return 0;
   const pid = irNorm(o.PROFIL) ? irResoudre("profil", o.PROFIL) : null;
   /* correctif 19 : un profil d'administration (niveau admin ou droit Système en écriture) n'est jamais attribué par un
      import : le compte créé garde le profil par défaut, l'administrateur l'élève ensuite à la main (un fichier pouvait
@@ -150,21 +160,30 @@ function irComptes(e, o){
   return 1;
 }
 function irMemoriser(){
-  const w = ui.imp; if (w.memo === false) return; const C = irCorresp();
+  const w = ui.imp; if (w.memo === false) return; try { if (SESS && niveauProfil(profilCourant()) !== "admin" && nivRang(droit("SYS")) < 2) return; } catch(e){ return; } const C = irCorresp();
   ["site", "dept", "cal", "profil"].forEach(ty=>Object.keys((w.dec||{})[ty]||{}).forEach(v=>{ const d = w.dec[ty][v];
-    const id = d.m === "ex" ? d.id : d.m === "creer" ? IR_EXIST[ty](v) : null; if (id) (C[ty] = C[ty] || {})[v] = id; }));
+    const id = d.m === "ex" ? d.id : d.m === "creer" ? IR_EXIST[ty](v) : null; if (id && v !== "__proto__" && v !== "constructor" && v !== "prototype") (C[ty] = C[ty] || {})[v] = id; }));
 }
+/* correctif 19 : rapport fondé sur ce que le serveur a RÉELLEMENT enregistré (créés, mis à jour, refus ligne par ligne
+   avec leur motif, doublons), pour les salariés comme pour les badgeages */
 function irRapportCsv(){ irInit();
-  const R = ui.impRapport; if (!R) return;
-  const l = [csvLine([t.irRapport, R.le]), csvLine([t.irCreer, R.crees]), csvLine([t.irMaj, R.majs]), csvLine([t.ignores||"Ignorés", R.ignores]), csvLine([t.irErr, R.erreurs.length]),
-    csvLine([t.irComptesCrees, R.comptes]), csvLine([t.irRefCrees, R.refs.length])].concat(R.refs.map(x=>csvLine(["", x]))).concat([csvLine([]), csvLine(["LIGNE", "MESSAGE"])]).concat(R.erreurs.map(e=>csvLine([e.l, e.m])));
+  const R = ui.impRapport; if (!R) return; const n = v => v == null ? 0 : v;
+  const l = [csvLine([t.irRapport, R.le]), csvLine([t.impRapCible, R.cible === "badge" ? t.badgeages : t.emp]), csvLine([t.impRapFichier, R.fichier || ""]), csvLine([t.impRapLus, n(R.lus)]),
+    csvLine([R.cible === "badge" ? t.impRapIntegres : t.irCreer, n(R.crees)])].concat(R.cible === "badge" ? [csvLine([t.impRapDoublons, n(R.doublons)])] : [csvLine([t.irMaj, n(R.majs)]), csvLine([t.ignores||"Ignorés", n(R.ignores)]), csvLine([t.irComptesCrees, n(R.comptes)]), csvLine([t.irRefCrees, (R.refs||[]).length])])
+    .concat((R.refs||[]).map(x=>csvLine(["", x]))).concat(R.nonConfirme ? [csvLine([t.impRapNonConfirme])] : [])
+    .concat([csvLine([]), csvLine(["LIGNE", "MESSAGE"])]).concat((R.erreurs||[]).concat(R.refus||[]).sort((a, b)=>(+a.l||0) - (+b.l||0)).map(e=>csvLine([e.l, e.m])));
   download("FIWAKTI_rapport_import_"+todayKey()+".csv", l.join("\r\n"));
 }
 function htmlImpRapport(){ irInit();
-  const R = ui.impRapport; if (!R) return "";
-  return '<div class="fw-card fw-u-p-lg" style="margin-bottom:12px"><div class="fw-sec" style="margin-top:0">'+esc(t.irRapport)+' — '+esc(R.le)+'</div>'+
-    '<div class="fw-hint">'+esc(t.irCreer+" : "+R.crees+" · "+t.irMaj+" : "+R.majs+" · "+(t.ignores||"Ignorés")+" : "+R.ignores+" · "+t.irErr+" : "+R.erreurs.length+" · "+t.irComptesCrees+" : "+R.comptes)+'</div>'+
-    '<div class="fw-hint">'+esc(t.irRefCrees+" : "+(R.refs.length ? R.refs.join(" ; ") : t.irAucun))+'</div>'+
+  const R = ui.impRapport; if (!R) return ""; const n = v => v == null ? 0 : v, err = (R.erreurs||[]).length, ref = (R.refus||[]).length;
+  const kv = (l, v, warn) => '<div class="fw-kpi" style="--kc:'+(warn && v ? "#b45309" : "#0f766e")+'"><div class="v">'+v+'</div><div class="l">'+esc(l)+'</div></div>';
+  const lst = (R.erreurs||[]).concat(R.refus||[]).sort((a, b)=>(+a.l||0) - (+b.l||0)).slice(0, 8);
+  return '<div class="fw-card fw-u-p-lg" style="margin-bottom:12px" role="status"><div class="fw-sec" style="margin-top:0">'+esc(t.irRapport)+' — '+esc(R.le)+(R.fichier ? ' — '+esc(R.fichier) : "")+'</div>'+
+    (R.nonConfirme ? '<div class="fw-note" role="alert">'+esc(t.impRapNonConfirme)+'</div>' : "")+(R.enFile ? '<div class="fw-hint">'+esc(t.impRapEnFile)+'</div>' : "")+
+    '<div class="fw-kpis">'+kv(t.impRapLus, n(R.lus))+kv(R.cible === "badge" ? t.impRapIntegres : t.irCreer, n(R.crees))+(R.cible === "badge" ? kv(t.impRapDoublons, n(R.doublons)) : kv(t.irMaj, n(R.majs))+kv(t.irComptesCrees, n(R.comptes)))+
+    kv(t.irErr, err, 1)+kv(t.impRapRefus, ref, 1)+'</div>'+
+    (R.cible !== "badge" && (R.refs||[]).length ? '<div class="fw-hint">'+esc(t.irRefCrees+" : "+R.refs.join(" ; "))+'</div>' : "")+
+    (lst.length ? '<ul class="fw-sm" style="margin:8px 0 0;padding-inline-start:18px">'+lst.map(e=>'<li>'+esc((t.ligne||"L")+" "+e.l+" : "+e.m)+'</li>').join("")+'</ul>'+(err + ref > lst.length ? '<div class="fw-hint">…</div>' : "") : "")+
     '<div class="fw-u-row" style="gap:8px;margin-top:8px"><button type="button" class="fw-btn sm" data-act="ir-rapport">'+esc(t.irRapDl)+'</button>'+
     '<button type="button" class="fw-iconb" data-act="ir-rapport-fermer" aria-label="'+esc(t.fermer)+'">×</button></div></div>';
 }
@@ -176,9 +195,9 @@ document.addEventListener("click", function(ev){
 });
 document.addEventListener("change", function(ev){
   const el = ev.target; if (!el || !el.dataset || !ui.imp) return; const w = ui.imp;
-  if (el.dataset.irdec){ const ty = el.dataset.irdec, v = el.dataset.irv, x = el.value; w.dec = w.dec || {}; w.dec[ty] = w.dec[ty] || {};
+  if (el.dataset.irdec){ const ty = el.dataset.irdec, v = el.dataset.irv, x = el.value; w.dec = w.dec || {}; if (!irPropre(w.dec, ty)) w.dec[ty] = Object.create(null);
     if (!x) delete w.dec[ty][v]; else if (x.indexOf("ex:") === 0) w.dec[ty][v] = {m:"ex", id:x.slice(3)}; else w.dec[ty][v] = {m:x, nom:v, code:""};
     return render(); }
-  if (el.dataset.irc){ const p = el.dataset.irc.split("|"), d = ((w.dec||{})[p[0]]||{})[p[1]]; if (d) d[p[2]] = el.value; return; }
+  if (el.dataset.irc){ const p = el.dataset.irc.split("|"), d = irPropre(irPropre(w.dec, p[0]), p[1]); if (d && /^(code|nom)$/.test(p[2])) d[p[2]] = el.value; return; }
   if (el.hasAttribute("data-irmemo")){ w.memo = el.checked; return; }
 });

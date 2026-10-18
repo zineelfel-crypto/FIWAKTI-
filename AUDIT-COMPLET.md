@@ -1489,3 +1489,43 @@ Chromium (dépôt au portail → N1 → N2 → acceptée, absences créées) ; 1
 démonstration : 56 écrans sans erreur ; non-régression des compteurs (seul 10188 diffère, attendu).
 
 Livraison : FIWAKTI-56.33.11-correctif-18.zip (cumulatif : correctifs 2 à 17 inclus).
+
+## Correctif 19 — Administration › Import (analyse approfondie)
+
+Trois analyses (salariés, badgeages, aspects transverses) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| I1 | Import de badgeages inutilisable en grand effectif (salariés non chargés → « matricule inconnu ») ; 100 000 lignes envoyées en un seul enregistrement bloquaient le serveur 15 min ; un 503 arrivait alors que tout était écrit (conflits au renvoi) | **critique** | route serveur dédiée `POST /api/v1/pointages/import` par lots de 2 000 : rattachement par matricule ou badge côté serveur, chaîne d'ingestion (traçabilité, alternance, date de travail), identifiants stables (réimport sans doublon) ; progression affichée ; 100 000 lignes en ~30 s sans bloquer le serveur |
+| I2 | Badgeages réels du terminal supprimés par l'import (dédoublonnage sur toutes les journées, ligne la plus tardive retirée quelle que soit sa source) ; doublons avec un badgeage reçu à la même minute | **haute** | seule la ligne importée est écartée (doublon à ±1 min d'un badgeage existant, ou dans le fichier) ; jamais une ligne d'une autre origine |
+| I3 | L'import pouvait créer des administrateurs dont le mot de passe provisoire était le matricule | **haute** | profil d'administration jamais attribué par un import (signalé) ; jamais de mot de passe « matricule » pour un compte administrateur ou ayant un droit d'écriture en Administration ; profil tracé dans l'audit |
+| I4 | « Annuler le dernier import » détruisait le travail fait après (fiches d'autres salariés, badgeages saisis) et neutralisait le verrou de version | **haute** | annulation ciblée : seules les fiches créées ou modifiées par l'import et inchangées depuis ; badgeages : seules les lignes créées par l'import (route `…/import/annuler`, par lots, trace d'annulation) ; bouton visible dès l'étape 1 |
+| I5 | Résultat annoncé avant la réponse du serveur (« 6 créés » pour 2 en base) ; refus muets après le premier ; lignes fantômes affichées | **haute** | rapport construit à partir de la réponse du serveur : créés, mis à jour, doublons, refus ligne par ligne avec motif (clôture, périmètre, unicité, présence) ; fiches et badgeages refusés retirés de l'écran |
+| I6 | Champ entre guillemets contenant un retour à la ligne → salariés fantômes ; matricule, CIN ou badge en double dans le fichier non détectés ; numéros de ligne faux | **haute** | lecture CSV à états sur tout le fichier ; doublons du fichier signalés ; numéro de ligne du fichier |
+| I7 | Mise à jour avec ENTREE : calendrier et champs historisés réécrits depuis l'embauche | **haute** | fiches existantes datées à une date d'effet choisie (défaut : aujourd'hui), postérieure à la dernière clôture |
+| I8 | Serveur : badgeages sans matricule, matricule inconnu (`__proto__`), date impossible (erreur 500), hors présence du salarié, futurs, origine « badge » usurpée ; fiche sans nom, responsable inexistant ou soi-même | moyenne | contrôles serveur ; dates réelles sans exception |
+| I9 | Heures « 8:00:00 » / « 05:00 PM » validées puis écartées en silence ; états ZK 2/4/5 et sens inconnus pris pour « entrée » ; fuseau `Z` ignoré (1 h d'écart) ; dates aaaa/mm/jj et jj/mm/aa refusées ; pas de rattachement par badge | moyenne | une seule lecture de l'heure (contrôle = exécution) ; table des états ZK, sens inconnu = erreur ; fuseau converti au fuseau du site ; formats de date élargis ; colonne BADGE et alias des pointeuses |
+| I10 | Matrice de l'écran Import non appliquée ; modèle, correspondances, comptes annoncés sans droit | moyenne | serveur : matrice Import appliquée aux écritures de l'import ; client : droits Salariés/Pointages « saisie », créer/modifier, PAR pour les modèles, SYS pour les correspondances, SYS config pour les comptes ; niveau « admin » aligné sur le serveur |
+| I11 | Aucune trace serveur fiable de l'import pour un compte limité | moyenne | `import.execute` / `import.annule` écrits par le serveur d'après ce qu'il a enregistré (fichier, créés, mis à jour, refus, matricules) |
+| I12 | Fichiers piégés : XLSX compressé (140 Mo) ou référence `ZZZZZZ1` bloquant l'onglet ; CSV de 50 Mo ; Excel Mac (1904) décalé de 4 ans ; CIN « 01234567 » lu 1234567 ; arabe Windows-1256 lu en 1252 | moyenne | limites (30 Mo par feuille, 200 000 lignes, colonnes, cellules ; fichier 20 Mo / 10 Mo) ; date 1904 ; zéros à gauche ; décodage strict avec détection et choix de l'encodage ; texte long non réaffiché |
+| I13 | Connecteurs et démonstration chargeant des badgeages fictifs en production ; modèle téléchargé décalé de deux colonnes ; correspondance gardée après changement de fichier ; quitter la page pendant l'envoi sans alerte ; instantané d'annulation envoyé au serveur (taille doublée) ; clés héritées (`constructor`) | moyenne / basse | corrigés (connecteur = format seulement avec le serveur ; modèle généré colonne par colonne ; alerte de sortie ; clés propres) |
+
+Non traité (à planifier) : annulation après rechargement de la page (l'instantané reste dans le navigateur) ; date d'effet antérieure à une clôture pour les fiches salariés côté serveur ; accessibilité de la zone de dépôt (clavier) ; Worker pour la lecture Excel.
+
+Vérifié : sur une copie neuve du serveur et dans Chromium :
+- salariés : doublons, nom, responsable, CIN déjà attribué → rapport = base ; aucun salarié fantôme ;
+- annulation ciblée : fiche modifiée après l'import conservée, autre salarié intact ;
+- badgeages :
+  - fuseau Z, AM/PM, états ZK, salarié sorti, doublon avec le terminal (aucune suppression) ;
+  - réimport : 0 créé ;
+  - annulation ;
+- droits : rh.s1 (hors périmètre détecté au contrôle, aucun compte sans droit), chef.s1 (refus), profil Admin non attribué, compte administrateur sans mot de passe « matricule » ;
+- fichiers piégés refusés en moins de 0,5 s, arabe 1256, Excel 1904, zéros à gauche ;
+- 20 000 salariés (annuaire paginé) et 100 000 badgeages :
+  - contrôle en 2,7 s ;
+  - import en 30 s (50 lots), serveur resté disponible (latence maximale 2,4 s) ;
+  - mémoire du navigateur 133 Mo ;
+  - annulation des 100 000 lignes en 21 s ;
+- démonstration (import et annulation sans serveur) et 56 écrans sans erreur JavaScript ; compteurs inchangés (seul 10188 diffère, attendu).
+
+Livraison : FIWAKTI-56.33.11-correctif-19.zip (cumulatif : correctifs 2 à 18 inclus).
