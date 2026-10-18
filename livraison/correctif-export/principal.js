@@ -1734,7 +1734,10 @@ async function traiter(req, res){
     if (p === "/api/v1/employes/acces-masse" && req.method === "POST"){
       const b = await corpsJson(req), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
       if (!admin && !PERIM.peutEcrire(P.profil, "emps")) return erreur(res, 403, "Droit de modification des salariés requis.");
+      /* correctif 6 : module Contrôle d'accès requis ; jamais de droit accordé ou retiré rétroactivement */
+      if (!(MOD && MOD.estActif("FW-Acces"))) return erreur(res, 403, "Module Contrôle d'accès non activé.");
       const d = /^\d{4}-\d{2}-\d{2}$/.test(b.from || "") ? b.from : aujourdhui();
+      if (b.appliquer && d < aujourdhui()) return erreur(res, 409, "Date d'effet passée : un droit d'accès ne s'accorde ni ne se retire rétroactivement. Choisissez aujourd'hui ou une date future.");
       const zone = (ref.zones || []).find(z=>z.id === b.zoneDst), planDst = String(b.planDst || "");
       const plan = planDst === "aucun" ? {id:"aucun", nom:"aucun accès"} : (ref.aplans || []).find(x=>x.id === planDst);
       if (b.appliquer && (!zone || !plan)) return erreur(res, 400, "Zone ou plan d'accès introuvable.");
@@ -1755,7 +1758,8 @@ async function traiter(req, res){
       const aModifier = zone && plan ? pop.filter(e=>norm(ACCES.planAt(e, zone.id, d)) !== plan.id) : [];
       const nomPlan = id => !id || id === "aucun" ? "" : ((ref.aplans || []).find(x=>x.id === id) || {}).nom || "?";
       const zonesA = e => (ref.zones || []).filter(z=>AC.autorise(e, z.id, d)).map(z=>z.nom);
-      if (!b.appliquer) return json(res, 200, {total:pop.length, aModifier:aModifier.length,
+      const programmes = zone ? pop.filter(e=>(e.acces || []).some(a=>a && a.zoneId === zone.id && a.from > d)).length : 0;
+      if (!b.appliquer) return json(res, 200, {total:pop.length, aModifier:aModifier.length, programmes,
         apercu:pop.slice(0, 60).map(e=>({id:e.id, mat:e.mat, nom:e.nom, prenom:e.prenom, deptId:e.deptId, siteId:e.siteId, zones:zonesA(e),
           planActuel:zone ? nomPlan(ACCES.planAt(e, zone.id, d)) : "", deja:!!(zone && plan) && norm(ACCES.planAt(e, zone.id, d)) === plan.id}))});
       let ecrits = 0, conflits = 0; const ignores = new Set();

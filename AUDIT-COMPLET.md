@@ -1090,3 +1090,26 @@ Limites (à traiter avec le matériel, non modifié) :
 
 Livraison : FIWAKTI-56.33.11-correctif-5.zip (cumulatif : app.js, moteur.js, calcul.js, donnees.js, principal.js,
 pointeuses.js, biosync.js, nouveau acces.js — contient les correctifs 2 à 4).
+
+## Correctif 6 — Contrôle d'accès › Droits d'accès
+
+Reprise détaillée de l'écran « Droits d'accès » (affectation des droits par population), au-delà des points corrigés
+au correctif 5 (retrait en masse, grand effectif, application aux lecteurs).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | « Appliquer » (`accapply`) n'était rattaché à aucune catégorie de la matrice des droits : un profil en **consultation** de l'écran pouvait modifier les droits d'accès de toute une population | **haute** | rattaché à « Modification » : bouton masqué et action refusée sans ce droit |
+| 2 | Date d'effet passée acceptée : droit accordé ou retiré rétroactivement, historique des accès réécrit (contraire à la note de l'écran) | **haute** | date d'effet ≥ aujourd'hui (champ, bouton, action, route serveur → 409) |
+| 3 | Changement déjà programmé plus tard pour la même zone non signalé (ex. retrait aujourd'hui alors qu'un accès est prévu dans un mois : l'accès revient à sa date) | moyenne | nombre affiché dans l'aperçu et dans la confirmation (calculé par le serveur en grand effectif) ; le changement programmé est conservé |
+| 4 | Confirmation sans zone, plan ni date ; affectation faite à l'écran absente du journal d'audit | moyenne | confirmation détaillée (« Appliquer », et non « Supprimer », pour un retrait) ; entrée d'audit « acces » |
+| 5 | Route serveur `acces-masse` utilisable sans le module Contrôle d'accès | basse | refusée (403) si le module n'est pas activé |
+
+Vérifié : Chromium, ancienne démonstration (correctif 5) puis nouvelle — date passée : avant, confirmation ouverte ;
+après, bouton grisé et action refusée ; changement programmé signalé (aperçu et confirmation) ; audit écrit ; profil en
+consultation : bouton masqué, clic forcé refusé (« Modification »). Serveur réel : application au 15/01/2026 → 409,
+aperçu avec 5 changements programmés, application du jour sur 9 salariés.
+
+Constat hors périmètre (non modifié) : l'affectation de calendrier en masse (`massapply`, Temps et présence) n'est pas
+non plus rattachée à la matrice des droits.
+
+Livraison : FIWAKTI-56.33.11-correctif-6.zip (cumulatif : correctifs 2 à 5 inclus).
