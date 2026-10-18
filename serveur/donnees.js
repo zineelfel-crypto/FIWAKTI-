@@ -341,7 +341,7 @@ function creer(B, PERIM){
     const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false; const m = (P.profil.menus || {})[v], a = ((P.profil.actions || {})[v] || {})[acte];
       return m === "masque" || m === "lecture" || a === false; };
     const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [];
-    let nbEcrits = 0;
+    let nbEcrits = 0; const parColl = {};
     await B.transaction(async ()=>{
       const r = paquet.ref || {};
       let refModifie = false;
@@ -456,6 +456,7 @@ function creer(B, PERIM){
            autre salarié était accepté (badgeages attribués au mauvais salarié). Seule une valeur nouvelle ou modifiée est
            contrôlée : un doublon ancien ne bloque pas l'enregistrement des autres champs. */
         const UNI = c === "emps" ? indexUnicite(await employes()) : null;
+        let MATS_C = null; const matsConnus = async () => MATS_C || (MATS_C = new Set((await employes()).map(e=>String(e.mat))));
         for (let x of (colls[c].put||[])){
           if (!x || x.id === undefined){ refus++; continue; }
           /* 56.33.11 : identifiant et matricule contrôlés (un identifiant contenant « " » injectait des attributs dans les
@@ -473,6 +474,13 @@ function creer(B, PERIM){
           if (UNI){ const d = doublonEmp(UNI, x, avant); if (d){ refus++; refusEmps.push(d); continue; } }
           if (!admin && !avant && acteRefuse(c, "creer")){ refus++; continue; }
           if (!(opts || {}).recette && !avant && (x.recette === true || x.src === "recette" || /^rec_/.test(String(x.id)))){ refus++; ignores.push(c+" (outils de recette réservés à une installation de recette)"); continue; }
+          /* correctif 19 : badgeage — salarié existant et horodatage réel exigés (un import pouvait écrire des badgeages
+             sans matricule, ou rattachés à « __proto__ » / « constructor », comptés ensuite nulle part) */
+          if (c === "ptg" && (!avant || String(avant.mat) !== String(x.mat) || String(avant.ts) !== String(x.ts))){
+            const mm = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(:\d{2})?$/.exec(String(x.ts || ""));
+            if (!mm || !jourReel(mm[1]+"-"+mm[2]+"-"+mm[3]) || +mm[1] < 2000 || +mm[4] > 23 || +mm[5] > 59){ refus++; ignores.push("ptg ("+String(x.mat || "?")+" : horodatage invalide)"); continue; }
+            if (!x.mat || !(await matsConnus()).has(String(x.mat))){ refus++; ignores.push("ptg ("+(x.mat ? "matricule inconnu : "+String(x.mat).slice(0, 30) : "matricule absent")+")"); continue; }
+          }
           /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
           if (c === "abs" && !admin && !avant){ let okA = false;
             if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat); }
@@ -504,7 +512,7 @@ function creer(B, PERIM){
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
-          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++;
+          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
           if (c === "notifs" && !avant) nouvellesNotifs.push(v);
           if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
@@ -521,7 +529,7 @@ function creer(B, PERIM){
           if (fermee(avant)){ refus++; clotRefus = true; continue; }
           const bv = (colls[c].delv || {})[String(id)];
           if (bv !== undefined && Number(bv) !== Number(avant.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(id), mat:avant.mat||"", suppression:true}); continue; }
-          await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++;
+          await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++; (parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]})).suppr++;
           corbSrv.push({ent:c, row:avant});
           if (c === "ptg" && API.tracerPtg) await API.tracerPtg(login, avant, null);
           if (c === "emps") CACHE_EMPS = null;
@@ -541,7 +549,7 @@ function creer(B, PERIM){
       rf.__versions = rf.__versions || {}; rf.__versions.corbeille = Number(rf.__versions.corbeille || 0) + 1; nouvellesVersions.ref.corbeille = rf.__versions.corbeille;
       await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(rf), new Date().toISOString(), CLE_APP);
     } catch(e){}
-    return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
+    return {ok:true, ignores, ecrits:nbEcrits, parColl, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
   const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
@@ -694,10 +702,12 @@ function controleConvs(avant, apres, sites){
   return "";
 }
 /* correctif 18 : fiche salarié — dates réelles, entrée avant sortie, adresse électronique, site et service existants */
+/* correctif 19 : date réelle aaaa-mm-jj (« 2026-13-45 » levait une exception : erreur 500 au lieu d'un refus) */
+function jourReel(j){ j = String(j == null ? "" : j); if (!/^\d{4}-\d{2}-\d{2}$/.test(j)) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j; }
 function controleEmp(x, ref, avant){
   /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
   const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
-  const dv = k => !chg(k) || !x[k] || (/^\d{4}-\d{2}-\d{2}$/.test(String(x[k])) && new Date(x[k]+"T00:00:00Z").toISOString().slice(0, 10) === x[k]);
+  const dv = k => !chg(k) || !x[k] || jourReel(x[k]);
   for (const k of ["entree", "sortie", "naissance"]) if (!dv(k)) return "date "+k+" invalide";
   if ((chg("entree") || chg("sortie")) && x.entree && x.sortie && x.sortie < x.entree) return "sortie avant l'entrée";
   if (chg("email") && x.email && x.email !== "•••" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x.email))) return "adresse électronique invalide";

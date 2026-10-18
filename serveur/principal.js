@@ -419,10 +419,12 @@ async function synchroniserComptes(doc, par, empIds){
     const actif = u.actif !== false && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
     const c = existants.get(login.toLowerCase());
     if (!c){
-      const temp = !!u.mdpTemp && !!mat;
+      /* correctif 19 : jamais de mot de passe temporaire = matricule pour un compte administrateur ou ayant un droit
+         d'écriture en Administration (un matricule se devine) : ces comptes attendent un mot de passe (invitation) */
+      const temp = !!u.mdpTemp && !!mat && role !== "admin" && !({saisie:1, validation:1, config:1}[d.SYS]);
       await B.run("INSERT INTO comptes(login,uid,nom,matricule,role,actif,etat,temp_le,changer,raison,maj) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         login, u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, 1, temp ? "premiere" : "invitation", maintenant());
-      await audit(par, "compte.cree", login+" ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
+      await audit(par, "compte.cree", login+" — profil "+(pr.nom || u.profilId || "aucun")+(role === "admin" ? " (administrateur)" : "")+" ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
       existants.set(login.toLowerCase(), {login, uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null});
     } else {
       const nv = {uid:u.id||c.uid, nom:u.nom||c.nom, matricule:mat, role, actif};
@@ -1619,8 +1621,15 @@ async function traiter(req, res){
     }
     if (r.ignores.length) await audit(C.login, "donnees.refusees", r.ignores.join(", "), ip);
     if (r.ecrits) await audit(C.login, "donnees.enregistrees", r.ecrits+" ligne(s)", ip);
+    /* correctif 19 : import (ou son annulation) tracé par le serveur d'après ce qu'il a RÉELLEMENT écrit — auparavant
+       seule une trace rédigée par le navigateur (« emp x2 »), refusée pour un compte au périmètre limité */
+    if (paquet.import && typeof paquet.import === "object"){
+      const im = paquet.import, txt = c => { const x = (r.parColl || {})[c]; return x ? c+" : "+x.crees+" créé(s), "+x.maj+" mis à jour"+(x.suppr ? ", "+x.suppr+" supprimé(s)" : "")+(x.mats.length ? " ("+x.mats.join(", ")+(x.crees+x.maj > x.mats.length ? "…" : "")+")" : "") : ""; };
+      const lib = String(im.fichier || "").replace(/[\r\n]/g, " ").slice(0, 120);
+      await audit(C.login, im.annulation ? "import.annule" : "import.execute", (im.cible === "badge" ? "badgeages" : "salariés")+(lib ? " — fichier « "+lib+" »" : "")+" — "+(["emps", "ptg", "users"].map(txt).filter(Boolean).join(" ; ") || "rien d'enregistré")+((r.ignores || []).length ? " — refus : "+r.ignores.join(", ").slice(0, 400) : ""), ip);
+    }
     if (r.conflits.length) await audit(C.login, "donnees.conflits", r.conflits.map(x=>x.type === "ref" ? "référentiel:"+x.cle : x.coll+":"+x.id).join(", ").slice(0, 500), ip);
-    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
+    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, parColl:r.parColl || {}, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
   /* ---- correctif 18 : restauration d'un élément de la corbeille par le serveur — l'élément est réinséré avec tous les

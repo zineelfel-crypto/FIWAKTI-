@@ -2,7 +2,7 @@
    contrôle de l'import (aucun poids ajouté au socle). Synthèse, référentiels manquants sur décision explicite, table de
    correspondance, comptes par ligne, rapport. Les libellés sont enregistrés à la première utilisation. */
 function irInit(){ if (irInit.fait) return; irInit.fait = true;
-Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synthèse avant import", irCreer:"Salariés à créer", irMaj:"Salariés à mettre à jour", irCols:"Colonnes non reconnues", irSites:"Sites inconnus",
+Object.assign(T.fr, {irProfSens:"{n} compte(s) demandent un profil d'administration : l'import ne l'attribue pas (profil par défaut). Attribuez-le ensuite dans Utilisateurs.", irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synthèse avant import", irCreer:"Salariés à créer", irMaj:"Salariés à mettre à jour", irCols:"Colonnes non reconnues", irSites:"Sites inconnus",
     irDepts:"Services inconnus", irCals:"Calendriers inconnus", irProfils:"Profils inconnus", irComptes:"Comptes à créer", irErr:"Erreurs bloquantes", irRefs:"Éléments de référentiel à traiter",
     irRefsH:"Rien n'est créé sans votre choix. Un calendrier ou un profil n'est jamais créé par l'import : choisissez un élément existant ou laissez vide.",
     irChoisir:"— à traiter —", irVide:"Ne pas renseigner", irIgnorer:"Ignorer la colonne", irCreerX:"Créer « {v} »", irCreerChamp:"Créer le champ personnalisé « {v} » — saisie libre", irCreerChampL:"Créer le champ personnalisé « {v} » — liste des valeurs du fichier", irTousChamps:"Créer toutes les colonnes non reconnues comme champs personnalisés ({n})", irTousChampsH:"Le type (saisie libre ou liste) est proposé d'après les valeurs du fichier ; il reste modifiable colonne par colonne, puis dans Paramétrage > Champs.",
@@ -10,7 +10,7 @@ Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synth�
     irBloque:"{n} élément(s) à traiter avant l'import.", irHorsPerim:"Matricule existant hors de votre périmètre", irChargement:"Chargement des fiches concernées…",
     irRapport:"Rapport d'import", irRapDl:"Télécharger le rapport", irRefCrees:"Référentiels créés", irAucun:"aucun", irComptesCrees:"Comptes créés",
     irNonHabil:"Seule une personne habilitée au paramétrage peut créer des éléments de référentiel.", irExclu:"Le retour arrière couvre les salariés, badgeages, services, sites, champs et comptes créés par cet import."});
-  Object.assign(T.en, {irCompteCol:"Create the account (Yes / No)", irSynth:"Summary before import", irCreer:"Employees to create", irMaj:"Employees to update", irCols:"Unrecognised columns", irSites:"Unknown sites",
+  Object.assign(T.en, {irProfSens:"{n} account(s) request an administration profile: the import does not assign it (default profile). Assign it afterwards in Users.", irCompteCol:"Create the account (Yes / No)", irSynth:"Summary before import", irCreer:"Employees to create", irMaj:"Employees to update", irCols:"Unrecognised columns", irSites:"Unknown sites",
     irDepts:"Unknown departments", irCals:"Unknown calendars", irProfils:"Unknown profiles", irComptes:"Accounts to create", irErr:"Blocking errors", irRefs:"Reference items to handle",
     irRefsH:"Nothing is created without your choice. The import never creates a calendar or a profile: pick an existing one or leave empty.",
     irChoisir:"— to handle —", irVide:"Leave empty", irIgnorer:"Ignore the column", irCreerX:"Create “{v}”", irCreerChamp:"Create the custom field “{v}” — free text", irCreerChampL:"Create the custom field “{v}” — list of the file's values", irTousChamps:"Create every unrecognised column as a custom field ({n})", irTousChampsH:"The type (free text or list) is suggested from the file's values; it can be changed column by column, then in Settings > Fields.",
@@ -18,7 +18,7 @@ Object.assign(T.fr, {irCompteCol:"Créer le compte (Oui / Non)", irSynth:"Synth�
     irBloque:"{n} item(s) to handle before importing.", irHorsPerim:"Employee number exists outside your scope", irChargement:"Loading the records concerned…",
     irRapport:"Import report", irRapDl:"Download the report", irRefCrees:"Reference items created", irAucun:"none", irComptesCrees:"Accounts created",
     irNonHabil:"Only a person authorised for settings can create reference items.", irExclu:"Rollback covers employees, punches, departments, sites, fields and accounts created by this import."});
-  Object.assign(T.ar, {irCompteCol:"إنشاء الحساب (نعم / لا)", irSynth:"ملخص قبل الاستيراد", irCreer:"أعوان للإنشاء", irMaj:"أعوان للتحديث", irCols:"أعمدة غير معروفة", irSites:"مواقع غير معروفة",
+  Object.assign(T.ar, {irProfSens:"{n} حساب يطلب ملف صلاحيات إدارة: لا يمنحه الاستيراد (الملف الافتراضي). امنحه لاحقا في المستخدمين.", irCompteCol:"إنشاء الحساب (نعم / لا)", irSynth:"ملخص قبل الاستيراد", irCreer:"أعوان للإنشاء", irMaj:"أعوان للتحديث", irCols:"أعمدة غير معروفة", irSites:"مواقع غير معروفة",
     irDepts:"مصالح غير معروفة", irCals:"رزنامات غير معروفة", irProfils:"ملفات صلاحيات غير معروفة", irComptes:"حسابات للإنشاء", irErr:"أخطاء مانعة", irRefs:"عناصر مرجعية للمعالجة",
     irRefsH:"لا يُنشأ شيء دون اختياركم. لا ينشئ الاستيراد أبدا رزنامة أو ملف صلاحيات: اختاروا عنصرا موجودا أو اتركوه فارغا.",
     irChoisir:"— للمعالجة —", irVide:"عدم التعبئة", irIgnorer:"تجاهل العمود", irCreerX:"إنشاء «{v}»", irCreerChamp:"إنشاء الحقل الخاص «{v}» — إدخال حر", irCreerChampL:"إنشاء الحقل الخاص «{v}» — قائمة قيم الملف", irTousChamps:"إنشاء كل الأعمدة غير المعروفة كحقول خاصة ({n})", irTousChampsH:"يُقترح النوع (إدخال حر أو قائمة) حسب قيم الملف؛ ويمكن تغييره لكل عمود ثم في الإعدادات > الحقول.",
@@ -51,7 +51,9 @@ function irAnalyse(){
   w.lignes.forEach(r=>{ const o = impLigne(r); if (!o.MATRICULE || (w.hors||{})[o.MATRICULE]) return;
     Object.keys(IR_COL).forEach(ty=>{ const v = irNorm(o[IR_COL[ty]]); if (v && !IR_EXIST[ty](v)) R[ty].add(v); });
     const neuf = !mats.has(o.MATRICULE), oui = /^(1|o|oui|y|yes|x|نعم)$/i.test(irNorm(o.COMPTE));
-    if ((oui || (auto && neuf && irNorm(o.COMPTE) === "")) && !(db.users||[]).some(u=>u.login === o.MATRICULE)) R.comptes++; });
+    if ((oui || (auto && neuf && irNorm(o.COMPTE) === "")) && !(db.users||[]).some(u=>u.login === o.MATRICULE)){ R.comptes++;
+      const pv = irNorm(o.PROFIL), d = pv ? irDecision("profil", pv) : null, pid = pv ? (IR_EXIST.profil(pv) || (d && d.m === "ex" ? d.id : null)) : null;
+      if (pid && irProfilSensible((db.profils||[]).find(p=>p.id === pid))) R.profSens = (R.profSens || 0) + 1; } });
   (w.entetes||[]).forEach((h, i)=>{ if (irNorm(h) && !w.map[i]) R.cols.push({i, nom:irNorm(h)}); });
   return R;
 }
@@ -88,7 +90,8 @@ function htmlImpRefs(){ irInit();
   const kv = (l, n, warn) => '<div class="fw-kpi" style="--kc:'+(warn && n ? "#b45309" : "#0f766e")+'"><div class="v">'+n+'</div><div class="l">'+esc(l)+'</div></div>';
   let h = '<div class="fw-card fw-u-p-lg" style="margin:12px 0"><div class="fw-sec" style="margin-top:0">'+esc(t.irSynth)+'</div><div class="fw-kpis">'+
     kv(t.irCols, R.cols.length, 1)+kv(t.irSites, R.site.size, 1)+kv(t.irDepts, R.dept.size, 1)+kv(t.irCals, R.cal.size, 1)+
-    (R.profil.size ? kv(t.irProfils, R.profil.size, 1) : "")+kv(t.irComptes, R.comptes)+'</div>';
+    (R.profil.size ? kv(t.irProfils, R.profil.size, 1) : "")+kv(t.irComptes, R.comptes)+'</div>'+
+    (R.profSens ? '<div class="fw-note" role="alert" style="margin-top:8px">'+esc(t.irProfSens.replace("{n}", R.profSens))+'</div>' : "");
   const lignes = [];
   ["site", "dept", "cal", "profil"].forEach(ty=>R[ty].forEach(v=>lignes.push('<tr><td class="fw-sm">'+esc({site:t.site, dept:t.dept, cal:t.calendar, profil:t.profil}[ty])+'</td><td class="fw-mono fw-sm">'+esc(v)+'</td><td>'+irSelect(ty, v)+'</td></tr>')));
   R.cols.forEach(x=>{ const d = ((w.dec||{}).col||{})[x.i] || {}; lignes.push('<tr><td class="fw-sm">'+esc(t.colonne||"Colonne")+'</td><td class="fw-mono fw-sm">'+esc(x.nom)+'</td><td>'+
@@ -135,10 +138,15 @@ function irCreerChamps(){ irInit();
     c.options = c.options.concat(neuves); w.crees.push((t.champs||"Champ")+" : "+c.nom+" + "+neuves.join(", ")); });
 }
 /* comptes demandés par ligne (colonne Créer compte), profil existant seulement */
+function irProfilSensible(pr){ if (!pr) return false; const d = pr.droits || {}; return pr.niveauMenu === "admin" || d.SYS === "saisie" || d.SYS === "validation" || d.SYS === "config"; }
 function irComptes(e, o){
   const oui = /^(1|o|oui|y|yes|x|نعم)$/i.test(irNorm(o.COMPTE)), non = /^(0|n|non|no|لا)$/i.test(irNorm(o.COMPTE));
   if (non || !oui) return 0; const r = creerCompteEmploye(e); if (!r || !r.u) return 0;
-  const pid = irNorm(o.PROFIL) ? irResoudre("profil", o.PROFIL) : null; if (pid) r.u.profilId = pid;
+  const pid = irNorm(o.PROFIL) ? irResoudre("profil", o.PROFIL) : null;
+  /* correctif 19 : un profil d'administration (niveau admin ou droit Système en écriture) n'est jamais attribué par un
+     import : le compte créé garde le profil par défaut, l'administrateur l'élève ensuite à la main (un fichier pouvait
+     créer des administrateurs dont le mot de passe provisoire était le matricule) */
+  if (pid){ const pr = (db.profils || []).find(p=>p.id === pid); if (irProfilSensible(pr)){ ui.imp.profRefuses = (ui.imp.profRefuses || 0) + 1; } else r.u.profilId = pid; }
   return 1;
 }
 function irMemoriser(){
