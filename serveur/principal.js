@@ -22,6 +22,7 @@ const PLANIFICATEUR = require("./planificateur.js");
 const PLAN = PLANIFICATEUR.creer({journal:m=>journal(m), enveloppe:fn=>(B && B.enTravail) ? B.enTravail(fn) : fn()});
 BD.ajouterModule(VISAGES);
 const BIOSYNC = require("./biosync.js");
+const ACCES = require("./acces.js");
 BD.ajouterModule(BIOSYNC);                                  /* v56.24 : file unique de synchronisation biométrique */                                  /* table chiffrée des visages (sauvegardée avec le reste) */
 const PARTITIONNEMENT = require("./partitionnement.js");
 let PART = null, PART_PAUSE_AVANT = false;
@@ -1724,6 +1725,52 @@ async function traiter(req, res){
       }
       try { await K.invalider(touches, []); } catch(e){ journal("invalidation : "+e.message); }
       await audit(C.login, "calendriers.masse", ecrits+" salarié(s) → « "+dst.nom+" » à partir du "+d+(conflits ? " ; "+conflits+" conflit(s)" : ""), ip);
+      return json(res, 200, {ok:true, modifies:ecrits, conflits, ignores:Array.from(ignores)});
+    }
+    /* correctif 5 : affectation des droits d'accès en masse côté serveur (Contrôle d'accès › Accès). L'écran filtrait les
+       salariés chargés dans le navigateur : en grand effectif il n'en trouvait presque aucun. Même sélection que l'écran
+       (sites, services avec sous-services, champs à la date d'effet, zone actuelle, sortis) sur tout le périmètre ;
+       « appliquer » enregistre par lots de 500 via la synchronisation (droits, périmètre, versions, audit, lecteurs). */
+    if (p === "/api/v1/employes/acces-masse" && req.method === "POST"){
+      const b = await corpsJson(req), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
+      if (!admin && !PERIM.peutEcrire(P.profil, "emps")) return erreur(res, 403, "Droit de modification des salariés requis.");
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(b.from || "") ? b.from : aujourdhui();
+      const zone = (ref.zones || []).find(z=>z.id === b.zoneDst), planDst = String(b.planDst || "");
+      const plan = planDst === "aucun" ? {id:"aucun", nom:"aucun accès"} : (ref.aplans || []).find(x=>x.id === planDst);
+      if (b.appliquer && (!zone || !plan)) return erreur(res, 400, "Zone ou plan d'accès introuvable.");
+      const AC = ACCES.contexte(ref), norm = v=>v || "aucun";
+      const valA = (e, code, k) => { const h = ((e.hist || {})[code] || []).slice().sort((x, y)=>String(x.d).localeCompare(String(y.d))); let v = ""; h.forEach(x=>{ if (x.d <= k) v = x.v; }); return v; };
+      const sousArbre = id => { const o = [id]; for (let i = 0; i < o.length; i++) (ref.depts || []).forEach(x=>{ if (x.parent === o[i] && o.indexOf(x.id) < 0) o.push(x.id); }); return o; };
+      const sites = Array.isArray(b.sites) ? b.sites.map(String) : [], depts = new Set([].concat(...(Array.isArray(b.depts) ? b.depts : []).map(x=>sousArbre(String(x)))));
+      const filtres = b.filtres && typeof b.filtres === "object" ? b.filtres : {};
+      const pop = (await D.employes()).filter(e=>{
+        if (P.set !== null && !P.set.has(String(e.mat))) return false;
+        if (!b.sortis && e.sortie && e.sortie < d) return false;
+        if (sites.length && sites.indexOf(e.siteId) < 0) return false;
+        if (depts.size && !depts.has(e.deptId)) return false;
+        for (const c in filtres) if (filtres[c] && valA(e, c, d) !== filtres[c]) return false;
+        if (b.zoneSrc && !AC.autorise(e, String(b.zoneSrc), d)) return false;
+        return true;
+      });
+      const aModifier = zone && plan ? pop.filter(e=>norm(ACCES.planAt(e, zone.id, d)) !== plan.id) : [];
+      const nomPlan = id => !id || id === "aucun" ? "" : ((ref.aplans || []).find(x=>x.id === id) || {}).nom || "?";
+      const zonesA = e => (ref.zones || []).filter(z=>AC.autorise(e, z.id, d)).map(z=>z.nom);
+      if (!b.appliquer) return json(res, 200, {total:pop.length, aModifier:aModifier.length,
+        apercu:pop.slice(0, 60).map(e=>({id:e.id, mat:e.mat, nom:e.nom, prenom:e.prenom, deptId:e.deptId, siteId:e.siteId, zones:zonesA(e),
+          planActuel:zone ? nomPlan(ACCES.planAt(e, zone.id, d)) : "", deja:!!(zone && plan) && norm(ACCES.planAt(e, zone.id, d)) === plan.id}))});
+      let ecrits = 0, conflits = 0; const ignores = new Set();
+      for (let i = 0; i < aModifier.length; i += 500){
+        const lot = aModifier.slice(i, i + 500).map(e=>{
+          const x = JSON.parse(JSON.stringify(e)), l = Array.isArray(x.acces) ? x.acces : [], j = l.findIndex(z=>z && z.zoneId === zone.id && z.from === d);
+          if (j >= 0) l[j].planId = plan.id; else l.push({zoneId:zone.id, planId:plan.id, from:d});
+          l.sort((y, z)=>y.from < z.from ? -1 : 1); x.acces = l;
+          return x;
+        });
+        const r = await D.synchroniser(C.login, {colls:{emps:{put:lot}}}, {admin});
+        if (!r.ok){ (r.ignores || []).forEach(z=>ignores.add(z)); break; }
+        ecrits += r.ecrits || 0; conflits += (r.conflits || []).length; (r.ignores || []).forEach(z=>ignores.add(z));
+      }
+      await audit(C.login, "acces.masse", ecrits+" salarié(s) → zone « "+zone.nom+" » : "+(plan.id === "aucun" ? "accès retiré" : "plan « "+plan.nom+" »")+" à partir du "+d+(conflits ? " ; "+conflits+" conflit(s)" : ""), ip);
       return json(res, 200, {ok:true, modifies:ecrits, conflits, ignores:Array.from(ignores)});
     }
     /* 56.33.11 : matricule, badge et CIN déjà attribués (tout le personnel ; l'autre salarié n'est pas nommé) */

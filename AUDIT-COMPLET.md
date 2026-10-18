@@ -1049,3 +1049,44 @@ règle effective au 01/08/2027, aucune erreur JavaScript ; `node --check` sur le
 
 Livraison : FIWAKTI-56.33.11-correctif-4.zip (cumulatif : app.js, moteur.js, calcul.js, donnees.js — contient les
 correctifs 2 et 3). Au premier démarrage, le changement de moteur déclenche le recalcul des journées en arrière-plan.
+
+## Correctif 5 — Contrôle d'accès (Accès, Zones, Plages d'accès, Plans d'accès)
+
+Analyse des 4 écrans du menu, de l'onglet « Accès » de la fiche salarié, de l'envoi des utilisateurs aux appareils
+(`pointeuses.js`) et de la synchronisation automatique (`biosync.js`).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | **Les droits d'accès n'étaient jamais appliqués aux lecteurs de porte** : utilisateurs envoyés selon le site (ou les lecteurs autorisés de la fiche). Un salarié sans droit, ou réglé sur « aucun accès », était enregistré sur le lecteur et ouvrait la porte | **critique** | nouveau `serveur/acces.js` (même règle que l'écran) : un lecteur « porte » rattaché à une porte d'une zone ne reçoit que les salariés autorisés dans la zone ce jour-là ; appliqué à l'envoi manuel et à la synchronisation automatique |
+| 2 | Retrait d'un droit d'accès sans effet sur les lecteurs (la synchronisation ne réagissait qu'au site, aux lecteurs autorisés, à la sortie, au badge) | **critique** | changement des droits d'accès → retrait (prioritaire) ou envoi sur les lecteurs concernés |
+| 3 | Droit daté (début ou retrait à une date future) jamais appliqué ce jour-là | **haute** | étape quotidienne du cycle de synchronisation (rattrapage des jours manqués) |
+| 4 | Accès › « Retirer l'accès » en masse impossible : bouton Appliquer toujours grisé (le plan « aucun » n'était pas reconnu) | **haute** | retrait applicable ; « aucun droit » et « aucun accès » traités de la même façon (le nombre « à modifier » n'était plus gonflé) |
+| 5 | Grand effectif : affectation en masse limitée aux salariés chargés dans la page | **haute** | route serveur `POST /api/v1/employes/acces-masse` (aperçu et application sur tout le périmètre, lots de 500, droits, audit « acces.masse ») |
+| 6 | Suppression d'une zone, d'un plan ou d'une plage utilisés : simple avertissement, droits orphelins ; **un plan supprimé laissait le salarié autorisé** | **haute** | suppression refusée (zone : salariés ou lecteurs rattachés ; plan : salariés ; plage : plans) ; un plan inexistant ou qui n'ouvre aucune plage ne donne plus accès |
+| 7 | Plages d'accès : chevauchements et durée nulle acceptés | moyenne | refusés (plages de nuit gérées) |
+| 8 | Fiche salarié : droit sans zone, sans date, plan inexistant ou deux lignes même zone même date acceptés (droit ambigu) | moyenne | refusés |
+| 9 | Zones : site facultatif, portes sans nom ou en double ; noms de zones, plans et plages en double | basse | contrôlés |
+| 10 | Retirer une porte d'une zone détachait ses lecteurs immédiatement, même si l'on annulait | basse | lecteurs détachés à l'enregistrement de la zone |
+| 11 | Alerte « terminaux actifs sans porte » : comptait aussi les pointeuses de simple pointage | basse | lecteurs de porte et mixtes seulement |
+| 12 | Effectifs par zone et par plan comptés sur les salariés chargés (faux en grand effectif) ; impact d'une plage repéré par sous-chaîne (« ap1 » trouvait « ap10 ») | basse | comptage serveur ; identifiant exact |
+
+Vérifié : vraie base SQLite, appareils simulés — avant : les 4 salariés (avec droit, sans droit, « aucun accès », plan
+sans plage) envoyés sur le lecteur de porte, retrait et droit daté sans effet ; après : seul le salarié autorisé, retrait
+envoyé, droit du jour appliqué. Serveur réel installé (licence de test, clé de test dans une copie uniquement) :
+`acces-masse` — aperçu sur tout le personnel, « Retirer l'accès » appliqué à 5 salariés et relu en base, plan inexistant
+refusé, audit. Moteur réel : 12 contrôles écran avant / après ; aucune fiche du jeu de démonstration bloquée à tort ;
+compteurs de temps identiques au correctif 4. Chromium : retrait en masse, suppression refusée, chevauchement et droit
+sans zone refusés à l'enregistrement, 4 écrans sans erreur JavaScript. Démonstration reconstruite.
+
+Limites (à traiter avec le matériel, non modifié) :
+- **Les plages horaires des plans ne sont pas transmises aux lecteurs** : un salarié autorisé dans une zone l'est
+  24 h/24 sur l'appareil. Envoyer les plages (« time zones » ZKTeco, plannings Hikvision / BioStar 2) demande un
+  développement par pilote et des essais sur les appareils réels.
+- **L'anti-passback** de la zone est enregistré mais n'est pas appliqué par FIWAKTI : il se règle sur le contrôleur.
+- Lecteurs « mixtes » (pointage et porte) : non filtrés par les droits d'accès, pour ne pas empêcher le pointage. Pour
+  restreindre une porte, utiliser un lecteur de type « porte ».
+- Après installation, resynchroniser chaque lecteur de porte (si la synchronisation inclut les terminaux d'accès)
+  pour retirer les salariés enregistrés à tort avant le correctif.
+
+Livraison : FIWAKTI-56.33.11-correctif-5.zip (cumulatif : app.js, moteur.js, calcul.js, donnees.js, principal.js,
+pointeuses.js, biosync.js, nouveau acces.js — contient les correctifs 2 à 4).

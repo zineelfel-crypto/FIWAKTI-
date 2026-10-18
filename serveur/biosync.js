@@ -13,6 +13,7 @@
      (empreinte tronquée) et résultat. */
 "use strict";
 const crypto = require("crypto");
+const ACCES = require("./acces.js");
 const COLS = "id TEXT PRIMARY KEY, cle TEXT NOT NULL, mat TEXT, terminal_id TEXT, action TEXT NOT NULL, priorite INTEGER NOT NULL DEFAULT 5, statut TEXT NOT NULL, cree TEXT NOT NULL, " +
   "started_at TEXT, finished_at TEXT, essais INTEGER NOT NULL DEFAULT 0, max_essais INTEGER NOT NULL DEFAULT 5, next_retry_at TEXT, locked_at TEXT, worker_id TEXT, version_bio TEXT, source TEXT, detail TEXT";
 const DDL = [
@@ -46,7 +47,7 @@ function creer(o){
   const maint = () => new Date().toISOString(), auj = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10), nid = () => "bq-"+crypto.randomBytes(8).toString("hex");
   /* rend la main à la boucle d'événements régulièrement (base intégrée synchrone) : l'interface reste fluide */
   let PAS = 0; const ceder = () => (++PAS % 20 === 0) ? new Promise(r=>setImmediate(r)) : null;
-  let CFG = null, BLOQUES = new Set(), CYCLE_EN_COURS = null;
+  let CFG = null, BLOQUES = new Set(), CYCLE_EN_COURS = null, AC = ACCES.contexte({});
   async function meta(k, v){ if (v === undefined){ const r = await B.get("SELECT v FROM meta WHERE k=?", k); return r ? JSON.parse(r.v) : null; }
     await B.run("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", k, JSON.stringify(v)); }
   async function config(){
@@ -74,13 +75,16 @@ function creer(o){
   /* ---------- appareils concernés (pointage et accès : même règle) ---------- */
   async function appareils(cfg){
     const ref = await D.referentielLecture() || {}, acces = !!(o.moduleActif && o.moduleActif("FW-Acces"));
+    AC = ACCES.contexte(ref);
     return (ref.terms||[]).filter(T=>T.actif !== false && PT().piloteDe(T) && !(T.usage === "door" && !(cfg.inclureTerminauxAcces && acces)));
   }
   /* périmètre d'un salarié : appareils auxquels il est rattaché (rds) ; sinon ceux de son site — exactement la règle
      des listes envoyées (utilisateursPour), vue depuis le salarié */
-  function perimetre(e, terms, avecRat){
+  /* correctif 5 : un lecteur de porte rattaché à une zone ne concerne que les salariés autorisés dans cette zone à la date (droits d'accès) */
+  function perimetre(e, terms, avecRat, jour){
     if (!e || (e.sortie && e.sortie < auj())) return [];
-    return terms.filter(T=>avecRat.has(T.id) ? (e.rds||[]).indexOf(T.id) >= 0 : (!T.siteId || e.siteId === T.siteId)).map(T=>T.id);
+    const d = jour || auj();
+    return terms.filter(T=>(avecRat.has(T.id) ? (e.rds||[]).indexOf(T.id) >= 0 : (!T.siteId || e.siteId === T.siteId)) && AC.admis(e, T, d)).map(T=>T.id);
   }
   const rattaches = emps => { const s = new Set(); emps.forEach(e=>(e.rds||[]).forEach(r=>s.add(r))); return s; };
   const capable = (T, action) => { const P = PT().piloteDe(T); return !!(P && (P.capacites || []).indexOf(ACTION_PILOTE[action] || action) >= 0); };
@@ -139,7 +143,7 @@ function creer(o){
     /* 56.33.11 : badge, code ou matricule changé — l'ancien identifiant est retiré des appareils et le nouveau envoyé
        (avant : carte perdue toujours valide sur les appareils en mode « badge », nouvelle carte jamais envoyée) */
     const ident = ancien && (String(a0(ancien).badge||"") !== String(nouveau.badge||"") || String(a0(ancien).pin||"") !== String(nouveau.pin||"") || String(a0(ancien).mat||"") !== String(nouveau.mat||""));
-    const a = ancien || {}, n = nouveau, change = ident || a.siteId !== n.siteId || JSON.stringify(a.rds||[]) !== JSON.stringify(n.rds||[]) || (a.sortie||"") !== (n.sortie||"");
+    const a = ancien || {}, n = nouveau, change = ident || a.siteId !== n.siteId || JSON.stringify(a.rds||[]) !== JSON.stringify(n.rds||[]) || (a.sortie||"") !== (n.sortie||"") || JSON.stringify(a.acces||[]) !== JSON.stringify(n.acces||[]);
     if (!change) return;
     const terms = await appareils(cfg), emps = await D.employes(), rat = rattaches(emps);
     const avant = new Set(ancien ? perimetre(a, terms, rat) : []), apres = new Set(perimetre(n, terms, rat));
@@ -224,6 +228,28 @@ function creer(o){
      déclenché que par la modification de la fiche : avec une date de sortie future, rien ne se passait le jour venu.
      Une fois par salarié et par date de sortie ; au plus 500 par cycle (reprise d'un historique au premier passage). */
   let SORTIS = null;
+  /* correctif 5 : droits d'accès datés — un droit qui prend effet (ou un retrait) à une date future est appliqué aux lecteurs
+     de porte ce jour-là (rattrapage des jours manqués si le serveur était arrêté) */
+  async function accesDates(cfg){
+    const a = auj(), dernier = await meta("biometrie_acces_jour"), res = {salaries:0};
+    if (dernier === a) return res;
+    const veille = (()=>{ const x = new Date(a+"T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); })();
+    const depuis = dernier && dernier < a ? dernier : veille, terms = await appareils(cfg);
+    if (terms.some(T=>AC.zoneDe(T))){
+      const emps = await D.employes(), rat = rattaches(emps);
+      for (const e of emps){
+        if (!(e.acces||[]).some(x=>x && x.from > depuis && x.from <= a)) continue;
+        await ceder();
+        const avant = new Set(perimetre(e, terms, rat, depuis)), apres = new Set(perimetre(e, terms, rat, a));
+        const retirer = Array.from(avant).filter(t=>!apres.has(t)), ajouter = Array.from(apres).filter(t=>!avant.has(t));
+        if (retirer.length) await enfilerRetrait(e.mat, retirer, "acces-date");
+        if (ajouter.length && !BLOQUES.has(String(e.mat))) await enfilerDiffusion(e.mat, ajouter, "acces-date");
+        if (retirer.length || ajouter.length) res.salaries++;
+      }
+    }
+    await meta("biometrie_acces_jour", a);
+    return res;
+  }
   async function traiterSortants(cfg){
     if (!SORTIS) SORTIS = new Map((await B.all("SELECT mat, sortie FROM bio_sorties")).map(r=>[String(r.mat), r.sortie]));
     const a = auj(), emps = await D.employes(), res = {sortants:0};
@@ -352,6 +378,8 @@ function creer(o){
         rapport.blocages = await recalculerBlocages(cfg);
         /* 2 bis. salariés sortis : retrait de tous les appareils */
         rapport.sortants = (await traiterSortants(cfg)).sortants;
+        /* 2 ter. droits d'accès qui prennent effet aujourd'hui (lecteurs de porte) */
+        rapport.accesDates = (await accesDates(cfg)).salaries;
         /* 3. traitement borné de la file */
         await traiter(cfg, rapport);
         /* 4. purge */

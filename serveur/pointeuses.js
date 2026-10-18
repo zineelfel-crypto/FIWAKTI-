@@ -10,6 +10,7 @@
    - Les secrets (mots de passe, clés de communication) restent sur le serveur. */
 "use strict";
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawn } = require("child_process");
+const ACCES = require("./acces.js");
 const ACTIONS = ["diagnostic","info","collecte","utilisateurs-lire","utilisateurs-envoyer","nettoyage","synchro-heure","redemarrer","effacer-commandes","visages-lire","visages-envoyer","utilisateurs-retirer"];
 
 function creer(o){
@@ -253,7 +254,9 @@ function creer(o){
        accès), y compris pour un envoi manuel ; sous-ensemble ciblé (synchronisation différentielle) si demandé */
     const bloques = o.bloques ? o.bloques() : null, sous = mats ? new Set(mats.map(String)) : null;
     const rat = emps.filter(e=>(e.rds||[]).indexOf(T.id) >= 0);
-    const l = (rat.length ? rat : emps.filter(e=>!T.siteId || e.siteId === T.siteId)).filter(e=>!(e.sortie && e.sortie < auj) && !(bloques && bloques.has(String(e.mat))) && !(sous && !sous.has(String(e.mat))));
+    /* correctif 5 : lecteur de porte rattaché à une zone → seuls les salariés autorisés dans cette zone aujourd'hui (avant : tout le site) */
+    const AC = ACCES.contexte(await D.referentielLecture() || {});
+    const l = (rat.length ? rat : emps.filter(e=>!T.siteId || e.siteId === T.siteId)).filter(e=>!(e.sortie && e.sortie < auj) && !(bloques && bloques.has(String(e.mat))) && !(sous && !sous.has(String(e.mat))) && AC.admis(e, T, auj));
     return l.map(e=>({id:String(mode === "badge" ? (e.badge||e.mat) : mode === "pin" ? (e.pin||e.mat) : e.mat), nom:((e.prenom||"")+" "+(e.nom||"")).trim(), carte:e.badge||"", pin:""}));
   }
   /* ---------- v56.5 : visages ---------- */
