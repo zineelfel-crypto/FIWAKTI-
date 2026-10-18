@@ -1159,3 +1159,23 @@ Rappel (correctif 5) : les plages ne sont pas transmises aux lecteurs ; une modi
 plannings sans date d'effet (pas d'historique des horaires).
 
 Livraison : FIWAKTI-56.33.11-correctif-8.zip (cumulatif : correctifs 2 à 7 inclus).
+
+## Correctif 9 — Contrôle d'accès › Plannings d'accès
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Jour rattaché à une plage supprimée : la liste affichait « Aucun accès », mais l'ancienne plage restait dans les données et était réenregistrée telle quelle | moyenne | « Plage supprimée — choisissez une plage » affiché ; enregistrement refusé tant qu'un jour pointe vers une plage disparue |
+| 2 | Planning n'ouvrant aucun jour accepté (ex. nouveau planning laissé à « Aucun accès » partout) : affecté à des salariés, il ne donne aucun accès sans que rien ne l'indique | moyenne | refusé, avec renvoi vers « Aucun accès » dans les droits |
+| 3 | Colonne « Employés » : salariés ayant eu le planning un jour, même remplacé ou retiré | basse | salariés à qui le planning s'applique aujourd'hui (critère serveur `planAuj` en grand effectif) |
+| 4 | **Serveur** : aucune protection des plannings par l'API — suppression d'un planning encore utilisé, plage inexistante, aucun jour ouvert, planning sans nom | **haute** | `controleAplans` dans `donnees.js` : refusés |
+| 5 | Modification d'un planning appliquée sans date d'effet à tous ses salariés, sans que l'écran le dise | basse | aide de l'écran complétée |
+
+Vérifié : Chromium, démonstration du correctif 8 puis nouvelle — plage supprimée (affichée « Aucun accès » et
+enregistrée → signalée et refusée), planning vide (créé → refusé), effectif après retrait (5 → 4), aucune erreur
+JavaScript ; 35 fiches de démonstration sans erreur. Serveur réel : suppression du planning utilisé (14 salariés), plage
+inexistante, planning sans jour ouvert refusés ; planning valide accepté ; comptage `planAuj`.
+
+Le menu Contrôle d'accès est ainsi entièrement repris (correctifs 5 à 9). Limites matérielles inchangées : plages non
+transmises aux lecteurs, anti-passback réglé sur le contrôleur.
+
+Livraison : FIWAKTI-56.33.11-correctif-9.zip (cumulatif : correctifs 2 à 8 inclus).

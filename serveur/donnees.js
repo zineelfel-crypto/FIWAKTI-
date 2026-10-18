@@ -232,6 +232,8 @@ function creer(B, PERIM){
         /* correctif 7 : zones et portes — pas de zone supprimée encore utilisée, pas de porte retirée avec des lecteurs, identifiants de porte uniques */
         if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
         /* correctif 8 : plages d'accès — pas de plage supprimée encore utilisée par un planning, intervalles valides */
+        /* correctif 9 : plannings d'accès — pas de planning supprimé encore référencé, plages existantes, au moins un jour ouvert */
+        if (k === "aplans"){ const motif = controleAplans(ref.aplans || [], r.aplans || [], Array.isArray(r.aplages) ? r.aplages : (ref.aplages || []), await employes()); if (motif){ ignores.push("aplans ("+motif+")"); continue; } }
         if (k === "aplages"){ const motif = controleAplages(ref.aplages || [], r.aplages || [], Array.isArray(r.aplans) ? r.aplans : (ref.aplans || [])); if (motif){ ignores.push("aplages ("+motif+")"); continue; } }
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
@@ -440,6 +442,18 @@ function controleCals(avant, apres, ref){
     for (const k of cles) if (JSON.stringify(jour(a, k)) !== JSON.stringify(jour(n, k))) return "exception du "+k+" en période clôturée";
     const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
     for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
+  }
+  return "";
+}
+function controleAplans(avant, apres, plages, emps){
+  const ids = new Set((apres||[]).map(p=>p && p.id));
+  for (const p of avant||[]) if (p && !ids.has(p.id)){ const n = (emps||[]).filter(e=>(e.acces||[]).some(a=>a && (a.planId === p.id || (a.hist||[]).some(h=>h && h.planId === p.id)))).length; if (n) return "suppression du planning « "+p.nom+" » encore utilisé par "+n+" salarié(s)"; }
+  const parId = new Map((avant||[]).map(p=>[p && p.id, p])), pl = new Map((plages||[]).map(a=>[a && a.id, a]));
+  for (const p of apres||[]){ if (!p) continue; const v = parId.get(p.id); if (v && JSON.stringify(v) === JSON.stringify(p)) continue;
+    if (!String(p.nom||"").trim()) return "planning sans nom";
+    const jours = [0,1,2,3,4,5,6].map(i=>(p.hebdo||{})[i]).concat([p.ferie]);
+    if (jours.some(x=>x && x !== "aucun" && !pl.has(x))) return "planning « "+p.nom+" » : plage inexistante";
+    if (!jours.some(x=>x && x !== "aucun" && ((pl.get(x)||{}).iv||[]).length)) return "planning « "+p.nom+" » : aucun jour ouvert";
   }
   return "";
 }
