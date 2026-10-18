@@ -36,7 +36,10 @@ Object.assign(L.fr, {pMois:"Mois en cours", pMoisPrec:"Mois précédent", pAnnee
   biometrie:"Règles biométriques", bloques:"Salariés bloqués (absence)", retraitsAtt:"Retraits en attente", retraitsEch:"Retraits en échec",
   ventilation:"Comparer par", vSite:"Site", vDept:"Service", vFonction:"Fonction", effectif:"Effectif", groupe:"Groupe", plusGroupes:"{n} groupes au total : les 300 plus grands sont affichés.",
   partage:"Enregistrer pour tous les utilisateurs", partageOk:"Objectifs et indicateurs enregistrés pour tous les utilisateurs.", objEntreprise:"Objectif de l'entreprise : {v}",
-  cache:"depuis le cache (30 min)", termine:L.fr.termine||"Terminé"});
+  cache:"depuis le cache (30 min au plus, mis à jour dès qu'une donnée change)", termine:L.fr.termine||"Terminé",
+  absenteisme:"Taux d'absence non justifiée", heuresSup:"Heures supplémentaires (selon les règles)", depassements:"Dépassements d'horaire bruts", absTotal:"Jours d'absence saisis",
+  quantite:"Quantité", uJ:"j", uH:"h", absSante:"Raison de santé (regroupé)", absSanteH:"Raison de santé, en heures (regroupé)", absNote:"Absences saisies (classes absence et délégation) ; demi-journée = 0,5 j ; les motifs de santé sont regroupés.",
+  masqueN:"masqué (moins de {n} salariés)", indicateur:"Indicateur", valeur:"Valeur"});
 Object.assign(L.en, {pMois:"This month", pMoisPrec:"Last month", pAnnee:"Year to date", pPerso:"Custom dates", du:"From", au:"To",
   ferTrav:"Public holidays worked", hFer:"Hours on public holidays", repTrav:"Rest days worked", hRep:"Hours on rest days", oublis:"Missed clockings", anomalies:"Days with anomalies",
   absences:"Absences by type", absTotal:"Absence days recorded", jours:"Days", type:"Type",
@@ -45,7 +48,10 @@ Object.assign(L.en, {pMois:"This month", pMoisPrec:"Last month", pAnnee:"Year to
   biometrie:"Biometric rules", bloques:"Employees blocked (absence)", retraitsAtt:"Pending removals", retraitsEch:"Failed removals",
   ventilation:"Compare by", vSite:"Site", vDept:"Department", vFonction:"Job", effectif:"Headcount", groupe:"Group", plusGroupes:"{n} groups in total: the 300 largest are shown.",
   partage:"Save for all users", partageOk:"Targets and indicators saved for all users.", objEntreprise:"Company target: {v}",
-  cache:"from cache (30 min)", termine:L.en.termine||"Done"});
+  cache:"from cache (30 min at most, refreshed as soon as data changes)", termine:L.en.termine||"Done",
+  absenteisme:"Unjustified absence rate", heuresSup:"Overtime (per rules)", depassements:"Raw schedule overruns", absTotal:"Absence days recorded",
+  quantite:"Quantity", uJ:"d", uH:"h", absSante:"Health reasons (grouped)", absSanteH:"Health reasons, in hours (grouped)", absNote:"Recorded absences (absence and delegation classes); half day = 0.5 d; health reasons are grouped.",
+  masqueN:"hidden (fewer than {n} employees)", indicateur:"Indicator", valeur:"Value"});
 Object.assign(L.ar, {pMois:"الشهر الحالي", pMoisPrec:"الشهر السابق", pAnnee:"السنة الحالية", pPerso:"تواريخ مختارة", du:"من", au:"إلى",
   ferTrav:"أيام عطل مشتغلة", hFer:"ساعات أيام العطل", repTrav:"أيام راحة مشتغلة", hRep:"ساعات أيام الراحة", oublis:"تسجيلات منسية", anomalies:"أيام بها خلل",
   absences:"الغيابات حسب النوع", absTotal:"أيام الغياب المسجلة", jours:"الأيام", type:"النوع",
@@ -54,9 +60,13 @@ Object.assign(L.ar, {pMois:"الشهر الحالي", pMoisPrec:"الشهر ال
   biometrie:"قواعد البيومترية", bloques:"أجراء محجوبون (غياب)", retraitsAtt:"عمليات حذف معلقة", retraitsEch:"عمليات حذف فاشلة",
   ventilation:"المقارنة حسب", vSite:"الموقع", vDept:"المصلحة", vFonction:"الوظيفة", effectif:"العدد", groupe:"المجموعة", plusGroupes:"{n} مجموعة في المجموع: تُعرض أكبر 300.",
   partage:"حفظ لجميع المستخدمين", partageOk:"تم حفظ الأهداف والمؤشرات لجميع المستخدمين.", objEntreprise:"هدف المؤسسة: {v}",
-  cache:"من الذاكرة المؤقتة (30 د)", termine:L.ar.termine||"تم"});
+  cache:"من الذاكرة المؤقتة (30 د على الأكثر، تُحدَّث عند تغيّر المعطيات)", termine:L.ar.termine||"تم",
+  absenteisme:"نسبة الغياب غير المبرر", heuresSup:"الساعات الإضافية (حسب القواعد)", depassements:"تجاوزات التوقيت الخام", absTotal:"أيام الغياب المسجلة",
+  quantite:"الكمية", uJ:"ي", uH:"س", absSante:"أسباب صحية (مجمّعة)", absSanteH:"أسباب صحية بالساعات (مجمّعة)", absNote:"الغيابات المسجلة (أصناف الغياب والنيابة)؛ نصف يوم = 0,5 ي؛ الأسباب الصحية مجمّعة.",
+  masqueN:"مخفي (أقل من {n} أجراء)", indicateur:"المؤشر", valeur:"القيمة"});
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
-const jour = n => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+/* correctif 17 : jour LOCAL (toISOString donnait la date UTC : 31 jours au lieu de 30 après minuit en Tunisie) */
+const jour = n => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
 const iso = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2, "0")+"-"+String(d.getDate()).padStart(2, "0");
 /* bornes de la période choisie et de la période précédente de même durée */
 function bornes(E){ const a = new Date(); let du, au = iso(a);
@@ -73,15 +83,18 @@ function charger(ctx, frais){
   if (!E.init) Object.assign(E, {init:true, per:"30", site:"", dept:"", fonction:"", F:null, D:null, axe:"site"});
   if (!E.cfg && !E.cEn){ E.cEn = true; ctx.api("api/v1/bi/config").then(j=>{ E.cfg = j; E.cEn = false; ctx.rendre(); }).catch(()=>{ E.cEn = false; E.cfg = {objectifs:{}, choix:null}; }); }
   const B = bornes(E);
-  if (E.axe && (!E.V || frais) && !E.vEn && E.D){ E.vEn = true;
-    ctx.api("api/v1/bi/ventilation?axe="+E.axe+"&du="+B.du+"&au="+B.au+filtresQ(E)+(frais ? "&frais=1" : "")).then(j=>{ E.V = j; E.vEn = false; ctx.rendre(); }).catch(()=>{ E.vEn = false; }); }
+  /* correctif 17 : chaque réponse n'est retenue que si elle correspond encore aux filtres affichés (une réponse tardive
+     de l'ancien filtre remplaçait les données du nouveau) */
+  const qv = "axe="+E.axe+"&du="+B.du+"&au="+B.au+filtresQ(E);
+  if (E.axe && (!E.V || frais) && E.vEn !== qv && E.D){ E.vEn = qv;
+    ctx.api("api/v1/bi/ventilation?"+qv+(frais ? "&frais=1" : "")).then(j=>{ if (E.vEn !== qv) return; E.V = j; E.vEn = false; ctx.rendre(); }).catch(e=>{ if (E.vEn === qv){ E.vEn = false; E.vErr = e.message; ctx.rendre(); } }); }
   if (!E.F && !E.fEn){ E.fEn = true; ctx.api("api/v1/bi/filtres").then(j=>{ E.F = j; E.fEn = false; ctx.rendre(); }).catch(()=>{ E.fEn = false; }); }
-  if ((!E.D || frais) && !E.dEn){ E.dEn = true;
-    const q = "du="+B.du+"&au="+B.au+filtresQ(E)+(frais ? "&frais=1" : "");
-    ctx.api("api/v1/bi/tableau?"+q).then(j=>{ E.D = j; E.dEn = false; ctx.rendre();
+  const q = "du="+B.du+"&au="+B.au+filtresQ(E);
+  if ((!E.D || frais) && E.dEn !== q){ E.dEn = q;
+    ctx.api("api/v1/bi/tableau?"+q+(frais ? "&frais=1" : "")).then(j=>{ if (E.dEn !== q) return; E.D = j; E.dEn = false; ctx.rendre();
       /* 56.31.1 : période précédente de même durée, pour les tendances (calcul serveur, mis en cache) */
       const qp = "du="+B.pdu+"&au="+B.pau+filtresQ(E);
-      ctx.api("api/v1/bi/tableau?"+qp).then(p=>{ E.P = p; ctx.rendre(); }).catch(()=>{}); }).catch(e=>{ E.dEn = false; ctx.flash(e.message, "err"); }); }
+      ctx.api("api/v1/bi/tableau?"+qp+(frais ? "&frais=1" : "")).then(p=>{ if (E.dEn === false && E.D === j){ E.P = p; ctx.rendre(); } }).catch(()=>{}); }).catch(e=>{ if (E.dEn === q){ E.dEn = false; E.err = e.message; ctx.flash(e.message, "err"); ctx.rendre(); } }); }
 }
 /* 56.31.1 : catalogue des indicateurs (identifiant, domaine, libellé, valeur, unité, sens favorable, seuils) */
 function indicateurs(ctx, D, P){
@@ -118,12 +131,18 @@ function ton(k, obj){ if (k.v == null) return "info"; const v = +k.v;
   if (k.seuil) return v >= k.seuil[0] ? "ok" : v >= k.seuil[1] ? "att" : "alerte";
   if (k.seuilInv) return v <= k.seuilInv[0] ? "ok" : v <= k.seuilInv[1] ? "att" : "alerte";
   return "info"; }
-const v = (x, suf) => x == null ? "—" : (typeof x === "number" ? x.toLocaleString("fr-FR") : String(x))+(suf || "");
+/* correctif 17 : nombres dans la langue de l'écran */
+let LOC = "fr-FR";
+const v = (x, suf) => x == null ? "—" : (typeof x === "number" ? x.toLocaleString(LOC) : String(x))+(suf || "");
 function bloc(ctx, titre, cartes){ return '<section class="fwb-bloc"><h2>'+ctx.esc(titre)+'</h2><div class="fwb-cartes">'+cartes.map(([l, val, aide])=>'<div class="fw-card fwb-k"><b>'+ctx.esc(val)+'</b><span>'+ctx.esc(l)+'</span>'+(aide ? '<small>'+ctx.esc(aide)+'</small>' : '')+'</div>').join("")+'</div></section>'; }
 function lignesCsv(ctx, D){
-  const l = [["Indicateur", "Valeur"]], ajout = (k, x) => l.push([k, x == null ? "" : String(x)]);
+  /* correctif 17 : en-tête dans la langue de l'écran, période et filtres, nombres au format de la langue */
+  const E = ctx.etat, F = E.F || {sites:[], depts:[]}, nomDe = (lst, id) => ((lst || []).find(x=>x.id === id) || {}).nom || id;
+  const num = x => typeof x === "number" ? (ctx.lang === "en" ? String(x) : String(x).replace(".", ",")) : String(x);
+  const l = [[T(ctx,"titre")], [T(ctx,"periode"), ctx.dateAff(D.du)+" → "+ctx.dateAff(D.au)], [T(ctx,"site"), E.site ? nomDe(F.sites, E.site) : T(ctx,"tous")], [T(ctx,"service"), E.dept ? nomDe(F.depts, E.dept) : T(ctx,"tous")], [T(ctx,"fonction"), E.fonction || T(ctx,"tous")], [],
+    [T(ctx,"indicateur"), T(ctx,"valeur")]], ajout = (k, x, u) => l.push([k, x == null ? "" : num(x)+(u ? " "+u : "")]);
   ajout(T(ctx,"actifs"), D.effectifs.actifs); ajout(T(ctx,"entrees"), D.effectifs.entrees); ajout(T(ctx,"sorties"), D.effectifs.sorties);
-  if (D.temps){ ajout(T(ctx,"tauxPresence"), D.temps.tauxPresence); ajout(T(ctx,"heuresSup"), D.temps.heuresSup); ajout(T(ctx,"absenteisme"), D.temps.tauxAbsenteisme); }
+  if (D.temps){ ajout(T(ctx,"tauxPresence"), D.temps.tauxPresence, "%"); ajout(T(ctx,"heuresSup"), D.temps.heuresSup, "h"); ajout(T(ctx,"depassements"), D.temps.depassements, "h"); ajout(T(ctx,"absenteisme"), D.temps.tauxAbsenteisme, "%"); ajout(T(ctx,"joursRetard"), D.temps.joursRetard); }
   if (D.competences){ ajout(T(ctx,"couverture"), D.competences.couverture); ajout(T(ctx,"enEcart"), D.competences.salariesEnEcart); }
   if (D.formation){ ajout(T(ctx,"heures"), D.formation.heures); ajout(T(ctx,"reussite"), D.formation.tauxReussite); ajout(T(ctx,"habExpirees"), D.formation.habilitationsExpirees); }
   if (D.evaluation){ ajout(T(ctx,"realisation"), D.evaluation.tauxRealisation); ajout(T(ctx,"noteMoyenne"), D.evaluation.noteMoyenne); }
@@ -132,12 +151,12 @@ function lignesCsv(ctx, D){
   if (D.medical && D.medical.total && !D.medical.total.masque){ const M = D.medical.total; ajout(T(ctx,"perAJour"), M.tauxPeriodiquesAJour); ajout(T(ctx,"embVisite"), M.tauxVisitesEmbauche); ajout(T(ctx,"mpDecl"), M.mpDeclarees);
     (D.medical.parService||[]).forEach(x=>{ if (!x.masque){ ajout(T(ctx,"perAJour")+" — "+x.service, x.tauxPeriodiquesAJour); ajout(T(ctx,"embVisite")+" — "+x.service, x.tauxVisitesEmbauche); ajout(T(ctx,"mpDecl")+" — "+x.service, x.mpDeclarees); } }); }
   if (D.temps && D.temps.joursFeriesTravailles !== undefined){ ajout(T(ctx,"ferTrav"), D.temps.joursFeriesTravailles); ajout(T(ctx,"hFer"), D.temps.heuresFeriees); ajout(T(ctx,"repTrav"), D.temps.joursReposTravailles); ajout(T(ctx,"hRep"), D.temps.heuresRepos); ajout(T(ctx,"oublis"), D.temps.oublisBadgeage); }
-  if (D.absences) D.absences.parType.forEach(x=>ajout(T(ctx,"absences")+" — "+x.nom, x.jours));
+  if (D.absences && !D.absences.masque) D.absences.parType.forEach(x=>ajout(T(ctx,"absences")+" — "+(x.sante ? T(ctx, x.unite === "h" ? "absSanteH" : "absSante") : x.nom), x.jours, T(ctx, x.unite === "h" ? "uH" : "uJ")));
   if (D.visiteurs){ ajout(T(ctx,"visites"), D.visiteurs.visites); ajout(T(ctx,"visReal"), D.visiteurs.realisees); }
   if (D.integration){ ajout(T(ctx,"parcours"), D.integration.parcoursEnCours); ajout(T(ctx,"tachesRetard"), D.integration.tachesEnRetard); }
   if (D.biometrie){ ajout(T(ctx,"bloques"), D.biometrie.bloques); ajout(T(ctx,"retraitsEch"), D.biometrie.retraitsEnEchec); }
   const V = ctx.etat.V; if (V && V.lignes.length){ l.push([]); l.push([T(ctx,"groupe"), T(ctx,"effectif"), T(ctx,"tauxPresence"), T(ctx,"absenteisme"), T(ctx,"heuresSup"), T(ctx,"joursRetard"), T(ctx,"accidents")]);
-    V.lignes.forEach(x=>l.push([x.nom, x.effectif, x.tauxPresence, x.absenteisme, x.heuresSup, x.joursRetard, x.accidents].map(c=>c == null ? "" : c))); }
+    V.lignes.forEach(x=>l.push(x.masque ? [x.nom, x.effectif, T(ctx,"masqueN").replace("{n}", V.seuil || 5)] : [x.nom, x.effectif, x.tauxPresence, x.absenteisme, x.heuresSup, x.joursRetard, x.accidents].map(c=>c == null ? "" : num(c)))); }
   /* cellule neutralisée : = + - @ en tête ne deviennent pas une formule dans le tableur (nombres négatifs gardés) */
   const cel = c => { let x = String(c == null ? "" : c); if (/^[=+\-@\t\r]/.test(x) && !/^-?\d+([.,]\d+)?$/.test(x)) x = "'"+x; return '"'+x.replace(/"/g, '""')+'"'; };
   return l.map(r=>r.map(cel).join(";")).join("\r\n");
@@ -157,6 +176,7 @@ FIWAKTI_MODULES.enregistrer({
   mount(ctx){ charger(ctx); },
   unmount(ctx){ if (ctx.etat.url){ URL.revokeObjectURL(ctx.etat.url); ctx.etat.url = null; } },
   render(vue, ctx){
+    LOC = ctx.lang === "en" ? "en-GB" : ctx.lang === "ar" ? "ar-TN" : "fr-FR";
     charger(ctx); const E = ctx.etat, F = E.F || {sites:[], depts:[], fonctions:[]}, D = E.D;
     const sel = (k, l, opts) => '<label class="fwb-c"><span>'+ctx.esc(l)+'</span><select data-fwmc="'+k+'">'+opts+'</select></label>';
     const opt = (val, lib, cur) => '<option value="'+ctx.esc(val)+'"'+(cur === val ? ' selected' : '')+'>'+ctx.esc(lib)+'</option>';
@@ -167,7 +187,7 @@ FIWAKTI_MODULES.enregistrer({
         sel("dept", T(ctx,"service"), opt("", T(ctx,"tous"), E.dept)+F.depts.map(s=>opt(s.id, s.nom, E.dept)).join(""))+
         sel("fonction", T(ctx,"fonction"), opt("", T(ctx,"tous"), E.fonction)+F.fonctions.map(f=>opt(f, f, E.fonction)).join(""))+
         '<button class="fw-btn" data-act="fwm:actualiser">'+ctx.esc(T(ctx,"actualiser"))+'</button>'+(D ? '<button class="fw-btn" data-act="fwm:exporter">'+ctx.esc(T(ctx,"exporter"))+'</button>' : '')+'</div>';
-    if (!D) return h+'<div class="fw-hint" aria-busy="true">'+ctx.esc(T(ctx,"chargement"))+'</div></div>';
+    if (!D) return h+(E.err ? '<div class="fw-note warn" role="alert">'+ctx.esc(E.err)+'</div>' : '<div class="fw-hint" aria-busy="true">'+ctx.esc(T(ctx,"chargement"))+'</div>')+'</div>';
     const PR = prefs(ctx), K = indicateurs(ctx, D, E.P), parId = {}; K.forEach(k=>{ parId[k.id] = k; });
     const choix = (PR.choix || (E.cfg && E.cfg.choix) || K.map(k=>k.id)).filter(id=>parId[id]);
     h += '<div class="fwb-barre"><span class="fw-hint">'+ctx.esc(E.P ? T(ctx,"vsPrec") : T(ctx,"chargementPrec"))+'</span><div class="fw-spacer"></div>'+
@@ -185,15 +205,17 @@ FIWAKTI_MODULES.enregistrer({
         '<table class="fw-tbl fwb-mois"><thead><tr><th>'+ctx.esc(T(ctx,"mois"))+'</th><th class="fw-num">'+ctx.esc(T(ctx,"tauxPresence"))+'</th><th class="fw-num">'+ctx.esc(T(ctx,"absenteisme"))+'</th><th class="fw-num">'+ctx.esc(T(ctx,"heuresSup"))+'</th></tr></thead><tbody>'+
         M.slice().reverse().map(m=>'<tr><td>'+ctx.esc(ctx.viz.mois(m.mois))+'</td><td class="fw-num">'+v(m.tauxPresence, " %")+'</td><td class="fw-num">'+v(m.absenteisme, " %")+'</td><td class="fw-num">'+v(m.heuresSup, " h")+'</td></tr>').join("")+'</tbody></table>'; }
     /* 56.33.11 : absences par type */
-    if (D.absences && D.absences.parType.length) h += '<section class="fwb-bloc"><h2>'+ctx.esc(T(ctx,"absences"))+'</h2><table class="fw-tbl fwb-mois"><thead><tr><th>'+ctx.esc(T(ctx,"type"))+'</th><th class="fw-num">'+ctx.esc(T(ctx,"jours"))+'</th><th class="fw-num">%</th></tr></thead><tbody>'+
-      D.absences.parType.map(x=>'<tr><td>'+ctx.esc(x.nom)+' <span class="fw-hint">'+ctx.esc(x.code)+'</span></td><td class="fw-num">'+v(x.jours)+'</td><td class="fw-num">'+v(D.absences.total ? Math.round(1000 * x.jours / D.absences.total) / 10 : null, " %")+'</td></tr>').join("")+'</tbody></table></section>';
+    if (D.absences && D.absences.masque) h += '<section class="fwb-bloc"><h2>'+ctx.esc(T(ctx,"absences"))+'</h2><p class="fw-hint">'+ctx.esc(T(ctx,"masqueN").replace("{n}", D.absences.seuil))+'</p></section>';
+    else if (D.absences && D.absences.parType.length){ const totU = x => x.unite === "h" ? D.absences.heures : D.absences.total;
+      h += '<section class="fwb-bloc"><h2>'+ctx.esc(T(ctx,"absences"))+'</h2><table class="fw-tbl fwb-mois"><caption class="fw-sr">'+ctx.esc(T(ctx,"absences"))+'</caption><thead><tr><th scope="col">'+ctx.esc(T(ctx,"type"))+'</th><th scope="col" class="fw-num">'+ctx.esc(T(ctx,"quantite"))+'</th><th scope="col" class="fw-num">%</th></tr></thead><tbody>'+
+      D.absences.parType.map(x=>'<tr><td>'+ctx.esc(x.sante ? T(ctx, x.unite === "h" ? "absSanteH" : "absSante") : x.nom)+(x.sante ? '' : ' <span class="fw-hint">'+ctx.esc(x.code)+'</span>')+'</td><td class="fw-num">'+v(x.jours, " "+T(ctx, x.unite === "h" ? "uH" : "uJ"))+'</td><td class="fw-num">'+v(totU(x) ? Math.round(1000 * x.jours / totU(x)) / 10 : null, " %")+'</td></tr>').join("")+'</tbody></table><p class="fw-hint">'+ctx.esc(T(ctx,"absNote"))+'</p></section>'; }
     /* 56.33.11 : ventilation par site, service ou fonction */
     h += '<section class="fwb-bloc"><div class="fwb-barre"><h2 style="margin:0">'+ctx.esc(T(ctx,"ventilation"))+'</h2><div class="fw-seg sm">'+[["site","vSite"],["dept","vDept"],["fonction","vFonction"]].map(([x, l])=>'<button type="button" data-act="fwm:axe" data-v="'+x+'"'+(E.axe === x ? ' class="on"' : '')+'>'+ctx.esc(T(ctx,l))+'</button>').join("")+'</div></div>';
     if (!E.V) h += '<div class="fw-hint" aria-busy="true">'+ctx.esc(T(ctx,"chargement"))+'</div>';
-    else { const tri = E.tri || "effectif", col = (k, l) => '<th class="fw-num"><button type="button" class="fwb-tri'+(tri === k ? ' on' : '')+'" data-act="fwm:tri" data-v="'+k+'">'+ctx.esc(T(ctx,l))+'</button></th>';
+    else { const tri = E.tri || "effectif", col = (k, l) => '<th scope="col" class="fw-num"'+(tri === k ? ' aria-sort="descending"' : '')+'><button type="button" class="fwb-tri'+(tri === k ? ' on' : '')+'" data-act="fwm:tri" data-v="'+k+'">'+ctx.esc(T(ctx,l))+'</button></th>';
       const L2 = E.V.lignes.slice().sort((a, b)=>tri === "nom" ? String(a.nom).localeCompare(String(b.nom)) : (b[tri] == null ? -1 : a[tri] == null ? 1 : b[tri] - a[tri]));
-      h += '<div class="fw-tablewrap"><table class="fw-tbl fwb-vent"><thead><tr><th><button type="button" class="fwb-tri'+(tri === "nom" ? ' on' : '')+'" data-act="fwm:tri" data-v="nom">'+ctx.esc(T(ctx,"groupe"))+'</button></th>'+col("effectif", "effectif")+(D.temps ? col("tauxPresence", "tauxPresence")+col("absenteisme", "absenteisme")+col("heuresSup", "heuresSup")+col("joursRetard", "joursRetard") : '')+(D.hse ? col("accidents", "accidents") : '')+'</tr></thead><tbody>'+
-        L2.map(x=>'<tr><td>'+ctx.esc(x.nom)+'</td><td class="fw-num">'+v(x.effectif)+'</td>'+(D.temps ? '<td class="fw-num">'+v(x.tauxPresence, " %")+'</td><td class="fw-num">'+v(x.absenteisme, " %")+'</td><td class="fw-num">'+v(x.heuresSup, " h")+'</td><td class="fw-num">'+v(x.joursRetard)+'</td>' : '')+(D.hse ? '<td class="fw-num">'+v(x.accidents)+'</td>' : '')+'</tr>').join("")+'</tbody></table></div>'+
+      h += '<div class="fw-tablewrap"><table class="fw-tbl fwb-vent"><thead><tr><th scope="col"'+(tri === "nom" ? ' aria-sort="ascending"' : '')+'><button type="button" class="fwb-tri'+(tri === "nom" ? ' on' : '')+'" data-act="fwm:tri" data-v="nom">'+ctx.esc(T(ctx,"groupe"))+'</button></th>'+col("effectif", "effectif")+(D.temps ? col("tauxPresence", "tauxPresence")+col("absenteisme", "absenteisme")+col("heuresSup", "heuresSup")+col("joursRetard", "joursRetard") : '')+(D.hse ? col("accidents", "accidents") : '')+'</tr></thead><tbody>'+
+        L2.map(x=>'<tr><td>'+ctx.esc(x.nom)+'</td><td class="fw-num">'+v(x.effectif)+'</td>'+(x.masque ? '<td class="fw-num fw-muted" colspan="'+((D.temps ? 4 : 0)+(D.hse ? 1 : 0))+'">'+ctx.esc(T(ctx,"masqueN").replace("{n}", E.V.seuil || 5))+'</td>' : (D.temps ? '<td class="fw-num">'+v(x.tauxPresence, " %")+'</td><td class="fw-num">'+v(x.absenteisme, " %")+'</td><td class="fw-num">'+v(x.heuresSup, " h")+'</td><td class="fw-num">'+v(x.joursRetard)+'</td>' : '')+(D.hse ? '<td class="fw-num">'+v(x.accidents)+'</td>' : ''))+'</tr>').join("")+'</tbody></table></div>'+
         (E.V.groupes > E.V.lignes.length ? '<p class="fw-hint">'+ctx.esc(T(ctx,"plusGroupes").replace("{n}", E.V.groupes))+'</p>' : ''); }
     h += '</section>';
     /* v56.21 : suivi médical par service (taux et nombres, masqués sous le seuil) */
@@ -208,8 +230,8 @@ FIWAKTI_MODULES.enregistrer({
   },
   action(a, el, ctx){
     const E = ctx.etat;
-    if (a === "actualiser"){ E.D = null; E.P = null; E.V = null; charger(ctx, true); return ctx.rendre(); }
-    if (a === "axe"){ E.axe = el.dataset.v; E.V = null; charger(ctx); return ctx.rendre(); }
+    if (a === "actualiser"){ E.D = null; E.P = null; E.V = null; E.dEn = false; E.vEn = false; charger(ctx, true); return ctx.rendre(); }
+    if (a === "axe"){ E.axe = el.dataset.v; E.V = null; E.vEn = false; charger(ctx); return ctx.rendre(); }
     if (a === "tri"){ E.tri = el.dataset.v; return ctx.rendre(); }
     if (a === "partager"){ const PR0 = prefs(ctx);
       ctx.api("api/v1/bi/config", {methode:"PUT", corps:{objectifs:objectifsEff(ctx), choix:PR0.choix || (E.cfg && E.cfg.choix) || null}})
@@ -220,11 +242,13 @@ FIWAKTI_MODULES.enregistrer({
     if (a === "persoReinit"){ E.pref = {choix:null, objectifs:{}, vue:PR.vue}; prefsSauver(ctx); return ctx.rendre(); }
     if (a === "monter" || a === "descendre"){ const l = ids().slice(), i = l.indexOf(el.dataset.v), j = a === "monter" ? i-1 : i+1; if (i < 0 || j < 0 || j >= l.length) return;
       [l[i], l[j]] = [l[j], l[i]]; PR.choix = l; prefsSauver(ctx); return ctx.rendre(); }
-    if (a === "exporter" && E.D){ if (E.url) URL.revokeObjectURL(E.url);
+    if (a === "exporter" && E.D){ const B0 = bornes(E);
+      /* correctif 17 : droit d'export vérifié et export tracé par le serveur avant de produire le fichier */
+      ctx.api("api/v1/bi/export?du="+E.D.du+"&au="+E.D.au+filtresQ(E), {methode:"POST", corps:{}}).then(()=>{ if (E.url) URL.revokeObjectURL(E.url);
       E.url = URL.createObjectURL(new Blob(["\ufeff"+lignesCsv(ctx, E.D)], {type:"text/csv;charset=utf-8"}));
-      const l = document.createElement("a"); l.href = E.url; l.download = "fiwakti-pilotage-"+E.D.du+"-"+E.D.au+".csv"; document.body.appendChild(l); l.click(); l.remove(); }
+      const l = document.createElement("a"); l.href = E.url; l.download = "fiwakti-pilotage-"+E.D.du+"-"+E.D.au+".csv"; document.body.appendChild(l); l.click(); l.remove(); }).catch(e=>ctx.flash(e.message, "err")); void B0; }
   },
-  change(k, el, ctx){ const E = ctx.etat; if (["per","site","dept","fonction","du","au"].indexOf(k) >= 0){ E[k] = el.value; E.D = null; E.P = null; E.V = null; return ctx.rendre(); }
+  change(k, el, ctx){ const E = ctx.etat; if (["per","site","dept","fonction","du","au"].indexOf(k) >= 0){ E[k] = el.value; E.D = null; E.P = null; E.V = null; E.dEn = false; E.vEn = false; E.err = ""; return ctx.rendre(); }
     const PR = prefs(ctx);
     if (k === "pchoix"){ const l = (PR.choix || indicateurs(ctx, E.D, E.P).map(x=>x.id)).filter(x=>x !== el.dataset.id); if (el.checked) l.push(el.dataset.id); PR.choix = l; prefsSauver(ctx); return ctx.rendre(); }
     if (k === "pobj"){ PR.objectifs = PR.objectifs || {}; if (el.value === "") delete PR.objectifs[el.dataset.id]; else PR.objectifs[el.dataset.id] = +el.value; prefsSauver(ctx); return ctx.rendre(); } }

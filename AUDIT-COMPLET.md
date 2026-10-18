@@ -1416,3 +1416,35 @@ une seule fois puis traitée par les règles au passage de l'administrateur ; Ch
 sans erreur.
 
 Livraison : FIWAKTI-56.33.11-correctif-16.zip (cumulatif : correctifs 2 à 15 inclus).
+
+## Correctif 17 — Pilotage › Pilotage transverse (module FW-BI)
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| C1 | Journées jamais calculées avant lecture : présence 0 % (« depuis le cache ») après un démarrage ou de nouveaux badgeages, résultat vide gardé 30 min | **haute** | journées manquantes calculées avant lecture (service de calcul transmis aux modules) |
+| C2 | Cache servant l'ancien périmètre et d'anciennes données 30 min | **haute** | clé = empreinte du périmètre + génération des données (modifications, badgeages, salariés) : invalidé dès qu'une donnée change |
+| C3 | « Actualiser » (`frais=1`) ouvert à tout lecteur : recalcul complet à chaque clic, serveur bloqué 4,7 s à 20 000 salariés | **haute** | recalcul forcé réservé au paramétrage des états ; un seul calcul à la fois par clé (requêtes simultanées mutualisées) |
+| C4 | Petits effectifs et santé non masqués (« Congé maladie » d'un service d'1 salarié, exporté) | **haute** | groupes de moins de 5 salariés masqués (ventilation, absences), motifs de santé regroupés |
+| C5 | Écran masqué et droit d'export ignorés par le serveur ; export non tracé | moyenne | 403 si l'écran est masqué ; export soumis au droit Exporter et tracé dans l'audit |
+| C6 | Dates non validées (2026-02-31 accepté, 2026-13-45 → erreur 500, 0000→9999 accepté, inversion silencieuse) | moyenne | date réelle exigée, période ≤ 3 ans, 400 explicite |
+| C7 | Filtre Service sans les sous-services | moyenne | arbre des services comme les autres écrans |
+| C8 | Définitions : absentéisme et présence sur toutes les journées (repos, fériés) ; heures sup. = tout dépassement brut | moyenne | journées prévues seulement (définition du préaudit) ; présence plafonnée au théorique ; heures sup. selon les règles, dépassements bruts à part ; libellé « absence non justifiée » |
+| C9 | « Absences par type » : présence comptée, demi-journée = 1 j, 2 h = 1 j | moyenne | classes absence et délégation seulement, demi-journée 0,5 j, types en heures en heures |
+| C10 | Réponse tardive d'un ancien filtre affichée sous le nouveau filtre | moyenne | réponse retenue seulement si elle correspond aux filtres affichés |
+| C11 | Dates de période en UTC (31 jours après minuit en Tunisie) | basse | jour local |
+| C12 | Recrutement hors périmètre pour un compte limité ; habilitations de salariés sortis | basse | postes / candidatures réservés au périmètre global ; salariés actifs seulement |
+| C13 | Une table absente faisait échouer tout le tableau | basse | chaque domaine isolé (erreur journalisée) |
+| C14–C15 | Nombres en français dans toutes les langues ; CSV sans période ni filtres, en-têtes en français ; tableaux sans `scope` / `aria-sort` | basse | nombres dans la langue de l'écran ; CSV avec période, filtres, unités et indicateurs ajoutés ; en-têtes accessibles |
+
+Empreinte d'intégrité du module (`serveur/modules/FW-BI.json`) mise à jour ; budget respecté (43 Ko / 44 Ko).
+
+Vérifié : scripts de l'analyse rejoués sur une copie du serveur (présence calculée dès le premier appel et identique avec
+`frais`, sous-services, cache réutilisé puis invalidé au changement de périmètre, `frais` ignoré pour un lecteur,
+écran masqué 403, export 200 et tracé, 7 dates invalides → 400, injection SQL sans effet, groupes et absences masqués
+sous 5 salariés, heures sup. = préaudit) ; Chromium (fr / ar, RTL, mobile, minuit en Tunisie, 5 montages /
+démontages sans fuite, intégrité acceptée) ; démonstration : 56 écrans sans erreur.
+
+Non vérifié : modules non licenciés dans la base de test (HSE, Formation, Recrutement, Compétences, Médicale,
+Visiteurs, Intégration) et PostgreSQL réel.
+
+Livraison : FIWAKTI-56.33.11-correctif-17.zip (cumulatif : correctifs 2 à 16 inclus).

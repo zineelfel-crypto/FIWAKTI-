@@ -128,6 +128,8 @@ function initPointeuses(){
       service:(id)=>{ const y = MODS_SERVEUR.find(z=>z.id === id); return y && y.inst && (!MOD || MOD.estActif(id)) ? y.inst : null; },
       /* v56.31 : recalcul des journées touchées (ex. badgeages repris par l'assistant de migration) ; dossier racine */
       invalider:(t, r)=>K.invalider(t, r), racine:path.join(ICI, "..", ".."), dossierDonnees:DONNEES,
+      /* correctif 17 : calcul des journées manquantes avant lecture, et génération des données (cache des modules) */
+      assurer:(m, du, au)=>K.assurer(m, du, au), generation:()=>K.generation(),
       publier:(nom, d)=>{ CACHE_AT.clear(); MODS_SERVEUR.forEach(y=>{ try { if (y.inst && y.inst.surEvenement) y.inst.surEvenement(nom, d); } catch(e){ journal("événement "+nom+" → "+y.id+" : "+e.message); } }); },
       planifier:(nom, opts)=>PLAN.planifier(x.id.toLowerCase()+"-"+nom, Object.assign({}, opts, {actif:()=>!!(CONFIG.installe && (!MOD || MOD.estActif(x.id))) && (!opts.actif || opts.actif())}))}); } catch(e){ x.inst = null; journal("module "+x.id+" : "+e.message); } }
   MODS_SERVEUR.forEach(instancierModule);

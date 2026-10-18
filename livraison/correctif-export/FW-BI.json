@@ -1,0 +1,48 @@
+{
+  "id": "FW-BI",
+  "etend": true,
+  "nom": "Indicateurs, états et exports",
+  "categorie": "metier",
+  "version": "56.33.11",
+  "deps": [
+    "FW-Core",
+    "FW-RH"
+  ],
+  "vues": [
+    "pilotage"
+  ],
+  "routes": [
+    "/api/v1/bi"
+  ],
+  "donnees": [],
+  "colls": [],
+  "droit": "ETA",
+  "niveauMenu": "avance",
+  "menu": {
+    "groupe": "rap",
+    "vue": "pilotage",
+    "libelle": {
+      "fr": "Pilotage transverse",
+      "en": "Cross-module dashboard",
+      "ar": "القيادة الشاملة"
+    }
+  },
+  "assets": {
+    "js": "modules/FW-BI/index.js",
+    "css": "modules/FW-BI/index.css"
+  },
+  "serveur": "FW-BI.serveur.js",
+  "lifecycle": {
+    "load": "téléchargement JS/CSS avec intégrité, à la première ouverture",
+    "mount": "mount(ctx)",
+    "unmount": "unmount(ctx)"
+  },
+  "budget": {
+    "js_ko": 44,
+    "css_ko": 4
+  },
+  "integrite": {
+    "js": "sha384-R8p2LkC6P36qIQzP3qc1TnzgAOKR+5ddK+cjVwVc3o/W7QQbKehExha+lmDTwhn3",
+    "css": "sha384-+yIn5y0NHxXlFKHrlWfxUfvTQiDCNoWZ+x4zxN9dbKVgN3GBVi0yjxfiMnVjbvBm"
+  }
+}
