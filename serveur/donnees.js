@@ -444,6 +444,19 @@ function controleReglesV(avant, apres, ref){
   const clot = (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, "");
   const parId = new Map((apres||[]).map(x=>[x && x.id, x]));
   const fige = ["code","niveau","cible","valeur","valid_from","version","priorite"];
+  const statutAvant = new Map((avant||[]).map(x=>[x && x.id, x && x.statut]));
+  /* recette Règles versionnées : une version publiée (nouvelle ou issue d'un brouillon) doit être cohérente, même envoyée directement à l'API */
+  const NIVEAUX = ["societe","etablissement","site","departement","service","equipe","planning","categorie","salarie"];
+  const dateOk = d=>/^\d{4}-\d{2}-\d{2}$/.test(d || "");
+  const incoherente = n=>{
+    if (!n.code || NIVEAUX.indexOf(n.niveau) < 0) return "règle ou niveau inconnu";
+    if (!dateOk(n.valid_from) || (n.valid_to && !dateOk(n.valid_to))) return "date invalide";
+    if (n.valid_to && n.valid_to < n.valid_from) return "fin avant le début";
+    if (n.niveau !== "societe" && !String(n.cible == null ? "" : n.cible).trim()) return "cible manquante";
+    if (typeof n.valeur === "number" && !(n.valeur >= 0)) return "valeur négative";
+    if (n.simulation) return "marque de simulation";
+    return "";
+  };
   for (const v of avant){
     if (!v || v.statut !== "publiee" && v.statut !== "retiree") continue;
     const n = parId.get(v.id);
@@ -458,6 +471,7 @@ function controleReglesV(avant, apres, ref){
   }
   const anciens = new Set(avant.map(x=>x && x.id));
   for (const n of (apres||[])) if (n && !anciens.has(n.id) && n.statut === "publiee" && clot && n.valid_from <= clot) return "nouvelle version dans une période clôturée";
+  for (const n of (apres||[])) if (n && n.statut === "publiee" && statutAvant.get(n.id) !== "publiee" && statutAvant.get(n.id) !== "retiree"){ const m = incoherente(n); if (m) return "version "+(n.code||"?")+" incohérente ("+m+")"; }
   for (const n of (apres||[])) if (n && anciens.has(n.id)){ const v = avant.find(x=>x.id === n.id); if (v.statut === "brouillon" && n.statut === "publiee" && clot && n.valid_from <= clot) return "publication dans une période clôturée"; }
   return "";
 }

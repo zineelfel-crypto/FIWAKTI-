@@ -97,7 +97,7 @@ async function compteurs(mats, du, au, source, reglesSim){
   if (!reglesSim) return lire();
   /* v54 : simulation « what if » — mêmes données, règles candidates ajoutées en mémoire seulement */
   const avant = lire();
-  E.M.db.reglesV = (doc.reglesV || []).concat(reglesSim.map(r=>Object.assign({}, r, {statut:"publiee", id:"sim-"+(r.id || Math.random()), version:(Number(r.version)||0) + 1000})));
+  E.M.db.reglesV = (doc.reglesV || []).concat(reglesSim.map(r=>Object.assign({}, r, {statut:"publiee", simulation:true, id:"sim-"+(r.id || Math.random()), version:(Number(r.version)||0) + 1000})));
   E.M.reinit();
   const apres = lire();
   mats.forEach(mat=>{ if (avant[mat]) out[mat] = {avant:avant[mat], apres:apres[mat]}; });

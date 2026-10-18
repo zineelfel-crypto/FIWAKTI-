@@ -1003,3 +1003,49 @@ alors que « 1–100 sur 42 007 journées » restait affiché.
 Vérifié sur 6 010 salariés : « bacc » → 2 100 journées ; valeur choisie dans la liste → 7 journées du salarié ;
 « asma baccouche » → résultats ; synthèse filtrée (300 salariés) ; installation simulée et démonstration sans erreur.
 Livraison : FIWAKTI-56.33.11-correctif-3.zip (cumulatif : app.js, moteur.js, calcul.js).
+
+## Correctif 4 — Temps et présence › Règles versionnées
+
+Analyse complète du sous-menu (écran, publication, retrait, simulation, règle effective, établissements), du calcul des
+compteurs alimentés par les règles (`compteursRegles`, `regleEff`) et du contrôle serveur (`controleReglesV`).
+Les anomalies 1 à 8 et 11 ont été reproduites avant correction sur le moteur réel (`app.js` chargé comme par
+`serveur/moteur.js`) et sur une vraie base SQLite (`D.synchroniser`, même fonction que l'enregistrement de l'écran) ;
+les anomalies 9, 10 et 12 à 14 ont été relevées à la lecture du code. Les corrections ont été vérifiées dans Chromium (démo).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Publier une nouvelle version d'une règle dont la version précédente avait une date de fin : l'écran ramenait cette fin à la veille, le serveur refusait alors **tout** l'enregistrement des règles (« fin de validité déjà fixée »). L'écran affichait « Règle enregistrée » : la version n'existait que dans le navigateur, jamais dans les calculs du serveur | **haute** | une nouvelle version remplace la précédente à partir de sa date **sans la modifier** (succession calculée à la date : la version de date de début la plus récente l'emporte) ; la fin effective est affichée dans la liste |
+| 2 | Retrait d'une version future : la version précédente, close la veille par la publication, ne s'appliquait plus (trou : retour à la valeur par défaut) | **haute** | conséquence du point 1 : rien n'est modifié à la publication, le retrait rétablit donc la version précédente |
+| 3 | Publier une version datée **avant** une version déjà prévue (ex. v3 au 01/04 alors que v2 est prévue au 01/07) : v3 l'emportait aussi après le 01/07 (rang par numéro de version), v2 était annulée sans le dire | **haute** | rang par date de début puis priorité puis version : v2 reste prévue à sa date |
+| 4 | Règles par département ou service : une règle du département parent l'emportait sur celle du département du salarié dès qu'elle avait une version ou une priorité plus élevée | **haute** | le département le plus proche du salarié l'emporte, puis date, priorité, version |
+| 5 | Valeur vide acceptée pour les taux, durées et seuils : « Seuil du second taux » vide = 0 → toutes les heures supplémentaires au second taux ; taux vide = 0 % ; durée de pause vide = 0 | **haute** | saisie refusée (sauf seuil journalier et tolérances, où « vide » a un sens) ; une version déjà publiée sans valeur garde la valeur par défaut |
+| 6 | Pause « flexible » : la fenêtre était ignorée (une pause badgée à 9 h comptait comme pause de midi) | moyenne | seule la pause badgée dans la fenêtre compte ; le complément jusqu'à la durée minimale est déduit |
+| 7 | Pause « forfaitaire » : badger 1 minute de pause suffisait à annuler la déduction d'une heure | moyenne | durée déduite moins la pause déjà badgée |
+| 8 | Pauses « payée » et « non payée » proposées sans aucun effet | moyenne | payée : pause badgée comptée comme travaillée dans la limite de la durée (variable `PAUSE_PAYEE`) ; non payée : pause badgée non comptée (comportement existant, désormais documenté) |
+| 9 | Règle effective non recalculée après la mutation d'un salarié (site, service, planning, catégorie, équipe) tant que la page n'était pas rechargée | moyenne | cache des règles effectives vidé à chaque enregistrement |
+| 10 | Publication d'un brouillon daté dans le passé sans la confirmation exigée à la création | moyenne | même confirmation « publication rétroactive » |
+| 11 | Serveur : versions incohérentes acceptées si envoyées directement à l'API (fin avant début, taux négatif, niveau inconnu, cible vide, date invalide) | moyenne | refusées par `controleReglesV` (de même qu'une version marquée « simulation ») |
+| 12 | Grand effectif : onglet « Règle effective » bloqué sur « Choisissez un salarié » pour un salarié absent de la page chargée | moyenne | salarié chargé depuis le serveur |
+| 13 | Saisie : minutes et pourcentages sans borne, matricule inexistant accepté, valeur hors liste acceptée, espaces autour de la cible | basse | minutes ≤ 1 440, pourcentages ≤ 1 000, matricule vérifié, choix vérifié, cible nettoyée (libellés fr / en / ar) |
+| 14 | Dates en aaaa-mm-jj dans le journal d'audit et la colonne Statut | basse | jj/mm/aaaa |
+
+Vérifié : 30 tests unitaires et d'enchaînement (écran → serveur), dont publication / version antérieure / retraits
+successifs ; vraie base SQLite (l'ancien écran perd la version, l'écran corrigé l'enregistre, l'API refuse les versions
+incohérentes) ; non-régression sur le jeu de démonstration : compteurs **identiques** à l'ancien moteur sans règle et avec
+des règles « société » (nuit, taux d'heures supplémentaires, tolérance, dimanche) ; Chromium : saisie vide refusée,
+publication de deux versions (fin effective 31/05/2027 affichée), retrait (version précédente « sans fin » rétablie),
+règle effective au 01/08/2027, aucune erreur JavaScript ; `node --check` sur les fichiers modifiés ; démonstration reconstruite.
+
+À valider par le métier (non modifié) :
+- **Pauses forfaitaire / flexible** (points 6 et 7) : la déduction complète la pause badgée jusqu'à la durée de la règle.
+  Si l'entreprise veut l'ancien comportement (aucune déduction dès qu'une pause est badgée), le signaler.
+- **« Autorisation des heures supplémentaires »** (constatées / préautorisées / à régulariser) et **« Récupération :
+  compteur spécifique »** sont enregistrées mais **n'ont aucun effet sur les calculs** : il n'existe pas de saisie des
+  autorisations préalables. À traiter comme une évolution, ou à masquer.
+- Le rattachement d'un site à un établissement n'est pas daté : le changer modifie le niveau « établissement » pour
+  toute la période non clôturée.
+- Grand effectif : les listes « Équipe » et « Catégorie » du formulaire sont proposées à partir des salariés chargés dans
+  la page (la saisie libre reste possible pour la catégorie).
+
+Livraison : FIWAKTI-56.33.11-correctif-4.zip (cumulatif : app.js, moteur.js, calcul.js, donnees.js — contient les
+correctifs 2 et 3). Au premier démarrage, le changement de moteur déclenche le recalcul des journées en arrière-plan.
