@@ -1364,3 +1364,29 @@ Non traité : duplication d'un état (fonction absente, pas une anomalie) ; fich
 après une réduction de périmètre ; sens de lecture des périodes en arabe.
 
 Livraison : FIWAKTI-56.33.11-correctif-14.zip (cumulatif : correctifs 2 à 13 inclus).
+
+## Correctif 15 — Pilotage › Tableau de bord (seconde analyse)
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Rectification acceptée comptée comme une nouvelle demande : modification = 2 acceptées et 6 j au lieu de 1 et 3 j ; annulation = 5 j toujours comptés | **haute** | rectifications exclues des indicateurs (signalées à part) ; indicateur « Annulées » ; mention « Demande de rectification » dans les demandes en instance |
+| 2 | Décisions de la période sur des absences anciennes absentes (chargement par date d'absence) — régularisation acceptée en octobre pour février jamais vue | **haute** | route serveur `/api/v1/demandes/bord` : demandes décidées ou déposées sur la période, périmètre appliqué, site et nom des demandeurs joints |
+| 7 | Décisions non contrôlées par le serveur : « acceptée le 01/01/2019 par Directeur général (falsifié) » enregistrée ; date de décision prise sur l'horloge du poste | **haute** | transitions d'état contrôlées (refusée → acceptée refusée…), date et auteur de la décision imposés par le serveur, décision figée ensuite (reprise de données par l'administrateur conservée) |
+| 3 | Période par défaut invalide en janvier et février (« 2027--1-01 ») | moyenne | calcul de date corrigé |
+| 4 | Fiches des demandeurs plafonnées à 1 000 (suivantes jamais chargées) | moyenne | chargement par lots jusqu'au bout |
+| 5 | Filtre de site : demande d'un salarié non chargé exclue sans avertissement | moyenne | site fourni par le serveur ; demandes non classées signalées |
+| 6 | Grand effectif : rendu 2 à 18 s (recherche linéaire des fiches, jours recalculés) | moyenne | index des fiches, jours mémorisés : ≈ 0,3–0,5 s pour 50 000 demandes |
+| 8–9 | Demi-journée sur jour non ouvré = 0,5 j ; jours après la sortie comptés ; décision sans `valideLe` invisible | basse | 0 ; jours hors contrat exclus ; date reprise de l'historique |
+| 10–14 | Répartition par type sans rapport avec son libellé ; exports sans période, site ni indicateurs ; « 2.5 h » non localisé ; colonne Ancienneté rognée, lignes inertes ; requête relancée à chaque rendu après un échec | basse | libellé « Demandes déposées sur la période, par type » ; en-tête période / site / édité le / indicateurs, fichier nommé avec la période ; nombre et unité localisés ; tableau défilant, nom cliquable vers la demande ; échec mémorisé, bouton « Réessayer » |
+| — | Motif de refus (peut révéler une information de santé) visible de tout compte du tableau de bord | à décider | affiché aux seuls comptes qui valident les absences (droit Absences ≥ validation), exports compris |
+
+Vérifié : scripts de l'analyse rejoués (rectifications, annulation, demi-journée, sortie, période de janvier, 1 500
+demandeurs, exports et impression, langues, performances) ; serveur réel (copie) : régularisation de février décidée le
+06/10 présente en octobre pour les trois comptes du site, demande d'un autre site exclue, décision falsifiée réécrite à la
+date du jour et au nom du compte, refusée → acceptée refusée ; Chromium (fr / ar, janvier 2027, largeur réduite) ;
+démonstration : 56 écrans sans erreur.
+
+Non traité : chefs d'équipe (niveau « avancé ») sans accès au tableau de bord (niveau « rh ») — à décider ; la cloche
+« demandes en attente » n'applique pas le filtre de site.
+
+Livraison : FIWAKTI-56.33.11-correctif-15.zip (cumulatif : correctifs 2 à 14 inclus).

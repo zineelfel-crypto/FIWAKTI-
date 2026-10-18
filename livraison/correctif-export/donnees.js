@@ -24,6 +24,32 @@ function joursDe(coll, x){
   if (coll === "dmd" && x.du){ const out = []; let k = x.du; const fin = x.au || x.du; let g = 0; while (k <= fin && g++ < 400){ out.push(k); k = plus1(k); } return out; }
   const d = dateDe(coll, x); return d ? [d] : [];
 }
+const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
+const RANG = {lecture:1, saisie:2, validation:3, config:4};
+function decisionDmd(avant, x, P, login, admin){
+  const ea = avant ? (avant.etat || "attente") : null, en = x.etat || "attente";
+  if (ETATS_DMD.indexOf(en) < 0) return {refus:"état inconnu"};
+  const decision = en === "acceptee" || en === "refusee";
+  if (ea && ea !== en){
+    /* transitions permises : en attente → acceptée / refusée / annulée ; acceptée → annulée (rectification) */
+    const ok = (ea === "attente" && en !== "attente") || (ea === "acceptee" && en === "annulee");
+    if (!ok && !admin) return {refus:"une demande "+ea+" ne peut pas devenir "+en};
+  }
+  if (decision && ea !== en){
+    /* décision : saisie directe d'une absence acceptée (droit Absences saisie) ou validation (droit Absences validation,
+       ou valideur désigné : responsable du salarié, délégation — contrôlés par le circuit dans le navigateur) */
+    const rang = admin ? 4 : (RANG[((P.profil || {}).droits || {}).ABS] || 0);
+    if (rang < 2 && !admin) return {refus:"droit de décision requis"};
+    /* administrateur : reprise de données (historique) — date de décision fournie conservée si elle est valide */
+    if (admin && /^\d{4}-\d{2}-\d{2}$/.test(String(x.valideLe || ""))) return {x};
+    const u = P.u || {}, n = new Date(), z = v => String(v).padStart(2, "0");
+    return {x:Object.assign({}, x, {valideLe:n.getFullYear()+"-"+z(n.getMonth()+1)+"-"+z(n.getDate()), validePar:String(u.nom || login || ""), valideParCompte:login})};
+  }
+  /* décision déjà prise : date et auteur ne se réécrivent pas */
+  if (avant && ea === en && (en === "acceptee" || en === "refusee") && !admin)
+    return {x:Object.assign({}, x, {valideLe:avant.valideLe, validePar:avant.validePar, valideParCompte:avant.valideParCompte})};
+  return {x};
+}
 function horodatage(){ const n = new Date(), p = v => String(v).padStart(2, "0"), j = n.getFullYear()+"-"+p(n.getMonth()+1)+"-"+p(n.getDate());
   return {min:j+" "+p(n.getHours())+":"+p(n.getMinutes()), sec:j+" "+p(n.getHours())+":"+p(n.getMinutes())+":"+p(n.getSeconds())}; }
 function plus1(k){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
@@ -322,6 +348,9 @@ function creer(B, PERIM){
                (seules les notifications restent permises hors périmètre : avis au valideur) */
             if (x.mat && !dansPerim(x.mat) && !(c === "notifs" && !avant)){ refus++; continue; }
           }
+          /* correctif 15 : décisions sur les demandes — transitions d'état contrôlées, date et auteur de la décision imposés
+             par le serveur (auparavant ceux du navigateur : « acceptée le 01/01/2019 par Directeur général » acceptés) */
+          if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
           /* correctif 13 : auteur et heure d'une trace d'audit ou du journal imposés par le serveur (compte de la session,
              horloge du serveur) — auparavant ceux envoyés par le navigateur, qui pouvait attribuer une trace à un autre compte */
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }

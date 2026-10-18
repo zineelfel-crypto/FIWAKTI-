@@ -1589,6 +1589,26 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
+  /* ---- correctif 15 : Tableau de bord des demandes — demandes DÉCIDÉES ou DÉPOSÉES sur la période (quelle que soit la
+     date d'absence : une régularisation acceptée ce mois-ci pour une absence de février y figure), périmètre du compte,
+     site et nom des demandeurs joints (fiches non chargées en grand effectif) ---- */
+  if (p === "/api/v1/demandes/bord" && req.method === "GET"){
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
+    if (!admin && !({lecture:1, saisie:2, validation:3, config:4}[(pr.droits || {}).ABS] >= 1)) return erreur(res, 403, "Droit de consultation des absences requis.");
+    const du = u.searchParams.get("du"), au = u.searchParams.get("au");
+    if (!dateOk(du) || !dateOk(au) || du > au) return erreur(res, 400, "Période invalide.");
+    if (ajoutJours(du, 3*366) < au) return erreur(res, 400, "Période limitée à 3 ans.");
+    const mois = []; for (let k = du.slice(0, 7); k <= au.slice(0, 7) && mois.length < 40; ){ mois.push(k); const y = +k.slice(0, 4), m = +k.slice(5, 7); k = (m === 12 ? (y+1)+"-01" : y+"-"+String(m+1).padStart(2, "0")); }
+    const w = [], a = [];
+    mois.forEach(m=>{ w.push("data LIKE ?", "data LIKE ?"); a.push('%"valideLe":"'+m+'%', '%"creeLe":"'+m+'%'); });
+    let sql = "SELECT data FROM enreg WHERE coll='dmd' AND ("+w.join(" OR ")+")";
+    if (P.set !== null){ const arr = Array.from(P.set); if (B.type === "pg"){ sql += " AND mat = ANY(?)"; a.push(arr); } else { sql += " AND mat IN (SELECT value FROM json_each(?))"; a.push(JSON.stringify(arr)); } }
+    const dans = k => !!k && String(k).slice(0, 10) >= du && String(k).slice(0, 10) <= au;
+    const l = (await B.all(sql, ...a)).map(r=>JSON.parse(r.data)).filter(x=>dans(x.valideLe) || dans(x.creeLe) || (x.hist || []).some(h=>h && dans(h.d) && /^(accepte|refuse|annule)$/.test(h.action)));
+    const emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e])), infos = {};
+    l.forEach(x=>{ const e = parMat.get(String(x.mat)); if (e && !infos[x.mat]) infos[x.mat] = {siteId:e.siteId || "", nom:e.nom || "", prenom:e.prenom || ""}; });
+    return json(res, 200, {dmd:l, emps:infos, du, au});
+  }
   /* ---- correctif 13 : audit applicatif (corrections de pointage, décisions, sécurité, clôtures…) servi par page ----
      L'écran Audit ne montrait que les traces chargées dans le navigateur (≈ 2 mois, hier et aujourd'hui seulement en
      grand effectif, 5 000 au plus). Périmètre du compte appliqué ; traces sans matricule réservées au droit Système. */
