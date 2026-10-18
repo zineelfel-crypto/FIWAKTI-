@@ -55,6 +55,10 @@ function analyser(texte, T, nomFichier){
 }
 function dossierDe(T){ const d = String(T.dossier||"").trim();
   if (!d || !path.isAbsolute(d)) throw new Error("Indiquez le dossier (chemin complet) où MorphoManager / MEMS dépose les journaux de passages.");
+  /* correctif 10 : jamais dans l'installation de FIWAKTI (programmes, données, sauvegardes, clés) */
+  { const rac = path.resolve(process.env.FIWAKTI_RACINE || path.join(__dirname, "..", "..", "..", "..")), ici = path.resolve(path.join(__dirname, "..", "..")), r = path.resolve(d);
+    const dans = (p, b) => p === b || p.startsWith(b + path.sep);
+    if (dans(r, rac) || dans(r, ici) || dans(rac, r)) throw new Error("Dossier refusé : il ne peut pas se trouver dans l'installation de FIWAKTI (ni la contenir). Indiquez le dossier d'export de MorphoManager / MEMS."); }
   if (!fs.existsSync(d) || !fs.statSync(d).isDirectory()) throw new Error("Dossier introuvable ou inaccessible depuis le serveur FIWAKTI : "+d);
   return d; }
 const motifRe = T => new RegExp("^"+String(T.motif || "*.csv;*.txt;*.dat").split(/[;,]/).map(x=>x.trim()).filter(Boolean).map(x=>x.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")).join("$|^")+"$", "i");

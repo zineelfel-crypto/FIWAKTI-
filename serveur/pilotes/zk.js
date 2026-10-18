@@ -223,19 +223,19 @@ module.exports = {refusPurge,
           let arch = null, motifSansPurge = "";
           /* 56.33.11 : copie complète seulement si l'appareil va être effacé ; sans purge, l'appareil garde son journal et
              la copie automatique (ctx.integrer) n'archive que les badgeages pas encore archivés */
-          if (T.purgeApresCollecte && lignes.length && ctx.archiver){ try { arch = await ctx.archiver(lignes, {complet:true}); } catch(e){ motifSansPurge = "archive impossible : "+e.message; } }
+          if ((T.purgeApresCollecte || ctx.options.purgeForcee) && lignes.length && ctx.archiver){ try { arch = await ctx.archiver(lignes, {complet:true}); } catch(e){ motifSansPurge = "archive impossible : "+e.message; } }
           const integres = await ctx.integrer(lignes);
           /* purge de l'appareil seulement si l'option est demandée ET si : copie de sauvegarde écrite, badgeages enregistrés
              par FIWAKTI, et lecture complète (autant de badgeages lus que l'appareil en annonce) — une lecture tronquée
              (coupure réseau) n'efface jamais l'appareil */
           let purge = false;
-          if (T.purgeApresCollecte && bad.length){
+          if ((T.purgeApresCollecte || ctx.options.purgeForcee) && bad.length){
             motifSansPurge = refusPurge({erreurArchive:motifSansPurge, archiveurDispo:!!ctx.archiver, archive:arch, integres, lus:bad.length, annonce:tl2 ? tl2.badgeages : null});
             if (!motifSansPurge){ const r = await L.commande(C.CLEAR_ATTLOG); purge = r.code === C.ACK_OK; if (!purge) motifSansPurge = "effacement refusé par l'appareil"; }
           }
           /* code du motif, traduit par l'interface (le texte détaillé reste pour le journal) */
           const purgeCode = !motifSansPurge ? undefined : /^(archive|pas de copie)/.test(motifSansPurge) ? "copie" : /^badgeages non/.test(motifSansPurge) ? "enregistrement" : /^lecture/.test(motifSansPurge) ? "lecture" : /^effacement/.test(motifSansPurge) ? "appareil" : "autre";
-          return Object.assign({lus:bad.length, purge, purgeDemandee:!!T.purgeApresCollecte, archive:arch ? path.basename(arch.fichier) : null, purgeNonFaite:motifSansPurge || undefined, purgeCode}, integres);
+          return Object.assign({lus:bad.length, purge, purgeDemandee:!!(T.purgeApresCollecte || ctx.options.purgeForcee), archive:arch ? path.basename(arch.fichier) : null, purgeNonFaite:motifSansPurge || undefined, purgeCode}, integres);
         } finally { await L.commande(C.ENABLE).catch(()=>{}); }
       }
       if (action === "utilisateurs-envoyer"){
@@ -264,6 +264,8 @@ module.exports = {refusPurge,
       }
       if (action === "nettoyage"){
         const quoi = ctx.options.quoi || "pointages";
+        /* correctif 10 : jamais d'effacement des badgeages sans collecte complète préalable (faite par pointeuses.executer) */
+        if ((quoi === "pointages" || quoi === "tout") && !ctx.options.apresCollecte) throw new Error("Effacement des badgeages refusé : collecte préalable requise.");
         if (quoi === "pointages" || quoi === "tout"){ const r = await L.commande(C.CLEAR_ATTLOG); if (r.code !== C.ACK_OK) throw new Error("Effacement des badgeages refusé."); }
         if (quoi === "utilisateurs" || quoi === "tout"){ const r = await L.commande(C.CLEAR_DATA, Buffer.from([5])); if (r.code !== C.ACK_OK) throw new Error("Effacement des utilisateurs refusé."); }
         return {ok:true};

@@ -323,7 +323,12 @@ function creer(o){
       const r = (await meta("pointeuses_push_refus")) || []; r.unshift({le:horo(new Date()), sn, ip, motif}); await meta("pointeuses_push_refus", r.slice(0, 50));
     }
   }
-  async function termParSn(sn){ const ref = await (D.referentielLecture || D.referentiel)() || {}; return (ref.terms||[]).find(x=>x.sn && String(x.sn) === String(sn) && x.actif !== false) || null; }
+  /* correctif 10 : numéro de série en double → refus (avant : premier terminal trouvé, badgeages attribués au mauvais appareil) ; terminal désactivé signalé comme tel */
+  async function termParSn(sn){ const ref = await (D.referentielLecture || D.referentiel)() || {}, k = String(sn).trim().toLowerCase();
+    const l = (ref.terms||[]).filter(x=>x.sn && String(x.sn).trim().toLowerCase() === k), actifs = l.filter(x=>x.actif !== false);
+    if (actifs.length > 1) return {__refus:"numéro de série déclaré sur plusieurs terminaux ("+actifs.map(x=>x.nom).join(", ")+")"};
+    if (!actifs.length && l.length) return {__refus:"terminal désactivé dans FIWAKTI"};
+    return actifs[0] || null; }
   /* requêtes émises par l'appareil : /iclock/cdata, /iclock/getrequest, /iclock/devicecmd */
   async function iclock(req, res, u, corps){
     const sn = u.searchParams.get("SN") || "";
@@ -332,6 +337,7 @@ function creer(o){
     let ipSrc = ipNorm(req.socket && req.socket.remoteAddress);
     /* derrière un proxy inverse déclaré de confiance : adresse réelle de l'appareil transmise par le proxy */
     if ((config().proxyConfiance||[]).map(ipNorm).indexOf(ipSrc) >= 0 && req.headers["x-forwarded-for"]) ipSrc = ipNorm(String(req.headers["x-forwarded-for"]).split(",")[0]);
+    if (T && T.__refus){ await refuserPush(sn, ipSrc, T.__refus); return texte(403, "ERROR: forbidden"); }
     if (!T){ await refuserPush(sn || "?", ipSrc, "numéro de série inconnu"); return texte(403, "ERROR: unknown device"); }
     /* le numéro de série ne suffit pas : l'appel doit venir de l'adresse déclarée de l'appareil (ou d'un réseau autorisé) */
     if (!origineAutorisee(T, ipSrc)){ await refuserPush(sn, ipSrc, "adresse d'origine non autorisée (attendue : "+(T.ip||"réseau autorisé")+")"); return texte(403, "ERROR: forbidden"); }
@@ -446,6 +452,16 @@ function creer(o){
     if (!P) throw Object.assign(new Error("Aucun pilote pour « "+(T.modele||T.nom)+" » : choisissez-le dans la fiche de l'appareil ou déposez le pilote du constructeur dans donnees/pilotes."), {code:501});
     if ((P.capacites||ACTIONS).indexOf(action) < 0 && !(action === "info" && (P.capacites||[]).indexOf("diagnostic") >= 0))
       throw Object.assign(new Error("« "+action+" » n'est pas proposé par le pilote "+P.nom+"."), {code:501});
+    /* correctif 10 : effacement des badgeages d'un appareil = collecte complète d'abord (copie de sauvegarde, enregistrement
+       confirmé, lecture complète), effacement par la collecte elle-même ; refus si une étape n'est pas confirmée. Avant : le
+       pilote ZK natif effaçait directement, les badgeages non collectés étaient perdus. ZK Push a son propre circuit. */
+    if (action === "nettoyage" && !P.push && ["pointages", "tout"].indexOf((options && options.quoi) || "pointages") >= 0 && !(options && options.apresCollecte)){
+      if ((P.capacites||ACTIONS).indexOf("collecte") < 0) throw Object.assign(new Error("Effacement des badgeages impossible : ce pilote ne sait pas les collecter d'abord."), {code:409});
+      const rc = await executer("collecte", id, Object.assign({}, options, {purgeForcee:true}), login);
+      if (rc && rc.lus && !rc.purge) throw Object.assign(new Error("Badgeages NON effacés : "+(rc.purgeNonFaite || "copie, enregistrement ou lecture complète non confirmés")+". Ils restent sur l'appareil ("+(rc.integres||0)+" enregistré(s) dans FIWAKTI)."), {code:409});
+      if (((options && options.quoi) || "pointages") === "pointages") return {ok:true, collecte:{lus:rc ? rc.lus : 0, integres:rc ? rc.integres : 0, purge:!!(rc && rc.purge)}};
+      options = Object.assign({}, options, {quoi:"utilisateurs", apresCollecte:true});
+    }
     const S = await secret(T.id);
     if (S._illisible && !P.push) throw Object.assign(new Error("Identifiant et mot de passe de cet appareil illisibles : ils ont été chiffrés par une autre installation de FIWAKTI (clé différente). Ouvrez la fiche de l'appareil, ressaisissez l'identifiant et le mot de passe puis enregistrez — ou importez le trousseau de clés de l'installation d'origine."), {code:409});
     /* verrou par appareil : l'action manuelle attend l'action automatique en cours (au plus 60 s), puis passe */

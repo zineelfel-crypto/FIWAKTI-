@@ -1673,7 +1673,9 @@ async function traiter(req, res){
     /* 56.33.11 : comptage sur tout le personnel (avant suppression d'un élément de paramétrage) : réservé au paramétrage */
     if (p === "/api/v1/employes/compter" && req.method === "GET"){
       if (!admin){ const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login);
-        if (!({lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).PAR] || 0)) return erreur(res, 403, "Réservé au paramétrage."); }
+        const dr = (P.profil||{}).droits||{}, rg = x=>({lecture:1, saisie:2, validation:3, config:4}[x] || 0);
+        /* correctif 10 : critères des écrans Terminaux et Contrôle d'accès aussi pour le paramétrage des terminaux (avant : 403, affiché « 0 salarié ») */
+        if (!rg(dr.PAR) && !(rg(dr.TER) >= 4 && ["rd", "zone", "zoneAuj", "plan", "planAuj"].indexOf(q.critere) >= 0)) return erreur(res, 403, "Réservé au paramétrage."); }
       return json(res, 200, await AN.compter(q)); }
     if (p === "/api/v1/employes/complets" && req.method === "POST"){ const b = await corpsJson(req, 2e6), r = await AN.complets(C.login, Array.isArray(b.mats) ? b.mats : []);
       /* export de la liste des employés : fiches sans photo (taille) */
@@ -2246,6 +2248,22 @@ async function traiter(req, res){
     if (!admin && rang < 1) return erreur(res, 403, "Droit de consultation des terminaux requis.");
     if (action === "pilotes") return json(res, 200, {pilotes:PT.liste(), attente:PT.attente(), dossier:path.join(DONNEES, "pilotes")});
     if (action === "etat"){ if (!admin && rang < 2) return erreur(res, 403, "Droits insuffisants sur les terminaux."); return json(res, 200, await PT.etat()); }
+    /* correctif 10 : badgeages d'un terminal exportés par le serveur (avant : badgeages chargés dans le navigateur — partiels en
+       grand effectif —, rapprochés sur le nom du terminal, lignes sans terminal incluses). Période de 93 jours au plus, périmètre appliqué. */
+    if (action === "export" && req.method === "GET"){
+      const id = String(u.searchParams.get("id")||""), T = (ref.terms||[]).find(x=>x.id === id); if (!T) return erreur(res, 404, "Terminal introuvable.");
+      const j = s => /^\d{4}-\d{2}-\d{2}$/.test(s||"") ? s : null, au = j(u.searchParams.get("au")) || aujourdhui();
+      const du = j(u.searchParams.get("du")) || new Date(new Date(au+"T00:00:00Z").getTime() - 30*86400000).toISOString().slice(0, 10);
+      if (du > au || (new Date(au) - new Date(du)) / 86400000 > 93) return erreur(res, 400, "Période de 93 jours au plus.");
+      const {P:PE} = await D.perimetreDe(ref, C.login);
+      if (!admin && PE.set !== null && T.siteId){ const sites = new Set((await D.employes()).filter(e=>PE.set.has(String(e.mat))).map(e=>e.siteId)); if (!sites.has(T.siteId)) return erreur(res, 403, "Terminal hors de votre périmètre."); }
+      const l = (await B.all("SELECT data FROM enreg WHERE coll='ptg' AND d>=? AND d<=?", du, au)).map(r=>{ try { return JSON.parse(r.data); } catch(e){ return null; } })
+        .filter(x=>x && (x.term ? x.term === id : (x.dev && (x.dev === T.nom || x.dev === T.ip))) && (admin || PE.set === null || PE.set.has(String(x.mat)))).sort((a, b)=>String(a.ts) < String(b.ts) ? -1 : 1);
+      const c = v=>{ v = String(v == null ? "" : v); return /[";\r\n]/.test(v) ? '"'+v.replace(/"/g, '""')+'"' : v; };
+      const csv = "\ufeff"+["MATRICULE;DATE;HEURE;SENS;TERMINAL;SOURCE"].concat(l.map(x=>[x.mat, String(x.ts).slice(0, 10), String(x.ts).slice(11, 16), x.sens, T.nom, x.src||""].map(c).join(";"))).join("\r\n");
+      await audit(C.login, "pointeuse.export", (T.nom||id)+" du "+du+" au "+au+" : "+l.length+" badgeage(s)", ip);
+      res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"pointages_"+String(T.nom||id).replace(/[^A-Za-z0-9_-]+/g, "_")+"_"+du+"_"+au+".csv\""}); return res.end(csv);
+    }
     if (!admin && rang < 2 && !(action === "biometrie-lever-blocage" && ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) return erreur(res, 403, "Droits insuffisants sur les terminaux.");
     /* 56.33.11 : liste des réactivations en attente des RH (matricule, nom, code d'absence) réservée à ceux qui peuvent
        lever le blocage : validation RH ou paramétrage des terminaux */
@@ -2253,6 +2271,11 @@ async function traiter(req, res){
     if (action === "biometrie-sync-etat" && req.method === "GET") return json(res, 200, await etatBio());
     if (req.method !== "POST") return erreur(res, 405, "Méthode");
     const b = await corpsJson(req);
+    /* correctif 10 : un terminal d'un site hors du périmètre n'est ni interrogé ni commandé (même règle que la supervision) */
+    if (!admin && b.id && ["recharger", "approuver", "desactiver", "biometrie-sync-config", "biometrie-sync-now", "biometrie-lever-blocage"].indexOf(action) < 0){
+      const {P:PP} = await D.perimetreDe(ref, C.login), T0 = (ref.terms||[]).find(x=>x.id === String(b.id));
+      if (PP.set !== null && T0 && T0.siteId){ const sites = new Set((await D.employes()).filter(e=>PP.set && PP.set.has(String(e.mat))).map(e=>e.siteId)); if (!sites.has(T0.siteId)) return erreur(res, 403, "Terminal hors de votre périmètre."); }
+    }
     if (action === "recharger"){ if (!admin) return erreur(res, 403, "Réservé aux administrateurs."); const r = await PT.charger(); await audit(C.login, "pilotes.recharges", JSON.stringify({nb:r.nb, erreurs:r.erreurs, attente:(r.attente||[]).map(x=>x.id)}), ip); return json(res, 200, Object.assign({pilotes:PT.liste(), attente:PT.attente()}, r)); }
     if (action === "approuver" || action === "desactiver"){
       if (!admin) return erreur(res, 403, "Réservé aux administrateurs.");
@@ -2266,6 +2289,7 @@ async function traiter(req, res){
       return json(res, 200, {ok:true, champs:Object.keys(v)});
     }
     if (action === "referentiel") return json(res, 200, {ok:true});
+    if (action === "verifier-identifiants" && !admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux.");
     if (action === "verifier-identifiants" && req.method === "POST"){ try { return json(res, 200, await PT.verifierIdentifiants(String(b.id||""), C.login)); } catch(e){ return erreur(res, e.code || 400, e.message); } }
     /* v56.24 : synchronisation biométrique automatique (pointage et accès) — les actions manuelles restent inchangées */
     if (action === "biometrie-sync-etat") return json(res, 200, await etatBio());
@@ -2286,7 +2310,8 @@ async function traiter(req, res){
     /* v56.5 : état des visages enregistrés (métadonnées seulement, jamais les images ni les gabarits) */
     if (action === "visages-etat"){ if (!admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux."); return json(res, 200, {resume:await VIS().resume()}); }
     /* actions qui modifient l'appareil : réservées au paramétrage des terminaux */
-    if (["nettoyage", "redemarrer", "effacer-commandes", "utilisateurs-envoyer", "visages-lire", "visages-envoyer"].indexOf(action) >= 0 && !admin && rang < 4) return erreur(res, 403, "Action réservée au paramétrage des terminaux.");
+    /* correctif 10 : lire ou retirer les utilisateurs d'un appareil (noms, cartes) relève aussi du paramétrage (avant : dès la saisie) */
+    if (["nettoyage", "redemarrer", "effacer-commandes", "utilisateurs-envoyer", "utilisateurs-lire", "utilisateurs-retirer", "visages-lire", "visages-envoyer"].indexOf(action) >= 0 && !admin && rang < 4) return erreur(res, 403, "Action réservée au paramétrage des terminaux.");
     try { return json(res, 200, await PT.executer(action, String(b.id||""), {quoi:b.quoi, confirme:b.confirme === true}, C.login)); }
     catch(e){ return erreur(res, [403, 404, 428, 429, 501].indexOf(e.code) >= 0 ? e.code : 502, e.message); }
   }

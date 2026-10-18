@@ -1179,3 +1179,38 @@ Le menu Contrôle d'accès est ainsi entièrement repris (correctifs 5 à 9). Li
 transmises aux lecteurs, anti-passback réglé sur le contrôleur.
 
 Livraison : FIWAKTI-56.33.11-correctif-9.zip (cumulatif : correctifs 2 à 8 inclus).
+
+## Correctif 10 — Appareil › Terminaux
+
+Analyse de l'écran Terminaux (fiche, barre d'actions, pilotes), des routes `/api/v1/pointeuses/*`, de `pointeuses.js`,
+des pilotes et des contrôles du paramétrage côté serveur.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | « Nettoyage › Pointages / Tout » (pilote ZK natif) : `CLEAR_ATTLOG` envoyé directement, sans collecte, copie ni intégration — badgeages non encore remontés **perdus** (contraire à la règle « purge seulement après intégration confirmée ») | **critique** | `executer` : collecte complète d'abord (copie, enregistrement, lecture complète), effacement par la collecte elle-même ; refus 409 avec motif sinon ; garde dans `zk.js` |
+| 2 | Actions `ta-suppr`, `ta-go` (nettoyage, redémarrage, envoi…), `termsync`, `svc-diag`, `ping*`, `pil-*` hors de la matrice des droits : un profil en consultation supprimait des terminaux, redémarrait des appareils | **haute** | rattachées à Suppression / Modification / Export |
+| 3 | Serveur : actions sur un terminal hors du périmètre de site ; `utilisateurs-lire`, `utilisateurs-retirer`, `verifier-identifiants` dès TER « saisie » (noms et cartes des personnes de l'appareil) | **haute** | périmètre de site (comme la supervision) ; paramétrage TER requis |
+| 4 | Serveur : aucun contrôle du paramétrage `terms` (site, adresse, port, n° de série, usage, bornes ; terminaux d'autres sites réécrits par un profil limité ; dossier de pilote) | **haute** | `controleTerms` dans `donnees.js` |
+| 5 | N° de série en double : `termParSn` prenait le premier terminal — badgeages Push refusés ou attribués au mauvais appareil (porte, fuseau) | **haute** | refusé à la saisie et au serveur ; appareil ambigu refusé et journalisé ; terminal désactivé signalé comme tel |
+| 6 | Fiche complète des terminaux (IP, n° de série, dossier) envoyée à tous les comptes, portail compris | **haute** | `perimetre.vue` : sans droit TER → nom, site, porte, usage ; sans paramétrage → ni adresse, ni port, ni n° de série, ni dossier |
+| 7 | Pilote Sagem : dossier libre sur le serveur (lecture, déplacement, écriture de fichiers) | moyenne | dossier interdit dans l'installation ; modification réservée à l'administrateur (point 4) |
+| 8 | Suppression d'un terminal : impacts limités aux salariés rattachés ; suppression en masse sans impacts | moyenne | porte et badgeages ajoutés ; impacts dans la confirmation en masse |
+| 9 | Comptage serveur refusé (profil sans PAR) affiché « 0 salarié » | moyenne | « ? » ; critères rd / zone / plan permis au paramétrage TER |
+| 10 | Export « pointages de ce terminal » : données du navigateur (partielles en grand effectif), rapprochement sur le nom, saisies manuelles incluses | moyenne | route serveur `GET /api/v1/pointeuses/export` (identifiant du terminal, 93 jours max, périmètre, audit) |
+| 11 | « Simuler sync horaire » actif en mode serveur (écart inventé présenté comme réel) ; écart réel jamais enregistré ; ZK Push « écart corrigé : null s » ; mode et fréquence sans effet | moyenne | simulation réservée à la démo ; écart enregistré ; message « mise à l'heure envoyée » ; aide clarifiée |
+| 12 | Saisie : port hors bornes, n° de série en double, ZK Push sans n° de série, bornes de collecte, site inexistant acceptés ; boutons de service sur un terminal non enregistré ; « Tester tous » (démo) incluant les terminaux désactivés | basse | contrôlés / masqués |
+
+Vérifié : `executer` avec un pilote ZK simulé — avant : effacement direct dans les 3 cas, y compris copie impossible ;
+après : collecte puis effacement, refus 409 si la copie échoue. Serveur réel avec un chef de site (TER saisie) et un
+technicien (TER config) limités au site s1 : fiches masquées, utilisateurs-lire 403, terminal du site s2 403,
+comptage rd permis au technicien, renommer un terminal de s2 / port 70000 / n° de série en double / dossier /etc refusés,
+modification légitime acceptée, export filtré (saisie manuelle et autre terminal exclus), push ZK d'un n° de série en
+double refusé avec motif. Moteur réel : 9 contrôles écran avant / après, 35 fiches sans erreur. Chromium : profil en
+consultation — avant, suppression d'un terminal effectuée ; après, refusée ; redémarrage refusé ; impacts affichés.
+
+À valider sur appareil réel (non modifié) : heure envoyée par ZK Push (`SET OPTIONS DateTime`, heure UTC) ; effet de
+`CLEAR DATA` selon le firmware. Hors écran : l'import de badgeages (Import) rapproche les matricules sur les salariés
+chargés dans le navigateur (partiel en grand effectif).
+
+Livraison : FIWAKTI-56.33.11-correctif-10.zip (cumulatif : correctifs 2 à 9 inclus ; ajoute perimetre.js, pilotes/zk.js,
+pilotes/sagem.js).

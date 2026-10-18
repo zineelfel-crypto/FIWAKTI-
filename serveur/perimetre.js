@@ -151,8 +151,19 @@ function peutEcrire(profil, cle){
 }
 
 /* ---------- lecture : document filtré pour l'utilisateur ---------- */
+/* correctif 10 : fiches des terminaux selon le droit TER — sans droit : nom, site, porte, usage ; sans paramétrage : ni adresse,
+   ni port, ni n° de série, ni dossier ou réglage du pilote (avant : fiche complète envoyée à tout compte, portail compris) */
+const TERMS_LECTURE = ["id","nom","siteId","porteId","usage","actif","modele","pilote","comEtat","comMs","comAt","comMotif","comSimule","derniereActivite","fuseau","identifiantAppareil","collecteMinutes","purgeApresCollecte"];
+const TERMS_AUCUN = ["id","nom","siteId","porteId","usage","actif"];
+function termsVus(doc, P){
+  if (!Array.isArray(doc.terms) || (P.u && P.u.role === "admin") || niveauProfil(P.profil) === "admin") return doc;
+  const r = RANG[droitsDe(P.profil).TER] || 0; if (r >= 4) return doc;
+  const garder = r >= 1 ? TERMS_LECTURE : TERMS_AUCUN;
+  return Object.assign({}, doc, {terms:doc.terms.map(T=>{ const o = {}; garder.forEach(k=>{ if (T && k in T) o[k] = T[k]; }); return o; })});
+}
 function vue(doc, login){
   const P = perimetre(doc, login);
+  doc = termsVus(doc, P);
   if (P.u && P.set === null && !(P.profil && P.profil.persoMasque)) return {doc, P};   /* accès global */
   const o = Object.assign({}, doc);
   const ok = m => P.set !== null && P.set !== undefined ? P.set.has(m) : true;

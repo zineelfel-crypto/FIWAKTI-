@@ -233,6 +233,10 @@ function creer(B, PERIM){
         if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
         /* correctif 8 : plages d'accès — pas de plage supprimée encore utilisée par un planning, intervalles valides */
         /* correctif 9 : plannings d'accès — pas de planning supprimé encore référencé, plages existantes, au moins un jour ouvert */
+        /* correctif 10 : terminaux — contrôles côté serveur (adresse, port, n° de série unique, site, usage, bornes), terminaux hors
+           périmètre intouchables pour un non-administrateur, dossier du pilote réservé à l'administrateur */
+        if (k === "terms"){ const sitesP = admin || P.set === null ? null : new Set((await employes()).filter(e=>P.set.has(String(e.mat))).map(e=>e.siteId));
+          const motif = controleTerms(ref.terms || [], r.terms || [], Array.isArray(r.sites) ? r.sites : (ref.sites || []), sitesP, admin); if (motif){ ignores.push("terms ("+motif+")"); continue; } }
         if (k === "aplans"){ const motif = controleAplans(ref.aplans || [], r.aplans || [], Array.isArray(r.aplages) ? r.aplages : (ref.aplages || []), await employes()); if (motif){ ignores.push("aplans ("+motif+")"); continue; } }
         if (k === "aplages"){ const motif = controleAplages(ref.aplages || [], r.aplages || [], Array.isArray(r.aplans) ? r.aplans : (ref.aplans || [])); if (motif){ ignores.push("aplages ("+motif+")"); continue; } }
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
@@ -442,6 +446,34 @@ function controleCals(avant, apres, ref){
     for (const k of cles) if (JSON.stringify(jour(a, k)) !== JSON.stringify(jour(n, k))) return "exception du "+k+" en période clôturée";
     const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
     for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
+  }
+  return "";
+}
+const TERM_VOLATILS = ["comEtat","comMs","comAt","comMotif","comSimule","comInfo","derniereActivite","syncAt","syncDelta"];
+function controleTerms(avant, apres, sites, sitesP, admin){
+  const sansVol = T=>{ const o = Object.assign({}, T); TERM_VOLATILS.forEach(k=>delete o[k]); return JSON.stringify(o); };
+  const parId = new Map((avant||[]).map(T=>[T && T.id, T])), ids = new Set(), idSites = new Set((sites||[]).map(x=>x && x.id));
+  const hors = T=>sitesP && T && T.siteId && !sitesP.has(T.siteId);
+  for (const T of apres||[]){ if (!T || !T.id) return "terminal sans identifiant"; if (ids.has(T.id)) return "identifiant de terminal en double ("+T.id+")"; ids.add(T.id); }
+  for (const v of avant||[]) if (v && !ids.has(v.id) && hors(v)) return "suppression du terminal « "+v.nom+" » hors de votre périmètre";
+  const changes = (apres||[]).filter(T=>{ const v = parId.get(T.id); return !v || sansVol(v) !== sansVol(T); });
+  const cleIp = T=>String(T.ip||"").trim().toLowerCase()+":"+(Number(T.port)||4370), cleSn = T=>String(T.sn||"").trim().toLowerCase();
+  for (const T of changes){
+    const v = parId.get(T.id), nom = "« "+(T.nom||T.id)+" »";
+    if (hors(T) || hors(v)) return "terminal "+nom+" hors de votre périmètre";
+    if (!admin && v && String(v.dossier||"") !== String(T.dossier||"")) return "dossier du pilote de "+nom+" : réservé à l'administrateur";
+    if (!admin && !v && String(T.dossier||"").trim()) return "dossier du pilote de "+nom+" : réservé à l'administrateur";
+    if (!String(T.nom||"").trim()) return "terminal sans nom";
+    if (!T.siteId || !idSites.has(T.siteId)) return "site du terminal "+nom+" introuvable";
+    if (T.usage && ["clocking", "door", "both"].indexOf(T.usage) < 0) return "usage du terminal "+nom+" invalide";
+    if (T.ip && !/^[A-Za-z0-9.:-]{1,253}$/.test(String(T.ip).trim())) return "adresse du terminal "+nom+" invalide";
+    if (T.port !== undefined && T.port !== "" && !(Number.isInteger(Number(T.port)) && Number(T.port) >= 1 && Number(T.port) <= 65535)) return "port du terminal "+nom+" hors de 1-65535";
+    if (T.collecteMinutes !== undefined && T.collecteMinutes !== "" && !(Number(T.collecteMinutes) >= 0 && Number(T.collecteMinutes) <= 10080)) return "fréquence de collecte de "+nom+" invalide";
+    if (T.joursCollecte !== undefined && T.joursCollecte !== "" && !(Number(T.joursCollecte) >= 1 && Number(T.joursCollecte) <= 366)) return "profondeur de collecte de "+nom+" hors de 1-366 jours";
+    if (T.pilote === "zk-push" && !cleSn(T)) return "n° de série obligatoire pour "+nom+" (ZK Push)";
+    const neufIp = T.ip && (!v || cleIp(v) !== cleIp(T)), neufSn = cleSn(T) && (!v || cleSn(v) !== cleSn(T) || (v.actif === false && T.actif !== false));
+    if (neufIp && (apres||[]).some(x=>x && x.id !== T.id && x.ip && cleIp(x) === cleIp(T))) return "adresse "+T.ip+":"+(Number(T.port)||4370)+" déjà utilisée par un autre terminal";
+    if (neufSn && T.actif !== false && (apres||[]).some(x=>x && x.id !== T.id && x.actif !== false && cleSn(x) === cleSn(T))) return "n° de série "+T.sn+" déjà déclaré sur un autre terminal actif";
   }
   return "";
 }
