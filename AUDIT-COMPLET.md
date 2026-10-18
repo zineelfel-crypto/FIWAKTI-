@@ -1214,3 +1214,38 @@ chargés dans le navigateur (partiel en grand effectif).
 
 Livraison : FIWAKTI-56.33.11-correctif-10.zip (cumulatif : correctifs 2 à 9 inclus ; ajoute perimetre.js, pilotes/zk.js,
 pilotes/sagem.js).
+
+## Correctif 11 — Appareil › Biométrie
+
+Analyse de l'écran Biométrie, de la synchronisation automatique (`biosync.js`), du stockage des visages
+(`visages.js`), des commandes ZK Push et des routes `/api/v1/pointeuses/biometrie-*` / `visages-*`.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | En mode serveur, l'écran ne pilotait aucun appareil : tableaux du navigateur (`db.bio`, `bioq`…), « Collecter » **inventait** des gabarits, « Traiter la file » marquait « fait » sans communication | **critique** | écran serveur : salariés enrôlés (métadonnées, appareils, blocages ; paginé, périmètre), effacement des gabarits (paramétrage TER, confirmation, audit, retrait des appareils puis réinscription sans biométrie), panneau de synchronisation réel ; actions simulées réservées à la démo |
+| 2 | Gabarits **jamais effacés** (`visages.supprimer` jamais appelé) : visages de salariés partis conservés indéfiniment, sauvegardes comprises | **critique** | purge planifiée (6 h) selon un délai de conservation fixé par l'administrateur (aucune purge tant qu'il n'est pas réglé) ; effacement à la suppression d'un salarié |
+| 3 | Salarié supprimé : aucun retrait des appareils (suppression jamais signalée à la synchronisation) | **haute** | suppression signalée : retrait programmé, gabarits, blocage et suivi effacés |
+| 4 | Retrait d'un sortant en « échec définitif » après ~1 h 30 d'appareil injoignable, jamais repris (`bio_sorties` déjà marqué) : l'ancien salarié gardait l'accès | **haute** | retrait jamais abandonné (nouvel essai toutes les heures au plus) ; ordres d'un appareil supprimé annulés |
+| 5 | Changement de matricule : visages, blocage, présence restés sur l'ancien matricule — réinscription sans visage et **sans le blocage soumis aux RH** | **haute** | données biométriques rattachées au nouveau matricule avant la diffusion |
+| 6 | Commandes ZK Push (photos, gabarits en base64) persistées **en clair** dans la base et les sauvegardes, 200 dernières conservées | **haute** | file chiffrée au repos (clé « biometrie » du coffre) ; commandes envoyées conservées sans contenu biométrique |
+| 7 | Liste des blocages (code d'absence = donnée de santé) et levée d'un blocage sans périmètre | **haute** | filtrées / refusées hors périmètre |
+| 8 | Validation RH sans droit TER : levée refusée (contrôle TER avant l'exception RH) | moyenne | consultation et levée permises à la validation RH, limitées au périmètre |
+| 9 | Actions de l'écran hors matrice des droits ; écran ouvert selon PTG (le serveur exige TER) | **haute** | actions catégorisées ; `ECRAN_DROIT.bio = TER` |
+| 10 | Sortie : la règle « retirer les accès » **effaçait** l'historique des droits d'accès (`acces = []`) ; dernier jour travaillé traité comme une sortie (`<=`) ; ordres de retrait dupliqués dans la file du navigateur | moyenne | droits clos à date (« aucun accès » le lendemain de la sortie) ; même règle de date que le serveur ; file du navigateur seulement en démo |
+| 11 | Pilote sans retrait : ordre marqué « ok » (« à retirer à la main » invisible, purgé après 7 jours) | moyenne | statut « manuel », compté, conservé 30 jours |
+| 12 | Messages pointeuse sans contrôle ; `window.FIWAKTI.enroll` (ouvre des accès) utilisable en production | basse | contrôles ; interface réservée à la démo |
+
+Vérifié : vraie base SQLite, appareil simulé — avant / après : retrait sortant (échec définitif → réessayé), salarié
+supprimé (aucun ordre → retrait), changement de matricule (visage / blocage / liste RH sur le nouveau matricule, salarié
+bloqué non réinscrit), purge (absente → sortis > délai et supprimés effacés, autres conservés ; rien sans délai réglé).
+Serveur réel : liste paginée (admin 5, chef de site 3 ; aucune donnée biométrique transmise), effacement hors périmètre
+403 / sans paramétrage 403 / sans confirmation 428 / autorisé 200, RH sans droit terminaux : liste limitée au site et
+levée hors périmètre 403. Chromium : écran serveur (liste réelle, effacement confirmé, conservation non réglée signalée
+puis réglée), démo inchangée ; sortie d'un salarié : historique des droits conservé (2 → 4 lignes). Compteurs de temps
+identiques ; 35 fiches sans erreur.
+
+Non traité (à décider) : écran RH dédié aux blocages biométriques (la validation RH sans droit TER n'a pas d'écran pour
+lever un blocage, seulement l'API) ; consentement / information des salariés (rappel INPDP affiché) ; après une
+resynchronisation, la présence des salariés hors périmètre sur l'appareil n'est pas reconstruite (non reproduit).
+
+Livraison : FIWAKTI-56.33.11-correctif-11.zip (cumulatif : correctifs 2 à 10 inclus).

@@ -311,6 +311,8 @@ function creer(B, PERIM){
           await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++;
           if (c === "ptg" && API.tracerPtg) await API.tracerPtg(login, avant, null);
           if (c === "emps") CACHE_EMPS = null;
+          /* correctif 11 : suppression d'un salarié signalée (retrait des appareils, effacement des données biométriques) */
+          if (c === "emps" && SUR_EMP){ const a = avant; setImmediate(()=>{ try { SUR_EMP(a, null); } catch(e){} }); }
           joursDe(c, avant).forEach(d=>touches.add(avant.mat+"|"+d));
         }
         if (refus) ignores.push(c+" ("+refus+" refusé(s)"+(clotRefus ? ", dont période clôturée : ajustement de période antérieure requis" : "")+")");

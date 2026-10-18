@@ -278,11 +278,18 @@ function creer(o){
   }
   /* ---------- protocole Push (ADMS) ---------- */
   const PUSH = {};
-  async function etatPushCharger(){ Object.assign(PUSH, (await meta("pointeuses_push")) || {}); }
+  /* correctif 11 : file des commandes Push chiffrée au repos (elle porte des photos et gabarits en base64 : avant en clair dans la base et
+     les sauvegardes) ; commandes déjà envoyées conservées sans leur contenu biométrique */
+  const pushChiffre = () => ({chiffre:coffre.chiffrerTexte(JSON.stringify(PUSH), "biometrie")});
+  const sansBio = c => String(c||"").replace(/((?:Content|Tmp|TMP)=)[^\t]*/g, "$1[…]");
+  async function etatPushCharger(){ const v = (await meta("pointeuses_push")) || {}; let o = v;
+    if (v && v.chiffre){ try { o = JSON.parse(coffre.dechiffrerTexte(v.chiffre, "biometrie")); } catch(e){ o = {}; journal("file Push illisible (clé « biometrie » différente) : "+e.message); } }
+    Object.values(o || {}).forEach(e=>{ if (e && Array.isArray(e.envoyees)) e.envoyees = e.envoyees.map(x=>Object.assign({}, x, {c:sansBio(x.c)})); });
+    Object.assign(PUSH, o || {}); }
   let sauvePush = null;
-  function persisterPush(){ if (sauvePush) return; sauvePush = setTimeout(()=>{ sauvePush = null; meta("pointeuses_push", PUSH).catch(()=>{}); }, 2000); }
+  function persisterPush(){ if (sauvePush) return; sauvePush = setTimeout(()=>{ sauvePush = null; meta("pointeuses_push", pushChiffre()).catch(()=>{}); }, 2000); }
   /* 56.33.11 : écriture immédiate (retraits de sortants : un redémarrage dans les 2 s ne doit pas perdre la commande) */
-  async function persisterPushMaintenant(){ if (sauvePush){ clearTimeout(sauvePush); sauvePush = null; } await meta("pointeuses_push", PUSH); }
+  async function persisterPushMaintenant(){ if (sauvePush){ clearTimeout(sauvePush); sauvePush = null; } await meta("pointeuses_push", pushChiffre()); }
   const etatPush = sn => PUSH[sn] || (PUSH[sn] = {cmds:[], seq:0});
   function commandePush(sn, c){ const e = etatPush(sn); e.seq = (e.seq||0) + 1; e.cmds.push({id:e.seq, c}); persisterPush(); return e.seq; }
   /* 56.33.11 : effacement des badgeages d'un appareil Push en deux temps — l'appareil renvoie tout son journal ; le
@@ -398,7 +405,7 @@ function creer(o){
       }
       if (e.purge && Date.now() - e.purge.demande > 6 * 3600000){ e.purge = null; persisterPush(); journal("push "+sn+" : effacement abandonné (renvoi non confirmé en 6 h)"); }
       if (!e.cmds.length) return texte(200, "OK");
-      const lot = e.cmds.splice(0, 20); e.envoyees = (e.envoyees||[]).concat(lot).slice(-200); persisterPush();
+      const lot = e.cmds.splice(0, 20); e.envoyees = (e.envoyees||[]).concat(lot.map(x=>Object.assign({}, x, {c:sansBio(x.c)}))).slice(-200); persisterPush();
       return texte(200, lot.map(c=>"C:"+c.id+":"+c.c).join("\r\n"));
     }
     if (p.endsWith("/devicecmd")){ const rl = String(corps||"").split(/\r?\n/).filter(Boolean); e.retours = (e.retours||[]).concat(rl).slice(-200);

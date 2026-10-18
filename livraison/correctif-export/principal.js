@@ -2245,7 +2245,9 @@ async function traiter(req, res){
     const action = p.split("/").pop();
     /* 56.33.11 : lecture des pilotes et de l'état des appareils (n° de série, adresses, badges inconnus) réservée au droit
        sur les terminaux (avant : tout utilisateur connecté) */
-    if (!admin && rang < 1) return erreur(res, 403, "Droit de consultation des terminaux requis.");
+    /* correctif 11 : la validation RH (sans droit sur les terminaux) consulte et lève les blocages biométriques de son périmètre */
+    const rangRh = ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0), rhSeul = !admin && rang < 2 && rangRh >= 3 && (action === "biometrie-lever-blocage" || action === "biometrie-sync-etat");
+    if (!admin && rang < 1 && !rhSeul) return erreur(res, 403, "Droit de consultation des terminaux requis.");
     if (action === "pilotes") return json(res, 200, {pilotes:PT.liste(), attente:PT.attente(), dossier:path.join(DONNEES, "pilotes")});
     if (action === "etat"){ if (!admin && rang < 2) return erreur(res, 403, "Droits insuffisants sur les terminaux."); return json(res, 200, await PT.etat()); }
     /* correctif 10 : badgeages d'un terminal exportés par le serveur (avant : badgeages chargés dans le navigateur — partiels en
@@ -2264,10 +2266,14 @@ async function traiter(req, res){
       await audit(C.login, "pointeuse.export", (T.nom||id)+" du "+du+" au "+au+" : "+l.length+" badgeage(s)", ip);
       res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"pointages_"+String(T.nom||id).replace(/[^A-Za-z0-9_-]+/g, "_")+"_"+du+"_"+au+".csv\""}); return res.end(csv);
     }
-    if (!admin && rang < 2 && !(action === "biometrie-lever-blocage" && ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) return erreur(res, 403, "Droits insuffisants sur les terminaux.");
+    if (!admin && rang < 2 && !rhSeul) return erreur(res, 403, "Droits insuffisants sur les terminaux.");
     /* 56.33.11 : liste des réactivations en attente des RH (matricule, nom, code d'absence) réservée à ceux qui peuvent
        lever le blocage : validation RH ou paramétrage des terminaux */
-    const etatBio = async () => { const e = await BS().etat(); if (!(admin || rang >= 4 || ({validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0) >= 3)) delete e.blocagesRh; return e; };
+    const etatBio = async () => { const e = await BS().etat(); if (!(admin || rang >= 4 || rangRh >= 3)) delete e.blocagesRh;
+      /* correctif 11 : blocages (code d'absence = donnée de santé) et derniers événements limités au périmètre */
+      if (!admin){ const {P:PB} = await D.perimetreDe(ref, C.login); if (PB.set !== null){ const ok = m=>PB.set.has(String(m)); if (e.blocagesRh) e.blocagesRh = e.blocagesRh.filter(x=>ok(x.mat)); e.evenements = (e.evenements||[]).filter(x=>!x.mat || x.mat === "*" || ok(x.mat)); } }
+      if (rhSeul) return {blocagesRh:e.blocagesRh || []};
+      return e; };
     if (action === "biometrie-sync-etat" && req.method === "GET") return json(res, 200, await etatBio());
     if (req.method !== "POST") return erreur(res, 405, "Méthode");
     const b = await corpsJson(req);
@@ -2305,10 +2311,30 @@ async function traiter(req, res){
     if (action === "biometrie-lever-blocage"){
       const rh = {aucun:0, lecture:1, saisie:2, validation:3, config:4}[((pr||{}).droits||{}).EMP] || 0;
       if (!admin && rang < 4 && rh < 3) return erreur(res, 403, "Réservé à la validation RH ou au paramétrage des terminaux.");
+      if (!admin){ const {P:PL} = await D.perimetreDe(ref, C.login); if (PL.set !== null && !PL.set.has(String(b.mat||"").trim())) return erreur(res, 403, "Salarié hors de votre périmètre."); }
       try { return json(res, 200, await BS().leverBlocage(String(b.mat||"").trim(), C.login)); } catch(e){ return erreur(res, e.code || 400, e.message); }
     }
     /* v56.5 : état des visages enregistrés (métadonnées seulement, jamais les images ni les gabarits) */
     if (action === "visages-etat"){ if (!admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux."); return json(res, 200, {resume:await VIS().resume()}); }
+    /* correctif 11 : écran Biométrie relié aux données réelles — liste paginée des salariés enrôlés (métadonnées seulement, jamais les
+       gabarits), périmètre appliqué ; effacement des gabarits d'un salarié (paramétrage TER, confirmation, audit, retrait des appareils) */
+    if (action === "visages-liste"){
+      const {P:PV} = await D.perimetreDe(ref, C.login), emps = new Map((await D.employes()).map(e=>[String(e.mat), e])), q = String(b.q||"").trim().toLowerCase();
+      const parMat = new Map(); (await B.all("SELECT mat, format, indice, taille, source, cree FROM bio_visages ORDER BY mat, format, indice")).forEach(r=>{ const m = String(r.mat); if (!admin && PV.set !== null && !PV.set.has(m)) return; (parMat.get(m) || parMat.set(m, []).get(m)).push({format:r.format, indice:Number(r.indice), taille:Number(r.taille), source:r.source||"", cree:r.cree}); });
+      const pres = new Map(); (await B.all("SELECT terminal_id, mat FROM bio_presence")).forEach(r=>{ const m = String(r.mat); if (parMat.has(m) || !q) (pres.get(m) || pres.set(m, []).get(m)).push(r.terminal_id); });
+      const bloq = new Map((await B.all("SELECT mat, mode, fin FROM bio_blocages WHERE statut='actif'")).map(r=>[String(r.mat), r]));
+      let l = Array.from(parMat.entries()).map(([m, v])=>{ const e = emps.get(m) || {}; return {mat:m, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), siteId:e.siteId||"", sortie:e.sortie||"", inconnu:!emps.has(m), gabarits:v, appareils:pres.get(m) || [], bloque:bloq.has(m) ? (bloq.get(m).mode === "rh" ? "rh" : "auto") : ""}; });
+      if (q) l = l.filter(x=>(x.mat+" "+x.nom).toLowerCase().indexOf(q) >= 0);
+      const off = Math.max(0, Number(b.offset)||0); return json(res, 200, {total:l.length, lignes:l.slice(off, off + 100), sansBio:Array.from(emps.values()).filter(e=>!(e.sortie && e.sortie < aujourdhui()) && (admin || PV.set === null || PV.set.has(String(e.mat))) && !parMat.has(String(e.mat))).length});
+    }
+    if (action === "visages-supprimer"){
+      if (!admin && rang < 4) return erreur(res, 403, "Réservé au paramétrage des terminaux.");
+      if (b.confirme !== true) return erreur(res, 428, "Effacement non confirmé.");
+      const mat = String(b.mat||"").trim(); if (!mat) return erreur(res, 400, "Matricule manquant.");
+      if (!admin){ const {P:PS2} = await D.perimetreDe(ref, C.login); if (PS2.set !== null && !PS2.set.has(mat)) return erreur(res, 403, "Salarié hors de votre périmètre."); }
+      const r = await VIS().supprimer(mat, C.login), rb = await BS().retirerBiometrie(mat, C.login);
+      return json(res, 200, {ok:true, gabarits:Number(r)||0, retrait:rb});
+    }
     /* actions qui modifient l'appareil : réservées au paramétrage des terminaux */
     /* correctif 10 : lire ou retirer les utilisateurs d'un appareil (noms, cartes) relève aussi du paramétrage (avant : dès la saisie) */
     if (["nettoyage", "redemarrer", "effacer-commandes", "utilisateurs-envoyer", "utilisateurs-lire", "utilisateurs-retirer", "visages-lire", "visages-envoyer"].indexOf(action) >= 0 && !admin && rang < 4) return erreur(res, 403, "Action réservée au paramétrage des terminaux.");
@@ -2458,6 +2484,8 @@ async function demarrer(){
     const c = await BS().config(); if (!c.actif) return "inactive (mode manuel)"; if (c.pause) return "en pause";
     if (Date.now() - BIO_DERNIER < c.intervalleMin * 60000) return "prochain cycle dans "+Math.ceil((c.intervalleMin * 60000 - (Date.now() - BIO_DERNIER)) / 60000)+" min";
     BIO_DERNIER = Date.now(); const r = await BS().cycle("planificateur"); return r.resultat+" — "+r.actions+" action(s)"; }});
+  /* correctif 11 : effacement des gabarits des salariés sortis (délai de conservation) et supprimés, même sans synchronisation automatique */
+  PLAN.planifier("purge-biometrique", {intervalle:6*3600000, premier:120000, priorite:3, delai:30*60000, actif:()=>installe() && !!PT, fn:async ()=>{ const r = await BS().purgerVisages(); return r.gabarits+" gabarit(s) de "+r.salaries+" salarié(s) effacé(s)"; }});
   PLAN.planifier("debit-purge", {intervalle:60000, priorite:3, delai:30000, actif:()=>installe() && B.type === "pg", fn:async ()=>{
     const r = await B.run("DELETE FROM fw_debit WHERE fenetre < ?", Math.floor(Date.now() / 10000) - 6); return r.n+" compteur(s) purgé(s)"; }});
   PLAN.planifier("nettoyage-sessions-et-travaux", {intervalle:10*60000, priorite:3, delai:60000, actif:installe, fn:async ()=>{

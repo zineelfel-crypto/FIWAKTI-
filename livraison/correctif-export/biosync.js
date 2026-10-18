@@ -37,7 +37,7 @@ function typesEffectifs(cfg, ref){ return {auto:cfg.typesBlocageAuto == null ? t
   fin:majuscules(cfg.typesBlocageFinAuto), rh:majuscules(cfg.typesBlocageValidationRH)}; }
 const DEFAUTS = {actif:false, pause:false, intervalleMin:15, terminauxMaitres:[], maxActionsParCycle:5, formatsVisage:["photo-jpeg", "zk-bio9-*", "zk-face7"],
   inclureTerminauxAcces:true, typesBlocageAuto:null, typesBlocageFinAuto:[], typesBlocageValidationRH:[], delaiGraceHeures:2,
-  delaiEntreActionsSec:20, maxDureeCycleSec:120, maxEssais:5, backoffRetrySec:[60, 300, 900, 3600], prioriteRetrait:1, delaiRecuperationJobBloqueMin:10};
+  delaiEntreActionsSec:20, maxDureeCycleSec:120, purgeVisagesJours:null, maxEssais:5, backoffRetrySec:[60, 300, 900, 3600], prioriteRetrait:1, delaiRecuperationJobBloqueMin:10};
 const ACTION_PILOTE = {lire:"visages-lire", envoyer_users:"utilisateurs-envoyer", envoyer_visages:"visages-envoyer", retrait:"utilisateurs-retirer"};
 const RANG_ACTION = {retrait:0, envoyer_users:1, envoyer_visages:2, lire:3, reconciliation:4};
 function creer(o){
@@ -66,6 +66,7 @@ function creer(o){
     if ("delaiEntreActionsSec" in b) c.delaiEntreActionsSec = n(b.delaiEntreActionsSec, 5, 600, 20);
     if ("maxDureeCycleSec" in b) c.maxDureeCycleSec = n(b.maxDureeCycleSec, 10, 1800, 120);
     if ("maxEssais" in b) c.maxEssais = n(b.maxEssais, 1, 20, 5);
+    if ("purgeVisagesJours" in b) c.purgeVisagesJours = b.purgeVisagesJours === null || b.purgeVisagesJours === "" ? null : n(b.purgeVisagesJours, 0, 365, 30);
     if ("delaiRecuperationJobBloqueMin" in b) c.delaiRecuperationJobBloqueMin = n(b.delaiRecuperationJobBloqueMin, 2, 120, 10);
     if (Array.isArray(b.backoffRetrySec)) c.backoffRetrySec = b.backoffRetrySec.map(x=>n(x, 10, 86400, 60)).slice(0, 10);
     ["terminauxMaitres","formatsVisage","typesBlocageAuto","typesBlocageFinAuto","typesBlocageValidationRH"].forEach(k=>{ if (k in b) c[k] = lst(b[k]); });
@@ -139,6 +140,11 @@ function creer(o){
   /* changement de site, de rattachement ou sortie : retraits (prioritaires) puis ajouts */
   const a0 = x => x || {};
   async function surChangementEmp(ancien, nouveau){
+    /* correctif 11 : salarié supprimé → gabarits, blocage et suivi effacés, retrait des appareils ; matricule changé → données
+       biométriques suivies sous le nouveau matricule (avant : visages et blocage restés sur l'ancien, réinscription sans visage
+       et sans le blocage RH) */
+    if (ancien && !nouveau){ await surSuppressionEmp(ancien); return; }
+    if (ancien && nouveau && String(ancien.mat||"") && String(ancien.mat) !== String(nouveau.mat||"")) await renommerMat(String(ancien.mat), String(nouveau.mat));
     const cfg = await config(); if (!cfg.actif || !nouveau) return;
     /* 56.33.11 : badge, code ou matricule changé — l'ancien identifiant est retiré des appareils et le nouveau envoyé
        (avant : carte perdue toujours valide sur les appareils en mode « badge », nouvelle carte jamais envoyée) */
@@ -153,6 +159,44 @@ function creer(o){
     const retirer = Array.from(avant).filter(t=>!apres.has(t)), ajouter = Array.from(apres).filter(t=>!avant.has(t));
     if (retirer.length) await enfilerRetrait(a.mat || n.mat, retirer, "perimetre");
     if (ajouter.length && !BLOQUES.has(String(n.mat))) await enfilerDiffusion(n.mat, ajouter, "perimetre");
+  }
+  async function renommerMat(a, n){
+    for (const t of ["bio_visages", "bio_blocages", "bio_presence", "bio_sorties"]){ try { await B.run("UPDATE "+t+" SET mat=? WHERE mat=?", n, a); } catch(e){ journal("biométrie : matricule "+a+" → "+n+" ("+t+") : "+e.message); } }
+    if (BLOQUES.has(a)){ BLOQUES.delete(a); BLOQUES.add(n); } if (SORTIS && SORTIS.has(a)){ SORTIS.set(n, SORTIS.get(a)); SORTIS.delete(a); }
+    await audit("systeme", "biometrie.matricule", a+" → "+n+" : données biométriques rattachées au nouveau matricule");
+  }
+  async function surSuppressionEmp(a){
+    const mat = String(a.mat||""); if (!mat) return;
+    const cfg = await config(), pres = (await B.all("SELECT terminal_id FROM bio_presence WHERE mat=?", mat)).map(r=>r.terminal_id);
+    if (cfg.actif){ const terms = await appareils(cfg), cibles = Array.from(new Set(perimetre(Object.assign({}, a, {sortie:""}), terms, rattaches(await D.employes())).concat(pres))).filter(t=>terms.some(T=>T.id === t)); if (cibles.length) await enfilerRetrait(mat, cibles, "suppression"); }
+    const n = (await B.all("SELECT id FROM bio_visages WHERE mat=?", mat)).length;
+    await B.run("DELETE FROM bio_visages WHERE mat=?", mat); await B.run("DELETE FROM bio_blocages WHERE mat=?", mat); await B.run("DELETE FROM bio_sorties WHERE mat=?", mat);
+    BLOQUES.delete(mat); if (SORTIS) SORTIS.delete(mat);
+    await audit("systeme", "biometrie.suppression_salarie", mat+" : "+n+" gabarit(s) effacé(s)"+(pres.length ? ", retrait demandé sur "+pres.length+" appareil(s)" : "")+(cfg.actif ? "" : " — synchronisation automatique inactive : retirer le salarié des appareils"));
+  }
+  /* correctif 11 : gabarits d'un salarié effacés à la demande → retrait de ses appareils (avec ses gabarits) puis réinscription sans biométrie */
+  async function retirerBiometrie(mat, login){
+    const cfg = await config(), emps = await D.employes(), e = emps.find(x=>String(x.mat) === String(mat));
+    if (!cfg.actif) return {appareils:0, note:"synchronisation automatique inactive : retirez aussi les gabarits sur les appareils (Terminaux › Utilisateurs)"};
+    const terms = await appareils(cfg), pres = (await B.all("SELECT terminal_id FROM bio_presence WHERE mat=?", String(mat))).map(r=>r.terminal_id);
+    const cibles = Array.from(new Set((e ? perimetre(e, terms, rattaches(emps)) : []).concat(pres))).filter(t=>terms.some(T=>T.id === t));
+    for (const t of cibles){ const T = terms.find(x=>x.id === t), id = PT().idSurAppareil(T, e || {mat});
+      await enfiler({mat:String(mat), terminal_id:t, action:"retrait", priorite:cfg.prioriteRetrait || 1, version_bio:"ancien-id:"+id, source:"gabarits-effaces:"+login});
+      if (e && !(e.sortie && e.sortie < auj()) && !BLOQUES.has(String(mat)) && perimetre(e, terms, rattaches(emps)).indexOf(t) >= 0) await enfilerDiffusion(mat, [t], "gabarits-effaces"); }
+    return {appareils:cibles.length};
+  }
+  /* correctif 11 : gabarits des salariés sortis effacés après le délai de conservation fixé par l'administrateur, et ceux de matricules
+     inconnus (salarié supprimé) — avant : conservés indéfiniment, sauvegardes comprises */
+  async function purgerVisages(){
+    const cfg = await config();
+    /* rien n'est effacé tant que l'administrateur n'a pas fixé le délai de conservation (effacement irréversible) */
+    if (cfg.purgeVisagesJours === null || cfg.purgeVisagesJours === undefined) return {salaries:0, gabarits:0, nonRegle:true};
+    const lim = (()=>{ const d = new Date(auj()+"T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (Number(cfg.purgeVisagesJours) >= 0 ? Number(cfg.purgeVisagesJours) : 30)); return d.toISOString().slice(0, 10); })();
+    const emps = new Map((await D.employes()).map(e=>[String(e.mat), e])), mats = (await B.all("SELECT DISTINCT mat FROM bio_visages")).map(r=>String(r.mat));
+    const cibles = mats.filter(m=>{ const e = emps.get(m); return !e || (e.sortie && e.sortie < lim); });
+    let n = 0; for (const m of cibles){ await ceder(); n += (await B.all("SELECT id FROM bio_visages WHERE mat=?", m)).length; await B.run("DELETE FROM bio_visages WHERE mat=?", m); }
+    if (cibles.length) await audit("systeme", "biometrie.purge", n+" gabarit(s) de "+cibles.length+" salarié(s) sorti(s) depuis plus de "+cfg.purgeVisagesJours+" jour(s) ou supprimé(s) : "+cibles.slice(0, 50).join(", "));
+    return {salaries:cibles.length, gabarits:n};
   }
   /* ---------- blocages selon les absences (lot, une requête par cycle) ---------- */
   async function chargerBloques(){ BLOQUES = new Set((await B.all("SELECT mat FROM bio_blocages WHERE statut='actif'")).map(r=>String(r.mat))); return BLOQUES; }
@@ -321,14 +365,19 @@ function creer(o){
       const fini = async (statut, detail, suite) => { for (const j of g.jobs){ await ceder();
         if (statut === "ok") await B.run("UPDATE bio_sync_queue SET statut='ok', finished_at=?, locked_at=NULL, detail=? WHERE id=?", maint(), detail, j.id);
         else if (statut === "report") await B.run("UPDATE bio_sync_queue SET statut='attente', locked_at=NULL, next_retry_at=?, detail=? WHERE id=?", new Date(Date.now() + cfg.delaiEntreActionsSec * 1000).toISOString(), detail, j.id);
-        else { const e = j.essais + 1, def = e >= j.max_essais, d = cfg.backoffRetrySec[Math.min(e - 1, cfg.backoffRetrySec.length - 1)] || 300;
+        else if (statut === "manuel") await B.run("UPDATE bio_sync_queue SET statut='manuel', finished_at=?, locked_at=NULL, detail=? WHERE id=?", maint(), detail, j.id);
+        /* correctif 11 : un retrait (sortie, absence, suppression) n'est jamais abandonné — nouvel essai toutes les heures au plus tard, tant que
+           l'appareil existe (avant : « échec définitif » après ~1 h 30 d'appareil injoignable, salarié resté inscrit) */
+        else { const e = j.essais + 1, def = e >= j.max_essais && j.action !== "retrait", d = Math.min(3600, cfg.backoffRetrySec[Math.min(e - 1, cfg.backoffRetrySec.length - 1)] || 300);
           await B.run("UPDATE bio_sync_queue SET statut=?, essais=?, finished_at=?, locked_at=NULL, next_retry_at=?, detail=? WHERE id=?", def ? "echec_final" : "echec", e, maint(), def ? null : new Date(Date.now() + d * 1000).toISOString(), String(detail).slice(0, 300), j.id); }
         if (suite) await suite(j); } };
-      if (!T){ await fini("echec", "appareil absent, inactif, sans pilote ou exclu (accès)"); continue; }
+      if (!T){ const existe = ((await D.referentielLecture() || {}).terms || []).some(x=>x.id === g.terminal);
+        if (!existe){ for (const j of g.jobs) await B.run("UPDATE bio_sync_queue SET statut='annule', finished_at=?, locked_at=NULL, detail=? WHERE id=?", maint(), "appareil supprimé", j.id); continue; }
+        await fini("echec", "appareil absent, inactif, sans pilote ou exclu (accès)"); continue; }
       if (!capable(T, g.action === "reconciliation" ? "envoyer_users" : g.action)){
         /* 56.33.11 : un retrait impossible (sortie, absence) n'est jamais silencieux : le salarié reste inscrit sur l'appareil */
         if (g.action === "retrait") await audit("systeme", "biometrie.retrait_impossible", (T.nom||T.id)+" : le pilote ne sait pas retirer un utilisateur — à retirer à la main sur l'appareil : "+g.jobs.map(j=>j.mat).join(", "));
-        await fini("ok", g.action === "retrait" ? "À RETIRER À LA MAIN : pilote sans retrait (alerte dans l'audit)" : "non pris en charge par le pilote de cet appareil"); continue; }
+        if (g.action === "retrait") await fini("manuel", "À RETIRER À LA MAIN : pilote sans retrait (alerte dans l'audit)"); else await fini("ok", "non pris en charge par le pilote de cet appareil"); continue; }
       for (const id of ids){ await ceder(); await B.run("UPDATE bio_sync_queue SET statut='en_cours', started_at=?, locked_at=?, worker_id=? WHERE id=?", maint(), maint(), WORKER, id); }
       const mats = g.jobs.map(j=>j.mat).filter(m=>m && m !== "*"), opts = {confirme:true, delaiMs:cfg.delaiEntreActionsSec * 1000};
       try {
@@ -383,7 +432,7 @@ function creer(o){
         /* 3. traitement borné de la file */
         await traiter(cfg, rapport);
         /* 4. purge */
-        const p = await B.run("DELETE FROM bio_sync_queue WHERE (statut IN ('ok','annule') AND COALESCE(finished_at, cree) < ?) OR (statut='echec_final' AND COALESCE(finished_at, cree) < ?)",
+        const p = await B.run("DELETE FROM bio_sync_queue WHERE (statut IN ('ok','annule') AND COALESCE(finished_at, cree) < ?) OR (statut IN ('echec_final','manuel') AND COALESCE(finished_at, cree) < ?)",
           new Date(Date.now() - 7*86400000).toISOString(), new Date(Date.now() - 30*86400000).toISOString());
         rapport.purges = p.n || 0;
         rapport.resultat = rapport.echecs.length ? "avec échecs" : "réussi";
@@ -428,6 +477,6 @@ function creer(o){
     return c;
   }
   async function demarrer(){ await config(); await chargerBloques(); await recuperer(await config(), true); }
-  return {cycle, etat, enregistrerConfig, config, leverBlocage, resynchroniser, surVisage, surChangementEmp, demarrer, bloques:()=>BLOQUES, enfiler, recuperer:()=>config().then(c=>recuperer(c, false)), WORKER};
+  return {cycle, etat, enregistrerConfig, config, leverBlocage, resynchroniser, surVisage, surChangementEmp, purgerVisages, retirerBiometrie, demarrer, bloques:()=>BLOQUES, enfiler, recuperer:()=>config().then(c=>recuperer(c, false)), WORKER};
 }
 module.exports = {ddl, tables, creer, DEFAUTS};
