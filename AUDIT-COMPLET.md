@@ -1113,3 +1113,27 @@ Constat hors périmètre (non modifié) : l'affectation de calendrier en masse (
 non plus rattachée à la matrice des droits.
 
 Livraison : FIWAKTI-56.33.11-correctif-6.zip (cumulatif : correctifs 2 à 5 inclus).
+
+## Correctif 7 — Contrôle d'accès › Zones et portes
+
+Reprise détaillée de l'écran « Zones et portes », du rattachement des lecteurs (fiche du terminal) et de la protection
+des zones par le serveur (au-delà du correctif 5 : suppression protégée à l'écran, contrôles de saisie).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Fiche du terminal : portes de **tous les sites** proposées ; un lecteur pouvait commander la porte d'une zone d'un autre site (droits de cette zone appliqués au mauvais bâtiment) | **haute** | portes des zones du site du terminal seulement ; rattachement contrôlé à l'enregistrement |
+| 2 | Zone déplacée vers un autre site alors que des lecteurs de l'ancien site commandent ses portes | **haute** | refusé (lecteurs nommés) |
+| 3 | Lecteur rattaché à une **porte supprimée** : la fiche affichait « — » (comme sans porte) et réenregistrait la référence ; pour la synchronisation, ce lecteur de porte retombait sur la règle du site (tout le site) | **haute** | « Porte supprimée — choisissez une porte » affiché et exigé ; alerte « terminaux sans porte » étendue à ces lecteurs |
+| 4 | **Serveur** : aucune protection des zones (appel direct de l'API) — suppression d'une zone utilisée, retrait d'une porte commandée par des lecteurs, même porte dans deux zones (zone d'une porte ambiguë), zone sans nom ou sans site | **haute** | `controleZones` dans `donnees.js` : refusés |
+| 5 | Colonne « Employés » en grand effectif : tous les salariés ayant eu un droit sur la zone, même retiré (petit effectif : autorisés aujourd'hui) | moyenne | critère serveur `zoneAuj` (autorisés aujourd'hui, même règle que `acces.js`) |
+| 6 | Nom de zone unique sur toute la société (correctif 5) : trop strict pour plusieurs sites | basse | unique par site |
+| 7 | Sens des portes et anti-passback enregistrés sans aucun effet, sans que l'écran le dise | basse | aide de l'écran : informations réglées sur le contrôleur de la porte, non appliquées par FIWAKTI |
+| 8 | Export des zones limité à l'identifiant, au nom et au site | basse | portes (avec sens), lecteurs, anti-passback |
+
+Vérifié : moteur réel, ancienne (correctif 6) et nouvelle version — lecteur d'un autre site, porte supprimée, zone
+déplacée : acceptés avant, refusés après ; nom par site ; 35 fiches du jeu de démonstration sans erreur. Serveur réel :
+suppression de la zone utilisée (14 salariés), retrait d'une porte commandée, porte en double — refusés par l'API ;
+modification légitime acceptée ; comptage `zoneAuj`. Chromium : portes proposées par site, « Porte supprimée » affichée
+et exigée, aide de la zone, alerte, écrans sans erreur JavaScript.
+
+Livraison : FIWAKTI-56.33.11-correctif-7.zip (cumulatif : correctifs 2 à 6 inclus ; ajoute annuaire.js).

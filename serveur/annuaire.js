@@ -120,6 +120,8 @@ function creer(o){
      nombre est renvoyé */
   async function compter(q){
     const emps = await D.employes(), id = String(q.id||""), sub = String(q.depts||"").split(",").filter(Boolean);
+    /* correctif 7 : salariés autorisés aujourd'hui dans une zone (colonne « Employés » de Zones et portes) */
+    if (q.critere === "zoneAuj"){ const AC = require("./acces.js").contexte(await D.referentielLecture() || {}), j = auj(); return {n:emps.filter(e=>!(e.sortie && e.sortie < j) && AC.autorise(e, id, j)).length}; }
     const cal = e => (Array.isArray(e.calHist) ? e.calHist : (e.calId ? [{calId:e.calId}] : [])).some(h=>h.calId === id) || e.calId === id;
     const f = {site:e=>e.siteId === id, depts:e=>sub.indexOf(e.deptId) >= 0, rd:e=>(e.rds||[]).indexOf(id) >= 0, tt:e=>(e.tts||[]).indexOf(id) >= 0, cal,
       zone:e=>(e.acces||[]).some(x=>x.zoneId === id), plan:e=>(e.acces||[]).some(x=>(x.hist||[]).some(h=>h.planId === id) || x.planId === id),

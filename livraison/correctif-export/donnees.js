@@ -229,6 +229,8 @@ function creer(B, PERIM){
         /* v51 : une version de règle publiée est immuable (invariant protégé par le serveur, même pour un administrateur) */
         if (k === "reglesV"){ const motif = controleReglesV(ref.reglesV || [], r.reglesV || [], ref); if (motif){ ignores.push("reglesV ("+motif+")"); continue; } }
         /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
+        /* correctif 7 : zones et portes — pas de zone supprimée encore utilisée, pas de porte retirée avec des lecteurs, identifiants de porte uniques */
+        if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
@@ -437,6 +439,22 @@ function controleCals(avant, apres, ref){
     const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
     for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
   }
+  return "";
+}
+function controleZones(avant, apres, terms, emps){
+  const ids = new Set((apres||[]).map(z=>z && z.id)), portesApres = new Map();
+  for (const z of apres||[]) for (const p of (z && z.portes) || []){ if (!p || !p.id) continue; if (portesApres.has(p.id)) return "porte "+p.id+" présente dans deux zones"; portesApres.set(p.id, z.id); }
+  for (const z of avant||[]){
+    if (!z) continue;
+    if (!ids.has(z.id)){
+      const n = (emps||[]).filter(e=>(e.acces||[]).some(a=>a && a.zoneId === z.id)).length;
+      if (n) return "suppression de la zone « "+z.nom+" » encore utilisée par "+n+" salarié(s)";
+    }
+    for (const p of z.portes || []){ if (p && p.id && !portesApres.has(p.id)){ const l = (terms||[]).filter(r=>r && r.porteId === p.id); if (l.length) return "porte « "+p.nom+" » retirée alors que "+l.length+" lecteur(s) la commandent"; } }
+  }
+  const parId = new Map((avant||[]).map(z=>[z && z.id, z]));
+  for (const z of apres||[]){ if (!z) continue; const a = parId.get(z.id); if (a && JSON.stringify(a) === JSON.stringify(z)) continue;
+    if (!String(z.nom||"").trim()) return "zone sans nom"; if (!z.siteId) return "zone « "+z.nom+" » sans site"; if ((z.portes||[]).some(p=>!p || !String(p.nom||"").trim())) return "porte sans nom dans « "+z.nom+" »"; }
   return "";
 }
 function controleReglesV(avant, apres, ref){
