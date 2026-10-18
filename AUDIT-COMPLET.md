@@ -1390,3 +1390,29 @@ Non traité : chefs d'équipe (niveau « avancé ») sans accès au tableau de b
 « demandes en attente » n'applique pas le filtre de site.
 
 Livraison : FIWAKTI-56.33.11-correctif-15.zip (cumulatif : correctifs 2 à 14 inclus).
+
+## Correctif 16 — Pilotage › Journal (seconde analyse)
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Tout profil (portail compris) pouvait écrire dans le journal : faux imports sans matricule, fausses règles « Compte désactivé », texte libre (« diagnostic : dépression », formule `=HYPERLINK`) | **haute** | contenu reconstruit par le serveur : règle existante et active, déclencheur de la règle, codes d'action connus, salarié du périmètre (droit Employés saisie), nom de la règle et du salarié repris du paramétrage, détail limité ; imports et accueil réservés au droit Système |
+| 2 | Sorties planifiées traitées seulement par un navigateur RH (jamais en grand effectif) ; rien au journal sinon | **haute** | tâche serveur : toute sortie passée non traitée est signalée au journal (une fois par salarié et date) |
+| 3 | Le journal annonçait des actions non faites (repli sur toutes les actions de la règle ; actions refusées par le serveur faute de droit annoncées faites) | **haute** | statut par action (faite, sans effet, non faite faute de droit, en échec) ; action sans droit non exécutée ; serveur reclasse « non faite » une action que le compte ne peut pas faire |
+| 4 | Tri faux à l'intérieur d'une journée (identifiants aléatoires) — aussi pour l'onglet Audit | moyenne | tri sur l'heure de l'entrée |
+| 5 | Doublons : même sortie rejouée à chaque ouverture si la fiche n'a pas pu être enregistrée ; service « hors effectif » rejoué à chaque enregistrement | moyenne | une entrée par règle, salarié, déclencheur et jour (serveur) ; règle « hors effectif » au passage seulement |
+| 6 | Limite locale de 500 : les entrées tronquées partaient en suppressions refusées (≈ 4 770 pour l'administrateur) | moyenne | plus de troncature avec le serveur (5 000 en démonstration) |
+| 8 | Journal jamais purgé | moyenne | conservation comme l'audit (jamais au-delà de la dernière clôture), visible dans l'état du système |
+| 9 | Injection de formule dans les exports CSV (journal et audit) | moyenne | valeur commençant par `= + - @` neutralisée |
+| 10 | Journal envoyé à tous les profils dans `/api/v1/donnees` (écran réservé au droit Système) | moyenne | envoyé aux seuls comptes du droit Système |
+| 11 | Filtre de site sans effet ; pas de filtre nature / salarié ; date invalide ignorée (toute la base) ; export coupé à 200 000 sans prévenir | basse | filtres nature, matricule et site (serveur et export) ; date invalide refusée ; export daté et signalé s'il est limité |
+| 12 | Actions et événements affichés en français dans tous les écrans ; en-têtes CSV en français ; boutons de page sans nom | basse | actions par code traduites à l'affichage ; export dans la langue de l'écran ; boutons nommés |
+| 7 | Entrée refusée signalée une seule fois par session | à suivre | motif de refus détaillé renvoyé par le serveur ; file d'attente des entrées refusées non faite |
+
+Vérifié : scripts de l'analyse rejoués (actions sans effet, service hors effectif renommé 3 fois = 2 entrées, libellés
+fr / en / ar) ; serveur réel (copie) : faux import refusé (droit Système), règle inconnue refusée, action sans droit
+reclassée « non faite », nom de règle / auteur imposés, doublon du jour ignoré, entrée hors périmètre refusée, journal non
+envoyé à chef.s1, tri à la seconde, filtres nature / site, date invalide 400, CSV neutralisé, sortie non traitée signalée
+une seule fois puis traitée par les règles au passage de l'administrateur ; Chromium fr / ar ; démonstration : 56 écrans
+sans erreur.
+
+Livraison : FIWAKTI-56.33.11-correctif-16.zip (cumulatif : correctifs 2 à 15 inclus).

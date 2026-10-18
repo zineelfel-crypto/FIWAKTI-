@@ -887,24 +887,28 @@ async function conservation(simuler){
   /* correctif 13 : l'audit applicatif n'est jamais purgé au-delà de la dernière clôture (comme l'annonce l'état du
      système) ; sans aucune clôture, rien n'est purgé (« jamais sur une période non clôturée ») */
   const lb = clot ? [limite(cfg.badgeagesAns), clot].sort()[0] : "0000", la = clot ? [limite(cfg.auditAns), clot].sort()[0] : "0000";
+  /* correctif 16 : journal des événements conservé comme l'audit (même durée, jamais au-delà de la dernière clôture) */
+  const lj = clot ? [limite(cfg.journalAns || cfg.auditAns), clot].sort()[0] : "0000";
   const lc = ajoutJours(aujourdhui(), -(Number(cfg.calculsJours)||400));
-  const n = {badgeages:0, absences:0, corrections:0, auditApp:0, calculs:0};
+  const n = {badgeages:0, absences:0, corrections:0, auditApp:0, journal:0, calculs:0};
   const compte = async (sql, ...a) => Number((await B.get("SELECT COUNT(*) n FROM "+sql, ...a)).n);
   n.badgeages = await compte("enreg WHERE coll='ptg' AND d < ?", lb);
   n.absences = await compte("enreg WHERE coll='abs' AND d < ?", lb);
   n.corrections = await compte("enreg WHERE coll='corrections' AND d < ?", lb);
   n.auditApp = await compte("enreg WHERE coll='audit' AND d < ?", la);
+  n.journal = await compte("enreg WHERE coll='journal' AND d < ?", lj);
   n.calculs = await compte("calc_jour WHERE d < ?", lc);
-  if (!simuler && (n.badgeages + n.absences + n.corrections + n.auditApp + n.calculs)){
+  if (!simuler && (n.badgeages + n.absences + n.corrections + n.auditApp + n.journal + n.calculs)){
     await B.transaction(async ()=>{
       await B.run("DELETE FROM enreg WHERE coll IN ('ptg','abs','corrections') AND d < ?", lb);
       await B.run("DELETE FROM enreg WHERE coll='audit' AND d < ?", la);
+      await B.run("DELETE FROM enreg WHERE coll='journal' AND d < ?", lj);
       await B.run("DELETE FROM calc_jour WHERE d < ?", lc);
     });
-    await meta("purge", {le:maintenant(), n, avant:{badgeages:lb, audit:la}});
+    await meta("purge", {le:maintenant(), n, avant:{badgeages:lb, audit:la, journal:lj}});
     await audit("conservation", "donnees.purgees", JSON.stringify(n)+" (avant "+lb+")");
   }
-  return {n, limites:{badgeages:lb, audit:la, calculs:lc}, derniereCloture:clot || null};
+  return {n, limites:{badgeages:lb, audit:la, journal:lj, calculs:lc}, derniereCloture:clot || null};
 }
 async function etatSysteme(){
   const sauv = listeSauvegardes(), der = sauv[0];
@@ -963,7 +967,7 @@ async function etatSysteme(){
         return it("alertes", a.length ? "bloquant" : "ok", "Alertes de sécurité (24 h)", a.length ? a.length+" alerte(s) : "+a[0].detail : "aucune"); })(),
       it("auditExterne", (CONFIG.syslog && CONFIG.syslog.hote) || CONFIG.auditExterne ? "ok" : "verifier", "Audit hors serveur",
         [(CONFIG.syslog && CONFIG.syslog.hote) ? "syslog "+CONFIG.syslog.protocole+" vers "+CONFIG.syslog.hote+":"+CONFIG.syslog.port : "", CONFIG.auditExterne ? "export quotidien vers "+CONFIG.auditExterne : ""].filter(Boolean).join(" ; ") || "non configuré : l'audit n'existe que sur ce serveur"),
-      it("conservation", "ok", "Conservation des données", "badgeages "+CONFIG.conservation.badgeagesAns+" ans, audit "+CONFIG.conservation.auditAns+" ans (jamais avant la dernière clôture)"+
+      it("conservation", "ok", "Conservation des données", "badgeages "+CONFIG.conservation.badgeagesAns+" ans, audit "+CONFIG.conservation.auditAns+" ans, journal des événements "+(CONFIG.conservation.journalAns || CONFIG.conservation.auditAns)+" ans (jamais avant la dernière clôture)"+
         (await meta("purge") ? " — dernière purge "+new Date((await meta("purge")).le).toLocaleString("fr-FR") : ""))
     ],
     sauvegardes:sauv.slice(0, 20), sessions:Number((await B.get("SELECT COUNT(*) n FROM sessions")).n)
@@ -1614,13 +1618,20 @@ async function traiter(req, res){
      grand effectif, 5 000 au plus). Périmètre du compte appliqué ; traces sans matricule réservées au droit Système. */
   if ((p === "/api/v1/audit-app" || p === "/api/v1/journal-app") && req.method === "GET"){
     const coll = p === "/api/v1/journal-app" ? "journal" : "audit";
+    /* correctif 16 : ordre à la minute près dans une même journée (avant : identifiants aléatoires) */
+    const ORDRE_HEURE = B.type === "pg" ? "COALESCE(data::jsonb->>'at', data::jsonb->>'ts', '')" : "COALESCE(json_extract(data,'$.at'), json_extract(data,'$.ts'), '')";
     const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
     const rg = x => ({lecture:1, saisie:2, validation:3, config:4}[x] || 0);
     const sysLu = admin || PERIM.niveauProfil(pr) === "admin" || rg((pr.droits || {}).SYS) >= 1, ptgLu = sysLu || rg((pr.droits || {}).PTG) >= 1;
     if (!ptgLu || (coll === "journal" && !sysLu)) return erreur(res, 403, "Droit de consultation requis.");
     const q = Object.fromEntries(u.searchParams.entries()), w = ["coll='"+coll+"'"], a = [];
+    /* correctif 16 : date invalide refusée (elle était ignorée : toute la base revenait) */
+    if ((q.du && !dateOk(q.du)) || (q.au && !dateOk(q.au)) || (q.du && q.au && q.du > q.au)) return erreur(res, 400, "Période invalide (dates jj/mm/aaaa, début avant la fin).");
     if (dateOk(q.du)){ w.push("d >= ?"); a.push(q.du); }
     if (dateOk(q.au)){ w.push("d <= ?"); a.push(q.au); }
+    /* correctif 16 : journal — filtre par nature (règles, imports, accueil, système) et par site */
+    if (coll === "journal" && q.nature){ if (q.nature === "regle"){ w.push("data LIKE ?"); a.push('%"regleId":%'); } else { w.push("data LIKE ?"); a.push('%"type":"'+String(q.nature).replace(/[%_"]/g, "").slice(0, 20)+'"%'); } }
+    if (q.site){ const ms = (await D.employes()).filter(e=>e.siteId === q.site).map(e=>String(e.mat)); if (B.type === "pg"){ w.push("mat = ANY(?)"); a.push(ms); } else { w.push("mat IN (SELECT value FROM json_each(?))"); a.push(JSON.stringify(ms)); } }
     /* onglet Pointages › Audit (droit Pointage seul) : corrections et décisions uniquement */
     const types = coll === "journal" ? null : (!sysLu || q.portee === "pointage") ? ["pointage", "decision"] : (q.type ? [String(q.type).slice(0, 40)] : null);
     if (types) { w.push("("+types.map(()=>"data LIKE ?").join(" OR ")+(types.indexOf("pointage") >= 0 ? " OR data NOT LIKE ?" : "")+")"); types.forEach(t=>a.push('%"type":"'+t.replace(/[%_"]/g, "")+'"%')); if (types.indexOf("pointage") >= 0) a.push('%"type":%'); }
@@ -1631,17 +1642,20 @@ async function traiter(req, res){
     const wh = " WHERE "+w.join(" AND "), lim = Math.min(500, Math.max(1, Number(q.limit) || 100)), off = Math.max(0, Number(q.offset) || 0);
     if (q.format === "csv"){
       if (!admin && ((pr.actions || {})[coll === "journal" ? "journal" : q.portee === "pointage" ? "ptg" : "audit"] || {}).exporter === false) return erreur(res, 403, "Droit d'export requis.");
-      const l = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, id DESC LIMIT 200000", ...a)).map(r=>JSON.parse(r.data));
+      const l = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, "+ORDRE_HEURE+" DESC, id DESC LIMIT 200001", ...a)).map(r=>JSON.parse(r.data));
+      const tronque = l.length > 200000; if (tronque) l.length = 200000;
       await audit(C.login, coll+".exporte", (coll === "journal" ? "journal des événements" : "audit applicatif")+" : "+l.length+" ligne(s)", ip);
-      const cel = v => { const x = String(v == null ? "" : v); return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
+      /* correctif 16 : une valeur commençant par = + - @ (formule) est neutralisée à l'ouverture dans un tableur */
+      const cel = v => { let x = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(x)) x = "'"+x; return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
       const fr = k => String(k||"").replace(/^(\d{4})-(\d{2})-(\d{2})/, "$3/$2/$1");
+      const EN = q.lang === "en", AR = q.lang === "ar";
       const txt = "\uFEFF"+(coll === "journal"
-        ? ["Horodatage;Type;Matricule;Salarié;Événement;Déclencheur;Actions;Par"].concat(l.map(x=>[fr(x.ts || x.at), x.type || (x.regleId ? "regle" : ""), x.mat, x.employe, x.regleNom || x.msg || x.action || "", x.declencheur, (x.actions || []).join(", "), x.par].map(cel).join(";")))
-        : ["Horodatage;Compte;Type;Matricule;Journée;Avant;Après;Motif;Lot"].concat(l.map(x=>[fr(x.ts), x.user, x.type || "pointage", x.mat, fr(x.date), x.avant, x.apres, x.motif, x.lot ? "oui" : ""].map(cel).join(";")))).join("\r\n");
-      entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\""+coll+"-"+aujourdhui()+".csv\""}); return res.end(txt);
+        ? [EN ? "Time;Type;Staff no.;Employee;Event;Trigger;Actions;By" : AR ? "التوقيت;النوع;المعرف;العون;الحدث;المُطلِق;الإجراءات;بواسطة" : "Horodatage;Type;Matricule;Salarié;Événement;Déclencheur;Actions;Par"].concat(l.map(x=>[fr(x.ts || x.at), x.type || (x.regleId ? "regle" : ""), x.mat, x.employe, x.regleNom || x.msg || x.action || "", x.declencheur, (Array.isArray(x.codes) ? x.codes : (x.actions || [])).join(", ")+((x.refuses || []).length ? " (non faites : "+x.refuses.join(", ")+")" : ""), x.par].map(cel).join(";")))
+        : ["Horodatage;Compte;Type;Matricule;Journée;Avant;Après;Motif;Lot"].concat(l.map(x=>[fr(x.ts), x.user, x.type || "pointage", x.mat, fr(x.date), x.avant, x.apres, x.motif, x.lot ? "oui" : ""].map(cel).join(";")))).join("\r\n")+(tronque ? "\r\n"+cel("… export limité aux 200 000 entrées les plus récentes : réduisez la période") : "");
+      entetes(res, true); res.writeHead(200, {"Content-Disposition":"attachment; filename=\""+coll+"-"+(q.du || "")+"_"+(q.au || aujourdhui())+".csv\"", "Content-Type":"text/csv; charset=utf-8"}); return res.end(txt);
     }
     const total = Number((await B.get("SELECT COUNT(*) n FROM enreg"+wh, ...a)).n);
-    const lignes = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, id DESC LIMIT "+lim+" OFFSET "+off, ...a)).map(r=>JSON.parse(r.data));
+    const lignes = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, "+ORDRE_HEURE+" DESC, id DESC LIMIT "+lim+" OFFSET "+off, ...a)).map(r=>JSON.parse(r.data));
     return json(res, 200, {lignes, total, offset:off, limit:lim});
   }
   /* ---- travaux en arrière-plan ---- */
@@ -2394,7 +2408,8 @@ async function traiter(req, res){
     if (q.format === "csv"){
       await audit(C.login, "audit.exporte", "audit du serveur : "+total+" ligne(s)", ip);
       const tous = await B.all("SELECT id,ts,login,action,detail,ip FROM audit"+wh+" ORDER BY id DESC LIMIT 200000", ...a);
-      const cel = v => { const x = String(v == null ? "" : v); return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
+      /* correctif 16 : une valeur commençant par = + - @ (formule) est neutralisée à l'ouverture dans un tableur */
+      const cel = v => { let x = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(x)) x = "'"+x; return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
       const fr = ts => { const d = new Date(ts); if (isNaN(d)) return String(ts||""); const z = v => String(v).padStart(2, "0"); return z(d.getDate())+"/"+z(d.getMonth()+1)+"/"+d.getFullYear()+" "+z(d.getHours())+":"+z(d.getMinutes())+":"+z(d.getSeconds()); };
       const txt = "\uFEFF"+["N°;Date;Compte;Action;Détail;Adresse"].concat(tous.map(r=>[r.id, fr(r.ts), r.login, r.action, r.detail, r.ip].map(cel).join(";"))).join("\r\n");
       entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"audit-serveur-"+aujourdhui()+".csv\""}); return res.end(txt);
@@ -2651,6 +2666,20 @@ async function demarrer(){
     if (Date.now() - BIO_DERNIER < c.intervalleMin * 60000) return "prochain cycle dans "+Math.ceil((c.intervalleMin * 60000 - (Date.now() - BIO_DERNIER)) / 60000)+" min";
     BIO_DERNIER = Date.now(); const r = await BS().cycle("planificateur"); return r.resultat+" — "+r.actions+" action(s)"; }});
   /* correctif 11 : effacement des gabarits des salariés sortis (délai de conservation) et supprimés, même sans synchronisation automatique */
+  /* correctif 16 : sorties échues — les règles « sortie d'un salarié » s'exécutent dans le navigateur d'un compte RH (et
+     jamais en grand effectif, où le navigateur ne reçoit pas les fiches). Le serveur signale dans le journal chaque sortie
+     passée depuis plus d'un jour sans traitement, une seule fois par salarié et date de sortie. */
+  PLAN.planifier("journal-sorties-non-traitees", {intervalle:6*3600000, premier:180000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+    const lim = ajoutJours(aujourdhui(), -1), z = v => String(v).padStart(2, "0"), n0 = new Date(), h = n0.getFullYear()+"-"+z(n0.getMonth()+1)+"-"+z(n0.getDate())+" "+z(n0.getHours())+":"+z(n0.getMinutes());
+    let n = 0;
+    for (const e of await D.employes()){
+      if (!e || !e.sortie || e.sortie > lim || e.sortieTraitee === e.sortie) continue;
+      const id = ("js_"+e.mat+"_"+e.sortie).replace(/[^A-Za-z0-9_.:-]/g, "_");
+      if (await B.get("SELECT 1 x FROM enreg WHERE coll='journal' AND id=?", id)) continue;
+      await D.ecrire("journal", {id, type:"systeme", code:"sortie_non_traitee", sortie:e.sortie, mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim(), par:"système", ts:h, at:h+":"+z(n0.getSeconds()), srv:1}); n++;
+    }
+    return n+" sortie(s) non traitée(s) signalée(s)";
+  }});
   PLAN.planifier("purge-biometrique", {intervalle:6*3600000, premier:120000, priorite:3, delai:30*60000, actif:()=>installe() && !!PT, fn:async ()=>{ const r = await BS().purgerVisages(); return r.gabarits+" gabarit(s) de "+r.salaries+" salarié(s) effacé(s)"; }});
   PLAN.planifier("debit-purge", {intervalle:60000, priorite:3, delai:30000, actif:()=>installe() && B.type === "pg", fn:async ()=>{
     const r = await B.run("DELETE FROM fw_debit WHERE fenetre < ?", Math.floor(Date.now() / 10000) - 6); return r.n+" compteur(s) purgé(s)"; }});

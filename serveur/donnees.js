@@ -50,6 +50,8 @@ function decisionDmd(avant, x, P, login, admin){
     return {x:Object.assign({}, x, {valideLe:avant.valideLe, validePar:avant.validePar, valideParCompte:avant.valideParCompte})};
   return {x};
 }
+const REGLE_ACTIONS = ["desac_compte","desac_portail","bloquer_badge","retirer_acces","retirer_bio","archiver","notif_rh","maj_workflows"];
+const coupe = (v, n) => String(v == null ? "" : v).slice(0, n);
 function horodatage(){ const n = new Date(), p = v => String(v).padStart(2, "0"), j = n.getFullYear()+"-"+p(n.getMonth()+1)+"-"+p(n.getDate());
   return {min:j+" "+p(n.getHours())+":"+p(n.getMinutes()), sec:j+" "+p(n.getHours())+":"+p(n.getMinutes())+":"+p(n.getSeconds())}; }
 function plus1(k){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
@@ -192,7 +194,9 @@ function creer(B, PERIM){
         if (!mats.length){ parties.push('"'+c+'":[]'); continue; }
         sql += " AND mat IN ("+mats.map(()=>"?").join(",")+")"; a.push(...mats);
       } else { sql += f.sql; a.push(...f.a); }
-      if ((c === "audit" || c === "journal") && !sysLu) sql += " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'";
+      if (c === "audit" && !sysLu) sql += " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'";
+      /* correctif 16 : journal des événements (écran réservé au droit Système) non envoyé aux autres comptes */
+      if (c === "journal" && !sysLu){ parties.push('"journal":[]'); continue; }
       const lignes = await B.all(sql, ...a);
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
@@ -208,11 +212,37 @@ function creer(B, PERIM){
     const parties = [];
     /* correctif 13 : collections demandées seulement (ex. demandes pour le Tableau de bord, sans les badgeages) */
     const sysLu = !!admin || (!!P.profil && (PERIM.niveauProfil(P.profil) === "admin" || ({lecture:1, saisie:2, validation:3, config:4}[(P.profil.droits || {}).SYS] || 0) >= 1));
-    for (const c of DATEES.filter(x=>!colls || colls.indexOf(x) >= 0)){
+    for (const c of DATEES.filter(x=>(!colls || colls.indexOf(x) >= 0) && (x !== "journal" || sysLu))){
       const lignes = await B.all("SELECT data FROM enreg WHERE coll=? AND d>=? AND d<=?"+f.sql+((c === "audit" || c === "journal") && !sysLu ? " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'" : ""), c, du, au, ...f.a);
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
     return '{"colls":{'+parties.join(",")+'},"du":'+JSON.stringify(du)+',"au":'+JSON.stringify(au)+'}';
+  }
+  async function controleJournal(x, P, ref, admin){
+    const rang = m => admin ? 4 : (RANG[((P.profil || {}).droits || {})[m]] || 0);
+    const codes = l => (Array.isArray(l) ? l : []).map(String).filter(c=>REGLE_ACTIONS.indexOf(c) >= 0);
+    if (x.regleId){
+      if (!x.mat) return {refus:"salarié manquant"};
+      if (rang("EMP") < 2 && !admin) return {refus:"droit Employés (saisie) requis"};
+      const r = (ref.regles || []).find(z=>z && z.id === x.regleId);
+      if (!r) return {refus:"règle inconnue"};
+      if (!admin && (r.actif === false || String(r.declencheur) !== String(x.declencheur))) return {refus:"règle inactive ou déclencheur différent"};
+      const e = (await employes()).find(z=>String(z.mat) === String(x.mat)); if (!e) return {refus:"salarié inconnu"};
+      const permis = new Set((r.actions || []).map(String)), dans = l => codes(l).filter(c=>permis.has(c));
+      const jour = String(x.ts || x.at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+      const deja = await B.get("SELECT 1 x FROM enreg WHERE coll='journal' AND mat=? AND data LIKE ? AND data LIKE ? AND (data LIKE ? OR data LIKE ?) LIMIT 1", String(x.mat), '%"regleId":"'+String(r.id).replace(/[%_"]/g, "")+'"%', '%"declencheur":"'+String(r.declencheur).replace(/[%_"]/g, "")+'"%', '%"ts":"'+horodatage().min.slice(0, 10)+'%', '%"at":"'+horodatage().min.slice(0, 10)+'%');
+      if (deja && !admin) return {doublon:true};
+      /* une action déclarée faite mais que le compte n'a pas le droit de faire (le serveur la refuse) est classée « non faite » */
+      const DROIT_ACT = {desac_compte:["SYS",4], desac_portail:["EMP",2], bloquer_badge:["EMP",2], retirer_acces:["EMP",2], retirer_bio:["TER",2], archiver:["EMP",2]};
+      const faites = dans(x.codes), ok = faites.filter(c=>!DROIT_ACT[c] || rang(DROIT_ACT[c][0]) >= DROIT_ACT[c][1]);
+      const refuses = Array.from(new Set(dans(x.refuses).concat(faites.filter(c=>ok.indexOf(c) < 0))));
+      /* libellés reconstruits à l'affichage à partir des codes (dans la langue de l'écran) : les libellés envoyés ne sont plus gardés */
+      return {x:{id:x.id, regleId:r.id, regleNom:coupe(r.nom, 120), declencheur:r.declencheur, mat:String(e.mat), employe:coupe((e.nom || "")+" "+(e.prenom || ""), 120),
+        codes:ok, sansEffet:dans(x.sansEffet), refuses, echecs:dans(x.echecs), detail:coupe(x.detail, 200), par:x.par}};
+    }
+    if (rang("SYS") < 2 && !admin) return {refus:"droit Système requis"};
+    if (["import","home"].indexOf(String(x.type)) < 0) return {refus:"type d'événement inconnu"};
+    return {x:{id:x.id, type:String(x.type), msg:coupe(x.msg, 300), mat:x.mat ? String(x.mat) : undefined}};
   }
   async function synchroniser(login, paquet, opts){
     /* 56.33.11 : envoi sans paramétrage (salariés, badgeages…) → paramétrage partagé en lecture (copie de surface ; le
@@ -351,6 +381,12 @@ function creer(B, PERIM){
           /* correctif 15 : décisions sur les demandes — transitions d'état contrôlées, date et auteur de la décision imposés
              par le serveur (auparavant ceux du navigateur : « acceptée le 01/01/2019 par Directeur général » acceptés) */
           if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
+          /* correctif 16 : journal des événements — contenu reconstruit par le serveur (règle existante et active, codes
+             d'action connus, salarié du périmètre, nom et libellés repris du paramétrage) ; une même règle n'est
+             journalisée qu'une fois par salarié, déclencheur et jour ; imports et accueil réservés au droit Système */
+          if (c === "journal" && !avant){ const j = await controleJournal(x, P, ref, admin);
+            if (j.doublon) continue;
+            if (j.refus){ refus++; ignores.push("journal ("+j.refus+")"); continue; } x = j.x; }
           /* correctif 13 : auteur et heure d'une trace d'audit ou du journal imposés par le serveur (compte de la session,
              horloge du serveur) — auparavant ceux envoyés par le navigateur, qui pouvait attribuer une trace à un autre compte */
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
