@@ -1137,3 +1137,25 @@ modification légitime acceptée ; comptage `zoneAuj`. Chromium : portes propos�
 et exigée, aide de la zone, alerte, écrans sans erreur JavaScript.
 
 Livraison : FIWAKTI-56.33.11-correctif-7.zip (cumulatif : correctifs 2 à 6 inclus ; ajoute annuaire.js).
+
+## Correctif 8 — Contrôle d'accès › Plages d'accès
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Bouton « 24 heures » : fin enregistrée « 24:00 », qu'un champ horaire ne sait pas afficher → heure de fin **vide** à l'écran ; la modifier effaçait la fin | moyenne | « 24 heures » = 00:00 → 00:00 (minuit à minuit, comme l'annonce l'écran) ; « 24:00 » existant affiché 00:00 |
+| 2 | 00:00 → 00:00 refusé (« même heure ») — régression du correctif 5, alors que l'écran présente « minuit à minuit » comme l'accès permanent | moyenne | accepté (seul intervalle) ; message d'erreur orientant vers « 24 heures » |
+| 3 | « Ajouter un intervalle » : toujours 08:00-18:00, donc chevauchement immédiat avec un intervalle existant | basse | premier créneau libre (4 h au plus) ; journée entièrement couverte signalée |
+| 4 | Intervalles conservés dans l'ordre de saisie | basse | rangés par heure de début à l'enregistrement |
+| 5 | **Serveur** : aucune protection des plages par l'API — suppression d'une plage utilisée par un planning, plage vidée de ses intervalles (accès coupé pour tous les salariés de ses plannings), heure invalide, plage sans nom | **haute** | `controleAplages` dans `donnees.js` : refusés |
+| 6 | Liste sans l'usage de chaque plage | basse | colonne « Plannings d'accès » |
+
+Vérifié : Chromium, démonstration du correctif 7 puis nouvelle — « 24 heures » (fin vide → 00:00), minuit à minuit
+(refusé → accepté), ajout d'intervalle (08:00-18:00 en double → 12:00-16:00, puis 6 ajouts couvrant la journée sans
+chevauchement), tri à l'enregistrement, colonne ajoutée, aucune erreur JavaScript ; 35 fiches de démonstration sans
+erreur. Serveur réel : suppression d'une plage utilisée (2 plannings), plage vidée, heure 25:00 refusées ; 00:00 → 00:00
+accepté.
+
+Rappel (correctif 5) : les plages ne sont pas transmises aux lecteurs ; une modification de plage s'applique à tous ses
+plannings sans date d'effet (pas d'historique des horaires).
+
+Livraison : FIWAKTI-56.33.11-correctif-8.zip (cumulatif : correctifs 2 à 7 inclus).

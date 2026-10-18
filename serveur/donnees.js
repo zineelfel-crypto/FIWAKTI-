@@ -231,6 +231,8 @@ function creer(B, PERIM){
         /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
         /* correctif 7 : zones et portes — pas de zone supprimée encore utilisée, pas de porte retirée avec des lecteurs, identifiants de porte uniques */
         if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
+        /* correctif 8 : plages d'accès — pas de plage supprimée encore utilisée par un planning, intervalles valides */
+        if (k === "aplages"){ const motif = controleAplages(ref.aplages || [], r.aplages || [], Array.isArray(r.aplans) ? r.aplans : (ref.aplans || [])); if (motif){ ignores.push("aplages ("+motif+")"); continue; } }
         if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
@@ -438,6 +440,19 @@ function controleCals(avant, apres, ref){
     for (const k of cles) if (JSON.stringify(jour(a, k)) !== JSON.stringify(jour(n, k))) return "exception du "+k+" en période clôturée";
     const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
     for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
+  }
+  return "";
+}
+function controleAplages(avant, apres, plans){
+  const ids = new Set((apres||[]).map(a=>a && a.id)), utilise = id => (plans||[]).filter(p=>p && ([0,1,2,3,4,5,6].some(i=>(p.hebdo||{})[i] === id) || p.ferie === id)).length;
+  for (const a of avant||[]) if (a && !ids.has(a.id)){ const n = utilise(a.id); if (n) return "suppression de la plage « "+a.nom+" » utilisée par "+n+" planning(s)"; }
+  const parId = new Map((avant||[]).map(a=>[a && a.id, a])), H = /^([01]\d|2[0-3]):[0-5]\d$/, HF = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
+  for (const a of apres||[]){ if (!a) continue; const v = parId.get(a.id); if (v && JSON.stringify(v) === JSON.stringify(a)) continue;
+    if (!String(a.nom||"").trim()) return "plage sans nom";
+    const iv = Array.isArray(a.iv) ? a.iv : [];
+    if (!iv.length) return "plage « "+a.nom+" » sans intervalle";
+    if (iv.some(x=>!x || !H.test(x.a||"") || !HF.test(x.b||""))) return "heure invalide dans « "+a.nom+" »";
+    if (iv.some(x=>x.a === x.b && x.a !== "00:00")) return "intervalle de durée nulle dans « "+a.nom+" »";
   }
   return "";
 }
