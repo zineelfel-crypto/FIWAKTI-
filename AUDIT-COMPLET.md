@@ -1270,3 +1270,66 @@ réactivation (2 envois en file) puis autorisation différée (fin d'absence) ; 
 et export sans erreur ; trilingue.
 
 Livraison : FIWAKTI-56.33.11-correctif-12.zip (cumulatif : correctifs 2 à 11 inclus).
+
+## Correctif 13 — Pilotage (États, Tableau de bord, Audit, Journal)
+
+### États
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | États calculés par le serveur (grand effectif, travaux) : salariés **sortis avant aujourd'hui** exclus (`calcul.etat` sans date de début) — Éléments variables du dernier mois des sortants absents | **critique** | sélection à la date de début de l'état |
+| 2 | Compteurs (`runCounters`) calculés sur les jours **avant l'entrée et après la sortie** : heures théoriques, soldes et absences fictifs (ex. sorti le 10/09 : HT 192 au lieu de 68) | **critique** | jours hors contrat ignorés (même règle que le calcul journalier du serveur) |
+| 3 | Période « Éléments variables » prise sur la convention du **premier salarié de la base** (filtre entrée/sortie, bornes affichées, dates envoyées au serveur) | **haute** | période de chaque salarié ; bornes affichées par convention ; dates serveur = min/max des conventions |
+| 4 | Serveur : données chargées à partir de la veille de la période, alors que les compteurs hebdomadaires / annuels démarrent au lundi / 1er janvier — **cumul hebdomadaire et soldes annuels faux** (HS d'une plage commençant un mercredi : 5 h au lieu de 13 h) | **haute** | données chargées depuis le début de la période du compteur le plus long (`debutDonnees`) |
+| 5 | Grand effectif : aperçu et visualisation calculés sur les deux jours chargés dans le navigateur | **haute** | aperçu calculé par le serveur à la demande (tous les salariés du périmètre, totaux exacts) |
+| 6 | « Total général », moyenne, min, max sur les seules lignes affichées (1 920 h au lieu de 2 672 h) | **haute** | totaux et sous-totaux sur tous les salariés |
+| 7 | `POST /api/v1/travaux` : ni liste des états du profil, ni action « exporter », ni menu masqué ; définition et dates du navigateur acceptées telles quelles (« pas-une-date », 1900→2999) | **haute** | contrôles serveur ; définition relue dans le paramétrage (options de visualisation contrôlées) ; dates valides, 3 ans au plus |
+| 8 | Unité « jours » : trois résultats différents (écran, CSV, Excel) selon la base du premier salarié | moyenne | conversion avec la base de chaque salarié, totaux = somme des jours |
+| 9 | Groupes éclatés (tri sur « groupe + nom » concaténés : Achat / Achats / Achat) | moyenne | tri sur le groupe puis le nom |
+| 10 | « Imprimer » de la visualisation imprimait l'écran tronqué | moyenne | impression de l'état complet |
+| 11 | Grand effectif : Excel, texte et impression sans groupes, sous-totaux ni total général (reconstruits d'un CSV plat) | moyenne | le serveur renvoie les blocs par salarié ; même matrice qu'en direct |
+| 12 | Jours à venir comptés en déficit (mois en cours : solde −88 h pour 13 jours non écoulés) | moyenne | période arrêtée à aujourd'hui (mention « arrêté au … ») ; période entièrement future et simulation inchangées |
+| 13–15 | En-tête contradictoire (bornes d'une convention, nom d'une autre) ; dates ISO dans le CSV ; salariés sortis absents de la liste de la visualisation | basse | corrigés ; plage tronquée à 3 ans signalée ; « Modifier l'état » rattaché au droit Modification |
+
+Un seul calcul par salarié (« bloc ») sert désormais l'écran, le CSV, Excel, le texte, l'impression et l'aperçu serveur.
+
+### Audit et Journal
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 1 | Tout compte pouvait écrire des traces d'audit et du journal **au nom d'un autre compte, à la date de son choix, hors de son périmètre** (preuve : RH sans droit Système → « suppression faite par admin » sur un salarié d'un autre site) | **critique** | auteur et heure imposés par le serveur (compte de la session, horloge du serveur) ; hors périmètre refusé |
+| 2 | Audit du serveur (connexions, refus, restaurations, réglages) consultable nulle part ; route limitée aux 500 dernières lignes | **haute** | onglet « Audit du serveur » : période, recherche, pages, export CSV |
+| 3 | Restauration d'une sauvegarde : **audit postérieur effacé en silence**, vérification « intègre » | **haute** | entrées copiées avant restauration, remises avec leurs sceaux (chaîne continue) ou conservées dans un fichier ; l'audit de la restauration le dit |
+| 4 | Sceau SHA-256 **sans clé** (recalculable), lignes non scellées admises partout, troncature de fin non détectée | moyenne | sceau HMAC (clé « audit » du coffre, incluse dans le trousseau) ; lignes non scellées admises seulement avant la première ligne scellée ; dernier ancrage quotidien vérifié |
+| 5 | Traces sans matricule (sécurité, clôtures, paramétrage, imports) envoyées à tout compte, portail compris | moyenne | réservées au droit Système |
+| 6 | Purge de l'audit sans tenir compte de la clôture ; badgeages purgés sans aucune clôture | moyenne | jamais au-delà de la dernière clôture ; rien sans clôture |
+| 7 | Écran Audit : seulement les traces chargées (≈ 2 mois ; hier et aujourd'hui en grand effectif ; 5 000 au plus) sans le dire | **haute** | traces servies par page sur la période choisie, avec le périmètre |
+| 8 | Export de l'audit hors matrice des droits (`audit-csv` sans catégorie) | **haute** | catégorie « exporter » ; export serveur complet de la période |
+| 9 | Pointages › Audit : tout l'audit (sécurité, clôtures…) avec le seul droit Pointage | moyenne | corrections et décisions seulement |
+| 10 | Recherche par date jj/mm/aaaa sans résultat ; dates ISO dans les exports | basse | corrigés |
+| 11–13 | Journal : ordre du plus ancien au plus récent, 200 premières sans mention ; deux formats d'entrée (lignes vides à l'écran, colonnes vides à l'export) ; heures en UTC et entrées des règles jamais datées (renvoyées à chaque chargement, volume sans limite) | moyenne | plus récent d'abord, pages ; une seule forme d'affichage et d'export ; heure locale, entrées datées (anciennes datées une fois) |
+
+### Tableau de bord
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| 14 | Pas de filtre de périmètre (demandes d'autres sites visibles, export compris) | **haute** | périmètre de l'écran Demandes |
+| 15 | Grand effectif : « 0 jours accordés », export vide (fiches des demandeurs non chargées) | **haute** | fiches complétées ; jours en attente de fiche signalés |
+| 16 | Indicateurs sur une fenêtre implicite ; heures additionnées comme des jours | moyenne | période explicite (décisions de la période, en instance à ce jour) ; demandes en heures comptées à part ; demandes plus anciennes chargées à la demande |
+| 17 | Toutes les demandes en instance affichées (20 000 → 1,1 s, 4,4 Mo de HTML) | moyenne | 50 affichées (18 ms pour 5 000), renvoi à l'écran Demandes |
+| 18 | Retard signalé après 3 jours (7 dans la note et l'alerte) ; dates ISO dans l'export | basse | 7 jours ; jj/mm/aaaa |
+
+Vérifié : banc VM (scénarios de l'analyse : sortants, entrée/sortie en cours de période, conventions, totaux, groupes,
+unités, dates) ; vraie base et serveur réel — cumul hebdomadaire d'une plage commençant un mercredi identique au calcul
+complet (13 h, contre 5 h avant), sortant présent dans l'export, contrôles de `/api/v1/travaux` (403 / 400 attendus,
+définition relue), falsification d'audit refusée ou réattribuée, traces sans matricule non transmises, restauration
+(6 entrées remises, chaîne intègre), ligne insérée / sceau recalculé / fin supprimée détectés ; Chromium en mode normal
+et en grand effectif (aperçu serveur = total navigateur, Excel et CSV par le serveur avec total général) ; démonstration :
+56 écrans sans erreur. Compteurs de temps identiques, sauf le salarié sorti du jeu de démonstration (plus de compteurs
+après sa sortie, attendu).
+
+Non traité : traces applicatives non chaînées (seul l'audit du serveur est scellé ; auteur et heure désormais garantis) ;
+ancrage externe (syslog ou export d'audit) toujours optionnel ; la cloche « demandes en attente depuis 7 jours » compte
+aussi celles que l'utilisateur ne peut pas valider.
+
+Livraison : FIWAKTI-56.33.11-correctif-13.zip (cumulatif : correctifs 2 à 12 inclus).

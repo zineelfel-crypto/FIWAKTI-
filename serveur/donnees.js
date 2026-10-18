@@ -11,7 +11,10 @@ function dateDe(coll, x){
     case "ptg": return String(x.ts||"").slice(0,10) || null;
     case "abs": case "corrections": case "notifs": case "ajust": return x.d || null;
     case "dmd": case "msgp": return x.au || x.du || null;
-    case "audit": case "journal": return String(x.ts||"").slice(0,10) || null;
+    case "audit": return String(x.ts||"").slice(0,10) || null;
+    /* correctif 13 : les entrées des règles automatiques portent « at » (sans « ts ») : jamais datées, elles étaient
+       renvoyées à chaque chargement quelle que soit la fenêtre (volume sans limite à 20 000 salariés) */
+    case "journal": return String(x.ts||x.at||"").slice(0,10) || null;
     default: return null;
   }
 }
@@ -21,8 +24,11 @@ function joursDe(coll, x){
   if (coll === "dmd" && x.du){ const out = []; let k = x.du; const fin = x.au || x.du; let g = 0; while (k <= fin && g++ < 400){ out.push(k); k = plus1(k); } return out; }
   const d = dateDe(coll, x); return d ? [d] : [];
 }
+function horodatage(){ const n = new Date(), p = v => String(v).padStart(2, "0"), j = n.getFullYear()+"-"+p(n.getMonth()+1)+"-"+p(n.getDate());
+  return {min:j+" "+p(n.getHours())+":"+p(n.getMinutes()), sec:j+" "+p(n.getHours())+":"+p(n.getMinutes())+":"+p(n.getSeconds())}; }
 function plus1(k){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function creer(B, PERIM){
+  let MIG_JOURNAL = false;
   function filtreMat(set){
     if (set === null) return {sql:"", a:[]};
     const arr = Array.from(set||[]);
@@ -130,6 +136,13 @@ function creer(B, PERIM){
     const du = grand ? opts.hier : depuis;
     const f = filtreMat(P.set);
     const parties = [];
+    /* correctif 13 : traces d'audit et du journal sans matricule (sécurité, clôtures, paramétrage, imports) réservées aux
+       comptes qui consultent l'administration (droit Système) — auparavant envoyées à tout compte, portail compris */
+    const sysLu = !!opts.admin || (!!P.profil && (PERIM.niveauProfil(P.profil) === "admin" || ({lecture:1, saisie:2, validation:3, config:4}[(P.profil.droits || {}).SYS] || 0) >= 1));
+    if (!MIG_JOURNAL){ MIG_JOURNAL = true; try {
+      /* entrées des règles automatiques sans date (champ « at » seul) : datées une fois pour toutes */
+      for (const r of await B.all("SELECT id, data FROM enreg WHERE coll='journal' AND d IS NULL")){ let x = null; try { x = JSON.parse(r.data); } catch(e){} const d = dateDe("journal", x); if (d) await B.run("UPDATE enreg SET d=?, mois=? WHERE coll='journal' AND id=?", d, d.slice(0,7), r.id); }
+    } catch(e){} }
     /* v56.3 : grand effectif → annuaire servi par page ; le navigateur ne reçoit que la fiche de l'utilisateur et de
        son équipe directe (le reste à la demande par /api/v1/employes) */
     const pagine = grand && opts.annuairePagine !== false;
@@ -153,21 +166,24 @@ function creer(B, PERIM){
         if (!mats.length){ parties.push('"'+c+'":[]'); continue; }
         sql += " AND mat IN ("+mats.map(()=>"?").join(",")+")"; a.push(...mats);
       } else { sql += f.sql; a.push(...f.a); }
+      if ((c === "audit" || c === "journal") && !sysLu) sql += " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'";
       const lignes = await B.all(sql, ...a);
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
     const refVue = Object.assign({}, vue); COLLS.forEach(c=>{ delete refVue[c]; });
     return '{"ref":'+JSON.stringify(refVue)+',"colls":{'+parties.join(",")+'},"fenetre":{"du":'+JSON.stringify(du||null)+'},"mode":'+JSON.stringify(grand ? "grand" : "normal")+',"effectif":'+nb+',"annuaire":'+JSON.stringify(pagine ? "pagine" : "complet")+'}';
   }
-  async function chargerPeriode(login, du, au, mats){
+  async function chargerPeriode(login, du, au, mats, colls, admin){
     const ref = await referentiel() || {};
     const {P} = await perimetreDe(ref, login);
     let set = P.set;
     if (mats && mats.length){ const m = new Set(mats.map(String)); set = set === null ? m : new Set(Array.from(set).filter(x=>m.has(x))); }
     const f = filtreMat(set);
     const parties = [];
-    for (const c of DATEES){
-      const lignes = await B.all("SELECT data FROM enreg WHERE coll=? AND d>=? AND d<=?"+f.sql, c, du, au, ...f.a);
+    /* correctif 13 : collections demandées seulement (ex. demandes pour le Tableau de bord, sans les badgeages) */
+    const sysLu = !!admin || (!!P.profil && (PERIM.niveauProfil(P.profil) === "admin" || ({lecture:1, saisie:2, validation:3, config:4}[(P.profil.droits || {}).SYS] || 0) >= 1));
+    for (const c of DATEES.filter(x=>!colls || colls.indexOf(x) >= 0)){
+      const lignes = await B.all("SELECT data FROM enreg WHERE coll=? AND d>=? AND d<=?"+f.sql+((c === "audit" || c === "journal") && !sysLu ? " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'" : ""), c, du, au, ...f.a);
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
     return '{"colls":{'+parties.join(",")+'},"du":'+JSON.stringify(du)+',"au":'+JSON.stringify(au)+'}';
@@ -267,29 +283,36 @@ function creer(B, PERIM){
         const immuable = c === "audit" || c === "journal";
         const clotC = (ref.clotures||[]).reduce((x, y)=>y.jusqu > x ? y.jusqu : x, "");
         const fermee = o => { if (!clotC || !o) return false; if (c === "dmd") return (o.du || o.d || "9999") <= clotC; if (c === "ptg" || c === "abs" || c === "corrections"){ const dd = dateDe(c, o); return !!dd && dd <= clotC; } return false; };
-        const libre = c === "notifs" || c === "audit" || c === "journal";
         let refus = 0, clotRefus = false;
         /* 56.33.11 : unicité du matricule, du badge et du CIN contrôlée sur TOUT le personnel. L'écran ne vérifiait que les
            salariés chargés dans le navigateur : en grand effectif (annuaire paginé), un badge ou un CIN déjà attribué à un
            autre salarié était accepté (badgeages attribués au mauvais salarié). Seule une valeur nouvelle ou modifiée est
            contrôlée : un doublon ancien ne bloque pas l'enregistrement des autres champs. */
         const UNI = c === "emps" ? indexUnicite(await employes()) : null;
-        for (const x of (colls[c].put||[])){
+        for (let x of (colls[c].put||[])){
           if (!x || x.id === undefined){ refus++; continue; }
           /* 56.33.11 : identifiant et matricule contrôlés (un identifiant contenant « " » injectait des attributs dans les
              écrans des valideurs : zone invisible déclenchant une validation) */
           if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(String(x.id)) || (x.mat != null && /["'<>&`\\]/.test(String(x.mat)))){ refus++; ignores.push(c+" (identifiant invalide)"); continue; }
           const av = await B.get("SELECT data FROM enreg WHERE coll=? AND id=?", c, String(x.id));
           const avant = av ? JSON.parse(av.data) : null;
-          if (immuable && avant){ if (JSON.stringify(avant) !== JSON.stringify(x)) refus++; continue; }
+          if (immuable && avant){
+            /* correctif 13 : trace renvoyée par le navigateur avec SON auteur et SON heure (celles du serveur font foi) */
+            const sans = o => { const y = Object.assign({}, o); if (avant.srv){ delete y.user; delete y.par; delete y.ts; delete y.at; delete y.srv; } return JSON.stringify(y); };
+            if (sans(avant) !== sans(x)) refus++; continue; }
           if (fermee(x) || fermee(avant)){ refus++; clotRefus = true; continue; }
           /* conflit : l'enregistrement a changé sur le serveur depuis que le client l'a lu */
           if (!immuable && avant && Number(avant.__v||0) !== Number(x.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(x.id), mat:avant.mat||""}); continue; }
           if (UNI){ const d = doublonEmp(UNI, x, avant); if (d){ refus++; refusEmps.push(d); continue; } }
           if (!admin){
             if (avant && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
-            if (x.mat && !dansPerim(x.mat) && !(libre && !avant)){ refus++; continue; }
+            /* correctif 13 : une trace d'audit ou du journal ne peut concerner qu'un salarié du périmètre de son auteur
+               (seules les notifications restent permises hors périmètre : avis au valideur) */
+            if (x.mat && !dansPerim(x.mat) && !(c === "notifs" && !avant)){ refus++; continue; }
           }
+          /* correctif 13 : auteur et heure d'une trace d'audit ou du journal imposés par le serveur (compte de la session,
+             horloge du serveur) — auparavant ceux envoyés par le navigateur, qui pouvait attribuer une trace à un autre compte */
+          if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
           await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++;

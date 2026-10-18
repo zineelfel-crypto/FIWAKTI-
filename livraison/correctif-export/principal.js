@@ -240,6 +240,11 @@ async function meta(k, v){
    dans la base casse la chaîne, ce que l'écran État du système signale */
 let AUDIT_FILE = Promise.resolve();
 const sceau = (prec, r) => crypto.createHash("sha256").update([prec||"", r.ts, r.login||"", r.action, r.detail||"", r.ip||""].join("\u0001"), "utf8").digest("hex");
+/* correctif 13 : sceau à clé (HMAC-SHA-256, clé « audit » du coffre, sauvegardée avec le trousseau). Le sceau sans clé
+   pouvait être recalculé par quiconque accède à la base : une ligne insérée avec un sceau recalculé passait la
+   vérification. Les anciennes lignes gardent leur sceau ; après la première ligne à clé, plus aucune ligne sans clé
+   n'est admise. */
+const sceauH = (prec, r) => "h1:"+crypto.createHmac("sha256", CF.cle("audit")).update([prec||"", r.ts, r.login||"", r.action, r.detail||"", r.ip||""].join("\u0001"), "utf8").digest("hex");
 /* v47 : copie de chaque entrée vers un journal distant (syslog RFC 5424, UDP ou TCP) :
    une compromission du serveur ne permet plus de réécrire à la fois la base et la trace */
 const dgram = require("dgram");
@@ -260,7 +265,7 @@ function audit(login, action, detail, ip){
   AUDIT_FILE = AUDIT_FILE.then(async ()=>{
     try {
       const der = await B.get("SELECT empreinte FROM audit WHERE empreinte IS NOT NULL ORDER BY id DESC LIMIT 1");
-      const emp = sceau(der && der.empreinte, r);
+      const emp = sceauH(der && der.empreinte, r);
       await B.run("INSERT INTO audit(ts,login,action,detail,ip,empreinte) VALUES(?,?,?,?,?,?)", r.ts, r.login, r.action, r.detail, r.ip, emp);
       versSyslog(r, emp);
     } catch(e){ journal("audit : "+e.message); }
@@ -279,19 +284,34 @@ async function exporterAudit(){
   await meta("audit_export", {le:maintenant(), fichier:f, lignes:l.length});
   return f;
 }
+/* correctif 13 : vérification renforcée — une ligne non scellée n'est admise qu'avant la première ligne scellée (lignes
+   antérieures à la v45) ; la chaîne doit contenir le dernier ancrage quotidien (ancrages-audit.log) : une troncature de
+   la fin de la table (lignes supprimées par un accès direct à la base) est ainsi détectée */
+function dernierAncrage(){
+  try { const l = fs.readFileSync(path.join(D_JOURN, "ancrages-audit.log"), "utf8").trim().split(/\r?\n/).reverse();
+    for (const x of l){ const m = /^(\S+) ((?:h1:)?[0-9a-f]{64}) (\d+)$/.exec(x.trim()); if (m) return {le:m[1], empreinte:m[2], n:Number(m[3])}; if (/ REPRISE$/.test(x)) return null; }
+  } catch(e){}
+  return null;
+}
 async function verifierAudit(){
-  let prec = null, n = 0, anciens = 0;
+  let prec = null, n = 0, anciens = 0, scelle = false, aCle = false, nCle = 0;
+  const anc = dernierAncrage(); let ancVu = !anc;
+  const rupture = (r, motif) => ({ok:false, n, anciens, rupture:{id:Number(r.id), ts:r.ts, action:r.action, motif}});
   for (let dernier = 0; ; ){
     const l = await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? ORDER BY id LIMIT 5000", dernier);
     if (!l.length) break;
     for (const r of l){
       dernier = Number(r.id);
-      if (!r.empreinte){ anciens++; continue; }
-      if (sceau(prec, r) !== r.empreinte) return {ok:false, n, anciens, rupture:{id:dernier, ts:r.ts, action:r.action}};
+      if (!r.empreinte){ if (scelle) return rupture(r, "ligne non scellée"); anciens++; continue; }
+      scelle = true;
+      if (String(r.empreinte).indexOf("h1:") === 0){ aCle = true; nCle++; if (sceauH(prec, r) !== r.empreinte) return rupture(r, "sceau invalide"); }
+      else { if (aCle) return rupture(r, "sceau sans clé après des sceaux à clé"); if (sceau(prec, r) !== r.empreinte) return rupture(r, "sceau invalide"); }
       prec = r.empreinte; n++;
+      if (!ancVu && r.empreinte === anc.empreinte) ancVu = true;
     }
   }
-  return {ok:true, n, anciens, dernier:prec};
+  if (!ancVu) return {ok:false, n, anciens, rupture:{motif:"dernier ancrage introuvable ("+anc.le+", "+anc.n+" entrées) : des entrées ont été supprimées", ancrage:anc}};
+  return {ok:true, n, anciens, aCle:nCle, dernier:prec, ancrage:anc ? anc.le : null};
 }
 
 /* ---------------- mots de passe (scrypt, standard, sans bloquer le serveur) ---------------- */
@@ -668,16 +688,41 @@ async function restaurerInterne(fichier, par){
   const v = await verifierFichier(f, man);
   if (!v.ok) throw new Error("Cette sauvegarde ne se relit pas correctement ("+v.motif+") : restauration refusée.");
   const securite = await sauvegarder(par, "avant restauration de "+man.fichier);
+  /* correctif 13 : les entrées d'audit postérieures à la sauvegarde restaurée ne sont plus effacées en silence. Elles sont
+     copiées dans un fichier (journaux/audit-avant-restauration-*.jsonl), puis remises dans la base restaurée avec leurs
+     sceaux si la chaîne continue (même installation) ; sinon elles restent dans ce fichier et la restauration le dit. */
+  await AUDIT_FILE;
+  const fAud = path.join(D_JOURN, "audit-avant-restauration-"+maintenant().replace(/[^0-9]/g, "")+".jsonl");
+  const depuisSauv = ajoutJours(String(man.cree || "0000-00-00").slice(0, 10), -1);
+  { const out = fs.openSync(fAud, "w", 0o600); try { for (let dernier = 0; ; ){ const l = await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? AND ts >= ? ORDER BY id LIMIT 5000", dernier, depuisSauv); if (!l.length) break; fs.writeSync(out, l.map(r=>JSON.stringify(r)).join("\n")+"\n"); dernier = Number(l[l.length-1].id); } } finally { fs.closeSync(out); } }
   let source = f, tmp = null;
   if (man.chiffre){ tmp = path.join(os.tmpdir(), "fiwakti-rest-"+crypto.randomBytes(6).toString("hex")+B.extension); await CF.dechiffrerFichier(f, tmp, "sauvegarde"); source = tmp; }
   try { B = await B.restaurer(source); } finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
   D = DONNEES_MOD.creer(B, PERIM);
   K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
-  await audit(par, "restauration", man.fichier+" (sauvegarde de sécurité : "+securite.fichier+")");
-  return {restauree:man.fichier, securite:securite.fichier};
+  const reprise = await reprendreAudit(fAud);
+  await audit(par, "restauration", man.fichier+" (sauvegarde de sécurité : "+securite.fichier+") — "+reprise.texte);
+  try { const v = await verifierAudit(); fs.appendFileSync(path.join(D_JOURN, "ancrages-audit.log"), maintenant()+" "+(v.ok ? v.dernier+" "+v.n : "RESTAURATION "+JSON.stringify(v.rupture)+" REPRISE")+"\n"); } catch(e){}
+  return {restauree:man.fichier, securite:securite.fichier, audit:reprise};
 }
 
+async function reprendreAudit(fAud){
+  let l = []; try { l = fs.readFileSync(fAud, "utf8").split("\n").filter(Boolean).map(x=>JSON.parse(x)); } catch(e){}
+  const der = await B.get("SELECT id, empreinte FROM audit ORDER BY id DESC LIMIT 1");
+  const maxId = der ? Number(der.id) : 0;
+  const lien = l.find(r=>Number(r.id) === maxId);
+  const suite = l.filter(r=>Number(r.id) > maxId);
+  if (!suite.length){ try { fs.unlinkSync(fAud); } catch(e){} return {remises:0, texte:"aucune entrée d'audit postérieure"}; }
+  /* même chaîne : la dernière entrée restaurée est celle du fichier (même numéro, même sceau) */
+  if ((maxId === 0 && !lien) || (lien && der && lien.empreinte === der.empreinte)){
+    await B.transaction(async ()=>{ for (const r of suite) await B.run("INSERT INTO audit(id,ts,login,action,detail,ip,empreinte) VALUES(?,?,?,?,?,?,?)", Number(r.id), r.ts, r.login, r.action, r.detail, r.ip, r.empreinte); });
+    if (B.type === "pg") try { await B.run("SELECT setval(pg_get_serial_sequence('audit','id'), (SELECT MAX(id) FROM audit) + 1, false)"); } catch(e){}
+    try { fs.unlinkSync(fAud); } catch(e){}
+    return {remises:suite.length, texte:suite.length+" entrée(s) d'audit postérieures à la sauvegarde remises (chaîne continue)"};
+  }
+  return {remises:0, conservees:suite.length, fichier:fAud, texte:suite.length+" entrée(s) d'audit postérieures conservées dans "+path.basename(fAud)+" (chaîne différente : sauvegarde d'une autre installation)"};
+}
 /* ---------------- mises à jour signées ---------------- */
 async function appliquerMiseAJour(paquet, par){
   const p = JSON.parse(paquet);
@@ -839,7 +884,9 @@ async function conservation(simuler){
   const cfg = CONFIG.conservation || {}, ref = await D.referentielLecture() || {};
   const clot = (ref.clotures||[]).reduce((x, c)=>c.jusqu > x ? c.jusqu : x, "");
   const limite = ans => { const d = new Date(); d.setFullYear(d.getFullYear() - (Number(ans)||5)); return d.toISOString().slice(0,10); };
-  const lb = [limite(cfg.badgeagesAns), clot].filter(Boolean).sort()[0] || "0000", la = limite(cfg.auditAns);
+  /* correctif 13 : l'audit applicatif n'est jamais purgé au-delà de la dernière clôture (comme l'annonce l'état du
+     système) ; sans aucune clôture, rien n'est purgé (« jamais sur une période non clôturée ») */
+  const lb = clot ? [limite(cfg.badgeagesAns), clot].sort()[0] : "0000", la = clot ? [limite(cfg.auditAns), clot].sort()[0] : "0000";
   const lc = ajoutJours(aujourdhui(), -(Number(cfg.calculsJours)||400));
   const n = {badgeages:0, absences:0, corrections:0, auditApp:0, calculs:0};
   const compte = async (sql, ...a) => Number((await B.get("SELECT COUNT(*) n FROM "+sql, ...a)).n);
@@ -904,7 +951,7 @@ async function etatSysteme(){
       d ? it("disque", d.libre/d.total > 0.15 ? "ok" : "verifier", "Stockage", Math.round(100*d.libre/d.total)+" % disponible ("+(d.libre/1e9).toFixed(1)+" Go)") : it("disque", "verifier", "Stockage", "inconnu"),
       it("terminaux", "verifier", "Service des terminaux", "test de liaison réseau disponible ; collecte par SDK constructeur non installée"),
       await (async ()=>{ const v = await auditEtat(); return it("audit", v.ok ? "ok" : "bloquant", "Journal d'audit",
-        v.ok ? v.n+" entrées scellées, chaîne intègre"+(v.anciens ? " ("+v.anciens+" antérieures au scellement)" : "") : "CHAÎNE ROMPUE à l'entrée "+v.rupture.id+" ("+v.rupture.ts+") : modification directe de la base"); })(),
+        v.ok ? v.n+" entrées scellées, chaîne intègre"+(v.anciens ? " ("+v.anciens+" antérieures au scellement)" : "") : (v.rupture.id ? "CHAÎNE ROMPUE à l'entrée "+v.rupture.id+" ("+v.rupture.ts+")"+(v.rupture.motif ? " — "+v.rupture.motif : "")+" : modification directe de la base" : "JOURNAL INCOMPLET : "+(v.rupture.motif || "entrées supprimées"))); })(),
       it("chiffrement", (CONFIG.sauvegarde||{}).chiffrer ? "ok" : "verifier", "Chiffrement au repos",
         ((CONFIG.sauvegarde||{}).chiffrer ? "sauvegardes chiffrées (clé "+CF.empreinte("sauvegarde")+")" : "sauvegardes NON chiffrées")+" ; accès des pointeuses chiffrés"),
       (()=>{ const c = der && der.copie; const dest = (CONFIG.sauvegarde||{}).copie;
@@ -948,9 +995,11 @@ function lancerTravail(login, type, params){
   B.enTravail(async ()=>{
     tr.etat = "en_cours"; const t0 = Date.now();
     try {
-      const txt = await K.etat(login, params.etat, params.du, params.au, params.filtres || {}, a=>{ tr.progression = a.total ? Math.round(100*a.fait/a.total) : 0; });
+      const txt = await K.etat(login, params.etat, params.du, params.au, params.filtres || {}, a=>{ tr.progression = a.total ? Math.round(100*a.fait/a.total) : 0; }, params.format);
       fs.writeFileSync(path.join(D_TRAV, id+".csv"), txt, {mode:0o600});
-      Object.assign(tr, {etat:"termine", progression:100, taille:Buffer.byteLength(txt), lignes:txt.split("\r\n").length - 1, dureeMs:Date.now()-t0, fini:maintenant()});
+      /* correctif 13 : format « blocs » (JSON, un bloc par salarié) : Excel, impression et aperçu gardent la structure de l'état */
+      let nl = 0; if (/^blocs/.test(params.format || "")){ try { nl = JSON.parse(txt).blocs.length; } catch(e){} } else nl = txt.split("\r\n").length - 1;
+      Object.assign(tr, {etat:"termine", progression:100, taille:Buffer.byteLength(txt), lignes:nl, format:params.format || "csv", dureeMs:Date.now()-t0, fini:maintenant()});
       await audit(login, "travail.termine", tr.titre+" — "+tr.lignes+" lignes en "+Math.round(tr.dureeMs/1000)+" s");
     } catch(e){ Object.assign(tr, {etat:"erreur", motif:e.message, fini:maintenant()}); journal("travail "+id+" : "+e.message); }
     sauverTravaux();
@@ -1480,7 +1529,7 @@ async function traiter(req, res){
     if (cD && cD.cle === cleD && Date.now() - cD.t < 300000 && /\bgzip\b/.test(String(req.headers["accept-encoding"]||""))){
       entetes(res, true); res.writeHead(200, {"Content-Type":"application/json; charset=utf-8", "Content-Encoding":"gzip", "Vary":"Accept-Encoding", "Content-Length":cD.gz.length}); return res.end(cD.gz);
     }
-    const texte = await D.charger(C.login, depuis, {seuil:Number(CONFIG.seuilGrandEffectif)||1000, hier:ajoutJours(aujourdhui(), -1), annuairePagine:(CONFIG.annuaire||{}).pagine});
+    const texte = await D.charger(C.login, depuis, {seuil:Number(CONFIG.seuilGrandEffectif)||1000, hier:ajoutJours(aujourdhui(), -1), annuairePagine:(CONFIG.annuaire||{}).pagine, admin});
     journal("donnees "+C.login+" : "+Math.round(texte.length/1024)+" Ko en "+(Date.now()-t0)+" ms");
     /* v56.30 : une seule compression, asynchrone (avant : gzipSync bloquant pour le cache PUIS une seconde compression
        pour la réponse) ; le résultat compressé sert à la fois la réponse et le cache */
@@ -1500,7 +1549,8 @@ async function traiter(req, res){
     const du = u.searchParams.get("du"), au = u.searchParams.get("au");
     if (!dateOk(du) || !dateOk(au)) return erreur(res, 400, "Dates invalides");
     const mats = (u.searchParams.get("mats")||"").split(",").filter(Boolean);
-    return texteJson(res, await D.chargerPeriode(C.login, du, au, mats.length ? mats : null));
+    const colls = (u.searchParams.get("colls")||"").split(",").filter(Boolean);
+    return texteJson(res, await D.chargerPeriode(C.login, du, au, mats.length ? mats : null, colls.length ? colls : null, admin));
   }
   if (p === "/api/v1/donnees/sync" && req.method === "POST"){
     let paquet; try { paquet = JSON.parse(await corps(req, 200e6)); } catch(e){ return erreur(res, 400, "JSON invalide"); }
@@ -1538,6 +1588,41 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
+  /* ---- correctif 13 : audit applicatif (corrections de pointage, décisions, sécurité, clôtures…) servi par page ----
+     L'écran Audit ne montrait que les traces chargées dans le navigateur (≈ 2 mois, hier et aujourd'hui seulement en
+     grand effectif, 5 000 au plus). Périmètre du compte appliqué ; traces sans matricule réservées au droit Système. */
+  if ((p === "/api/v1/audit-app" || p === "/api/v1/journal-app") && req.method === "GET"){
+    const coll = p === "/api/v1/journal-app" ? "journal" : "audit";
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
+    const rg = x => ({lecture:1, saisie:2, validation:3, config:4}[x] || 0);
+    const sysLu = admin || PERIM.niveauProfil(pr) === "admin" || rg((pr.droits || {}).SYS) >= 1, ptgLu = sysLu || rg((pr.droits || {}).PTG) >= 1;
+    if (!ptgLu || (coll === "journal" && !sysLu)) return erreur(res, 403, "Droit de consultation requis.");
+    const q = Object.fromEntries(u.searchParams.entries()), w = ["coll='"+coll+"'"], a = [];
+    if (dateOk(q.du)){ w.push("d >= ?"); a.push(q.du); }
+    if (dateOk(q.au)){ w.push("d <= ?"); a.push(q.au); }
+    /* onglet Pointages › Audit (droit Pointage seul) : corrections et décisions uniquement */
+    const types = coll === "journal" ? null : (!sysLu || q.portee === "pointage") ? ["pointage", "decision"] : (q.type ? [String(q.type).slice(0, 40)] : null);
+    if (types) { w.push("("+types.map(()=>"data LIKE ?").join(" OR ")+(types.indexOf("pointage") >= 0 ? " OR data NOT LIKE ?" : "")+")"); types.forEach(t=>a.push('%"type":"'+t.replace(/[%_"]/g, "")+'"%')); if (types.indexOf("pointage") >= 0) a.push('%"type":%'); }
+    if (q.mat){ w.push("mat = ?"); a.push(String(q.mat)); }
+    if (q.q && String(q.q).trim().length >= 2){ let x = String(q.q).trim(); const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(x); if (m) x = m[3]+"-"+m[2]+"-"+m[1]; w.push("lower(data) LIKE ?"); a.push("%"+x.toLowerCase().replace(/[%_]/g, "").slice(0, 80)+"%"); }
+    if (!sysLu) w.push("mat IS NOT NULL AND mat<>'' AND mat<>'—'");
+    if (P.set !== null){ const arr = Array.from(P.set); if (B.type === "pg"){ w.push("(mat IS NULL OR mat='' OR mat = ANY(?))"); a.push(arr); } else { w.push("(mat IS NULL OR mat='' OR mat IN (SELECT value FROM json_each(?)))"); a.push(JSON.stringify(arr)); } }
+    const wh = " WHERE "+w.join(" AND "), lim = Math.min(500, Math.max(1, Number(q.limit) || 100)), off = Math.max(0, Number(q.offset) || 0);
+    if (q.format === "csv"){
+      if (!admin && ((pr.actions || {})[coll === "journal" ? "journal" : q.portee === "pointage" ? "ptg" : "audit"] || {}).exporter === false) return erreur(res, 403, "Droit d'export requis.");
+      const l = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, id DESC LIMIT 200000", ...a)).map(r=>JSON.parse(r.data));
+      await audit(C.login, coll+".exporte", (coll === "journal" ? "journal des événements" : "audit applicatif")+" : "+l.length+" ligne(s)", ip);
+      const cel = v => { const x = String(v == null ? "" : v); return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
+      const fr = k => String(k||"").replace(/^(\d{4})-(\d{2})-(\d{2})/, "$3/$2/$1");
+      const txt = "\uFEFF"+(coll === "journal"
+        ? ["Horodatage;Type;Matricule;Salarié;Événement;Déclencheur;Actions;Par"].concat(l.map(x=>[fr(x.ts || x.at), x.type || (x.regleId ? "regle" : ""), x.mat, x.employe, x.regleNom || x.msg || x.action || "", x.declencheur, (x.actions || []).join(", "), x.par].map(cel).join(";")))
+        : ["Horodatage;Compte;Type;Matricule;Journée;Avant;Après;Motif;Lot"].concat(l.map(x=>[fr(x.ts), x.user, x.type || "pointage", x.mat, fr(x.date), x.avant, x.apres, x.motif, x.lot ? "oui" : ""].map(cel).join(";")))).join("\r\n");
+      entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\""+coll+"-"+aujourdhui()+".csv\""}); return res.end(txt);
+    }
+    const total = Number((await B.get("SELECT COUNT(*) n FROM enreg"+wh, ...a)).n);
+    const lignes = (await B.all("SELECT data FROM enreg"+wh+" ORDER BY d DESC, id DESC LIMIT "+lim+" OFFSET "+off, ...a)).map(r=>JSON.parse(r.data));
+    return json(res, 200, {lignes, total, offset:off, limit:lim});
+  }
   /* ---- travaux en arrière-plan ---- */
   /* 56.33.11 : export d'états (en direct ou en tâche de fond) réservé au droit de consultation des états (matrice ETA) */
   const droitEtats = async () => { if (admin) return true; const {P} = await D.perimetreDe(await D.referentielLecture() || {}, C.login);
@@ -1545,8 +1630,39 @@ async function traiter(req, res){
   if (p === "/api/v1/travaux" && req.method === "POST" && !(await droitEtats())) return erreur(res, 403, "Droit de consultation des états requis.");
   if (p === "/api/v1/travaux" && req.method === "POST"){
     const b = await corpsJson(req, 2e6);
-    if (b.type !== "etat" || !b.etat || !Array.isArray(b.etat.champs)) return erreur(res, 400, "Travail inconnu.");
-    try { const tr = lancerTravail(C.login, "etat", {titre:(b.etat.nom||"État")+" "+(b.du||"")+" → "+(b.au||""), etat:b.etat, du:b.du, au:b.au, filtres:b.filtres}); await audit(C.login, "travail.lance", tr.titre, ip); return json(res, 200, tr); }
+    if (b.type !== "etat" || !b.etat || typeof b.etat !== "object" || !Array.isArray(b.etat.champs)) return erreur(res, 400, "Travail inconnu.");
+    /* correctif 13 : mêmes contrôles que l'écran États, appliqués par le serveur — menu masqué, action « exporter »
+       retirée, liste des états autorisés du profil ; la définition est relue dans le référentiel (seules les options
+       de la visualisation sont reprises du navigateur, contrôlées) ; période contrôlée (dates valides, 3 ans au plus) */
+    const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = admin ? null : (P.profil || {});
+    if (pr){
+      if ((pr.menus || {}).etats === "masque") return erreur(res, 403, "Écran États masqué pour votre profil.");
+      if (((pr.actions || {}).etats || {}).exporter === false) return erreur(res, 403, "Droit d'export des états requis.");
+      if (Array.isArray(pr.etats) && pr.etats.length && pr.etats.indexOf(String(b.etat.id || "")) < 0) return erreur(res, 403, "État non autorisé pour votre profil.");
+    }
+    const stocke = (ref.etats || []).find(x=>x && x.id === b.etat.id);
+    const rangEta = admin ? 4 : ({lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).ETA] || 0);
+    /* état non encore enregistré (atelier) : seulement pour qui peut le créer */
+    if (!stocke && rangEta < 2) return erreur(res, 403, "État inconnu : enregistrez-le d'abord.");
+    /* qui peut modifier les états (saisie et plus) exporte la définition de l'atelier telle qu'elle est à l'écran */
+    const libre = !stocke || rangEta >= 2;
+    const def = JSON.parse(JSON.stringify(libre ? b.etat : stocke)), arits = new Set((ref.arits || []).map(a=>a.id));
+    const PERS = ["jour", "semaine", "semainep", "mois", "ev", "annee", "libre"];
+    if (!libre){
+      if (Array.isArray(b.etat.champs)) def.champs = b.etat.champs.map(String);
+      if (PERS.indexOf(b.etat.periode) >= 0) def.periode = b.etat.periode;
+      def.plage = !!b.etat.plage;
+      ["ref", "from", "to"].forEach(k=>{ if (b.etat[k] === undefined || b.etat[k] === "" || b.etat[k] === null) delete def[k]; else if (dateOk(b.etat[k])) def[k] = b.etat[k]; });
+      if (b.etat.stats && typeof b.etat.stats === "object") def.stats = {total:!!b.etat.stats.total, moy:!!b.etat.stats.moy, min:!!b.etat.stats.min, max:!!b.etat.stats.max};
+    }
+    def.champs = (def.champs || []).filter(id=>arits.has(id)).slice(0, 200);
+    if (!def.champs.length) return erreur(res, 400, "Aucun compteur valide dans l'état.");
+    if (PERS.indexOf(def.periode) < 0) def.periode = "mois";
+    if (!dateOk(b.du) || !dateOk(b.au) || b.du > b.au) return erreur(res, 400, "Période invalide (dates jj/mm/aaaa, début avant la fin).");
+    if (ajoutJours(b.du, 3*366) < b.au) return erreur(res, 400, "Période limitée à 3 ans.");
+    const fl = b.filtres && typeof b.filtres === "object" ? b.filtres : {}, filtres = {dept:String(fl.dept || ""), mat:String(fl.mat || ""), site:String(fl.site || "")};
+    const format = b.format === "blocs" || b.format === "blocs-leger" ? b.format : "csv";
+    try { const tr = lancerTravail(C.login, "etat", {titre:(def.nom||"État")+" "+b.du.split("-").reverse().join("/")+" → "+b.au.split("-").reverse().join("/"), etat:def, du:b.du, au:b.au, filtres, format}); await audit(C.login, "travail.lance", tr.titre, ip); return json(res, 200, tr); }
     catch(e){ return erreur(res, e.code === 429 ? 429 : 400, e.message); }
   }
   if (p === "/api/v1/travaux" && req.method === "GET") return json(res, 200, {travaux:Array.from(TRAVAUX.values()).filter(x=>x.login === C.login).sort((a,b)=>a.cree < b.cree ? 1 : -1).slice(0, 20)});
@@ -1557,6 +1673,7 @@ async function traiter(req, res){
     if (tr.etat !== "termine") return erreur(res, 409, "Travail non terminé.");
     const f = path.join(D_TRAV, tr.id+".csv"); if (!fs.existsSync(f)) return erreur(res, 410, "Fichier expiré.");
     await audit(C.login, "travail.telecharge", tr.titre, ip);
+    if (/^blocs/.test(tr.format || "")){ entetes(res, true); res.writeHead(200, {"Content-Type":"application/json; charset=utf-8"}); return fs.createReadStream(f).pipe(res); }
     entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\""+(tr.titre||"etat").replace(/[^A-Za-z0-9._-]+/g, "_")+".csv\""});
     return fs.createReadStream(f).pipe(res);
   }
@@ -2041,7 +2158,8 @@ async function traiter(req, res){
     return json(res, 200, d);
   }
   if (p === "/api/v1/systeme/controles") return json(res, 200, {controles:await controles()});
-  if (p === "/api/v1/systeme/audit") return json(res, 200, await verifierAudit());
+  /* correctif 13 : vérification complète à la demande (« Vérifier » : ?forcer=1), sinon résultat de moins de 10 min */
+  if (p === "/api/v1/systeme/audit"){ if (u.searchParams.get("forcer") === "1") AUDIT_CACHE = null; return json(res, 200, await auditEtat()); }
   if (p === "/api/v1/systeme/conservation") return json(res, 200, Object.assign({politique:CONFIG.conservation}, await conservation(true)));
   if (p === "/api/v1/systeme/reglages"){
     if (req.method === "GET") return json(res, 200, {copie:(CONFIG.sauvegarde||{}).copie||"", chiffrer:!!(CONFIG.sauvegarde||{}).chiffrer, pushReseaux:CONFIG.pushReseaux||[], conservation:CONFIG.conservation, cle:CF.empreinte("sauvegarde"),
@@ -2234,7 +2352,30 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, revoquees:n});
   }
   if (p === "/api/v1/alertes") return json(res, 200, {alertes:(await meta("alertes")) || []});
-  if (p === "/api/v1/audit-serveur") return json(res, 200, {lignes:await B.all("SELECT ts,login,action,detail,ip FROM audit ORDER BY id DESC LIMIT 500")});
+  /* correctif 13 : audit du serveur (connexions, refus, réglages, restaurations, écritures) consultable par page,
+     avec filtres de période (jj/mm/aaaa à l'écran), de compte, d'action et recherche ; aucune limite fixe à 500 */
+  if (p === "/api/v1/audit-serveur"){
+    const q = Object.fromEntries(u.searchParams.entries()), w = [], a = [];
+    /* horodatage en UTC (ISO) : bornes du jour local converties */
+    const isoJour = k => new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)).toISOString();
+    if (dateOk(q.du)){ w.push("ts >= ?"); a.push(isoJour(q.du)); }
+    if (dateOk(q.au)){ w.push("ts < ?"); a.push(isoJour(ajoutJours(q.au, 1))); }
+    if (q.login){ w.push("lower(login) = ?"); a.push(String(q.login).toLowerCase().slice(0, 80)); }
+    if (q.action){ w.push("action LIKE ?"); a.push(String(q.action).replace(/[%_]/g, "").slice(0, 60)+"%"); }
+    if (q.q && String(q.q).trim().length >= 2){ const s = "%"+String(q.q).trim().toLowerCase().replace(/[%_]/g, "").slice(0, 80)+"%"; w.push("(lower(detail) LIKE ? OR lower(login) LIKE ? OR lower(action) LIKE ? OR ip LIKE ?)"); a.push(s, s, s, s); }
+    const lim = Math.min(500, Math.max(1, Number(q.limit) || 100)), off = Math.max(0, Number(q.offset) || 0), wh = w.length ? " WHERE "+w.join(" AND ") : "";
+    const total = Number((await B.get("SELECT COUNT(*) n FROM audit"+wh, ...a)).n);
+    const lignes = await B.all("SELECT id,ts,login,action,detail,ip,CASE WHEN empreinte IS NULL THEN 0 ELSE 1 END scelle FROM audit"+wh+" ORDER BY id DESC LIMIT "+lim+" OFFSET "+off, ...a);
+    if (q.format === "csv"){
+      await audit(C.login, "audit.exporte", "audit du serveur : "+total+" ligne(s)", ip);
+      const tous = await B.all("SELECT id,ts,login,action,detail,ip FROM audit"+wh+" ORDER BY id DESC LIMIT 200000", ...a);
+      const cel = v => { const x = String(v == null ? "" : v); return /[;"\r\n]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
+      const fr = ts => { const d = new Date(ts); if (isNaN(d)) return String(ts||""); const z = v => String(v).padStart(2, "0"); return z(d.getDate())+"/"+z(d.getMonth()+1)+"/"+d.getFullYear()+" "+z(d.getHours())+":"+z(d.getMinutes())+":"+z(d.getSeconds()); };
+      const txt = "\uFEFF"+["N°;Date;Compte;Action;Détail;Adresse"].concat(tous.map(r=>[r.id, fr(r.ts), r.login, r.action, r.detail, r.ip].map(cel).join(";"))).join("\r\n");
+      entetes(res, true); res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"audit-serveur-"+aujourdhui()+".csv\""}); return res.end(txt);
+    }
+    return json(res, 200, {lignes, total, offset:off, limit:lim});
+  }
 
   /* ---- terminaux : pilotes intégrés ou déposés dans donnees/pilotes ---- */
   if (p.startsWith("/api/v1/pointeuses/")){

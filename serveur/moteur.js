@@ -30,7 +30,8 @@ function chargerMoteur(fichierApp){
 ;globalThis.__moteur = {
   get db(){ return db; }, set db(v){ db = v; },
   reinit(){ ptgTouch(); absTouch(); SUIVI_CACHE = []; if (typeof jvVider === "function") jvVider(); if (typeof PERIM_TICK !== "undefined") PERIM_TICK++; },
-  jourVars, convFor, mvtsDe, mvtsCalc, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff
+  jourVars, convFor, mvtsDe, mvtsCalc, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
+  counterOrder, ordreRestreint, periodBounds, etatBlocs:typeof etatBlocs === "function" ? etatBlocs : null, etatBornesListe:typeof etatBornesListe === "function" ? etatBornesListe : null
 };`;
   vm.runInContext(code, ctx, {filename:"app.js"});
   ctx.download = (nom, contenu)=>{ if (ctx.__capture) ctx.__capture(nom, contenu); };
@@ -68,11 +69,27 @@ async function ptgNormalises(mats, d0, d1){
     return o;
   });
 }
-async function contexte(mats, du, au, source){
+/* correctif 13 : un compteur hebdomadaire, mensuel ou annuel se calcule depuis le début de SA période (lundi, 1er du
+   mois, début de la période des Éléments variables de chaque convention, 1er janvier) : les données sont chargées depuis
+   ce jour-là (auparavant depuis la veille de la période demandée seulement — cumul de la semaine, soldes annuels et
+   seuils hebdomadaires faux dans les états et compteurs calculés par le serveur). */
+function debutDonnees(ref, du, codes){
+  const jour = k => { const x = k.split("-").map(Number); return new Date(x[0], x[1]-1, x[2]); };
+  const cle = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  try {
+    E.M.db = Object.assign({}, ref, {emps:[], ptg:[], abs:[], corrections:[], ajust:[], dmd:[]}); E.M.reinit();
+    let order = E.M.counterOrder(); if (!order) return du;
+    if (Array.isArray(codes) && codes.length) order = E.M.ordreRestreint(order, codes);
+    const d = jour(du), convs = [undefined].concat(ref.convs || []); let min = d;
+    new Set(order.map(a=>a.period)).forEach(per=>{ if (per === "jour") return; convs.forEach(c=>{ const b = E.M.periodBounds(per, d, c); if (b && b.from < min) min = b.from; }); });
+    return cle(min);
+  } catch(e){ return du; }
+}
+async function contexte(mats, du, au, source, codes){
   const ref = JSON.parse((await B.get("SELECT valeur FROM kv WHERE cle=?", "fiwakti:ref:v1")).valeur);
   const emps = (await B.all("SELECT data FROM enreg WHERE coll='emps'")).map(r=>JSON.parse(r.data));
   const f = filtre(mats);
-  const d0 = E.M.dAjout(du, -1), d1 = E.M.dAjout(au, 1);
+  const d0 = E.M.dAjout(codes ? debutDonnees(ref, du, codes) : du, -1), d1 = E.M.dAjout(au, 1);
   /* serveur = données réelles : jamais de badgeages simulés */
   const doc = Object.assign({}, ref, {emps, audit:[], notifs:[], journal:[], bio:[], msgp:[], exemple:false});
   for (const c of COLLS_JOUR) doc[c] = (await B.all("SELECT data FROM enreg WHERE coll=? AND d>=? AND d<=? AND "+f.sql, c, d0, d1, ...f.a)).map(r=>JSON.parse(r.data));
@@ -84,7 +101,7 @@ async function contexte(mats, du, au, source){
 /* calcule et range les journées de ces employés sur la période */
 /* v53 : valeur de chaque compteur par salarié sur une période (recalcul avec rapport avant/après) */
 async function compteurs(mats, du, au, source, reglesSim){
-  const doc = await contexte(mats, du, au, source), out = {};
+  const doc = await contexte(mats, du, au, source, []), out = {};
   const p = k => { const x = k.split("-").map(Number); return new Date(x[0], x[1]-1, x[2]); };
   const lire = () => { const o = {};
     for (const mat of mats){
@@ -167,15 +184,17 @@ async function calculer(mats, du, au, horodatage, source){
   return lignes.length;
 }
 /* état (export CSV) calculé par lots d'employés, mêmes règles que l'écran États */
-async function etat(def, mats, du, au, idTache, source){
-  let entete = null; const corps = [];
+async function etat(def, mats, du, au, idTache, source, format){
+  let entete = null; const corps = [], blocs = [];
+  const codes = ((JSON.parse((await B.get("SELECT valeur FROM kv WHERE cle=?", "fiwakti:ref:v1")).valeur).arits) || []).filter(a=>(def.champs || []).indexOf(a.id) >= 0).map(a=>a.code);
   for (let i = 0; i < mats.length; i += 500){
     /* v49 : avancement transmis au serveur (travaux en arrière-plan) */
     if (idTache) parentPort.postMessage({id:idTache, progression:{fait:i, total:mats.length}});
-    const lot = mats.slice(i, i+500);
-    await contexte(lot, du, au, source);
-    E.M.db.emps = E.M.db.emps.filter(e=>lot.indexOf(String(e.mat)) >= 0);
+    const lot = mats.slice(i, i+500), dans = new Set(lot);
+    await contexte(lot, du, au, source, codes);
+    E.M.db.emps = E.M.db.emps.filter(e=>dans.has(String(e.mat)));
     E.M.reinit();
+    if (format === "blocs" || format === "blocs-leger"){ blocs.push(...E.M.etatBlocs(JSON.parse(JSON.stringify(def)), {}, format === "blocs-leger" ? {plein:0} : undefined)); continue; }
     let contenu = "";
     E.ctx.__capture = (nom, c)=>{ contenu = c; };
     E.M.exportEtatCsv(JSON.parse(JSON.stringify(def)));
@@ -183,6 +202,7 @@ async function etat(def, mats, du, au, idTache, source){
     if (!entete) entete = l[0];
     corps.push(...l.slice(1));
   }
+  if (format === "blocs" || format === "blocs-leger") return JSON.stringify({blocs, du, au, bornes:E.M.etatBornesListe(def)});
   return "\uFEFF"+[entete || ""].concat(corps).join("\r\n");
 }
 /* une tâche à la fois : le moteur travaille sur un seul jeu de données en mémoire
@@ -206,7 +226,7 @@ if (parentPort) parentPort.on("message", m=>{
       if (m.type === "calculer") r = await calculer(m.mats, m.du, m.au, m.horodatage, m.source);
       else if (m.type === "compteurs") r = await compteurs(m.mats, m.du, m.au, m.source, m.reglesSim);
       else if (m.type === "comparer") r = await comparerSources(m.mats, m.du, m.au);
-      else if (m.type === "etat") r = await etat(m.def, m.mats, m.du, m.au, m.id, m.source);
+      else if (m.type === "etat") r = await etat(m.def, m.mats, m.du, m.au, m.id, m.source, m.format);
       else throw new Error("tâche inconnue");
       parentPort.postMessage({id:m.id, ok:true, r});
     } catch(e){ parentPort.postMessage({id:m.id, ok:false, erreur:e.message, pile:e.stack}); }
