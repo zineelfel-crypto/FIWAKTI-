@@ -1448,3 +1448,44 @@ Non vérifié : modules non licenciés dans la base de test (HSE, Formation, Rec
 Visiteurs, Intégration) et PostgreSQL réel.
 
 Livraison : FIWAKTI-56.33.11-correctif-17.zip (cumulatif : correctifs 2 à 16 inclus).
+
+## Correctif 18 — Administration
+
+Écrans : Import, Sites, Profils, Utilisateurs, Sécurité, Règles métier, Circuits de validation, Recette, État du
+système, Modules, Sauvegarde, Corbeille.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| B1 | Un compte au profil SYS « config » sans niveau de menu « admin » pouvait réécrire son propre profil, s'attribuer le profil administrateur et obtenir le rôle serveur « admin » | **critique** | rôle administrateur revérifié à chaque requête d'après le profil ; un non-administrateur ne peut ni modifier son propre profil ou un profil administrateur, ni créer un administrateur, ni accorder un droit supérieur aux siens, ni retirer la double authentification |
+| B2 | Suppression d'un profil attribué à un compte ou à une délégation (comptes orphelins), du dernier profil administrateur | **haute** | refusée avec le compte en cause |
+| B3 | Matrice des droits (créer / modifier / supprimer) ignorée par le serveur pour les salariés et les badgeages | **haute** | appliquée au serveur ; création vérifiée dans le périmètre |
+| C1 | Circuits de validation non appliqués par le serveur : décision au niveau 0 d'un circuit à 2 niveaux par n'importe quel valideur, auto-validation, demande créée déjà acceptée par le salarié, circuit retiré d'une demande en attente | **critique** | circuit et niveau recalculés à la création ; seul le valideur du niveau avance ou décide (repli : validation ABS dans le périmètre s'il n'y en a aucun) ; auto-validation refusée ; circuit d'une demande en attente immuable ; annulation par le demandeur ou la RH |
+| C2 | Absence injectée directement par le salarié, sans demande acceptée | **haute** | refusée (demande acceptée liée, ou validation RH pour un tiers) |
+| C3 | Circuits et règles non validés (niveau vide, valideur ou profil inexistant, délai négatif, déclencheur ou action inconnus, liste remplacée par un objet) ; suppression d'un circuit utilisé par des demandes en attente | **haute** | contrôles serveur (1 à 10 niveaux, valideurs existants, délais 0–365, déclencheurs et actions connus) ; suppression refusée tant qu'une demande en attente l'utilise ; droit requis pour les circuits : ABS config |
+| C4 | Outils de recette (jeu d'essai) utilisables sur une installation de production | moyenne | réservés à une installation déclarée de recette (`"recette": true` dans config.json) |
+| C5 | Entrée de journal d'une règle supprimée ou inactive rejetée | basse | gardée, marquée « règle hors liste » |
+| A1 | Sites : suppression d'un site utilisé (salariés, terminaux, services, calendriers), code en double, fuseau invalide (badgeages ensuite rejetés), identifiant piégé ; conventions hors bornes ou rattachées à un site inexistant | **haute** | contrôles serveur ; Paramétrage des sites soumis au droit Paramétrage (PAR), comme au serveur |
+| A2 | Fiche salarié : dates impossibles, sortie avant l'entrée, adresse électronique, site ou service inexistants | moyenne | contrôle des champs modifiés |
+| A3 | Corbeille : restauration faite seulement dans le navigateur (perdue au rechargement, conflit avec un matricule déjà attribué non signalé) ; corbeille envoyée à tous les comptes ; suppressions faites par un compte sans accès à la corbeille non conservées ; purge sur des dates invalides | **haute** | restauration par le serveur (`POST /api/v1/corbeille/restaurer`, motif du refus affiché, entrée gardée en cas de refus, audit) ; corbeille réservée aux lecteurs Administration ; entrées écrites par le serveur ; purge sur des dates réelles ; date jj/mm/aaaa ; purge d'un élément confirmée |
+| A4 | Import : instantané d'annulation (jusqu'à 20 000 fiches) renvoyé à chaque compte à chaque chargement ; annulation refusée en conflit de version ; correspondances mémorisées sans droit | moyenne | instantané jamais stocké au serveur ; annulation reprise sur les versions actuelles ; droit SYS saisie pour les correspondances |
+| A5 | Identifiants non échappés dans 20 listes déroulantes (identifiant importé avec un guillemet : écran cassé, injection) | moyenne | échappés |
+| D1 | Écran Sauvegarde en mode serveur : sauvegardes et restaurations du navigateur (instantané en clair stocké au serveur, restauration en conflit) | **haute** | renvoi vers État du système › Sauvegardes ; fonctions du navigateur inactives avec le serveur |
+| D2 | Restauration du système : entrées d'audit postérieures perdues si l'horloge diffère ; mise à jour appliquée avant de vérifier tous les fichiers | moyenne | reprise de l'audit à partir de l'identifiant mémorisé dans la sauvegarde ; chemins et empreintes de tous les fichiers vérifiés avant toute écriture |
+| D3 | Réglages : réseaux de pointage et proxys non validés, durées de conservation sans borne (1e9 ans), heure 0 refusée, copie hors serveur dans le dossier des données, adresse IP du client prise au premier proxy ; export d'audit externe sans rattrapage | moyenne | validations et bornes ; IP lue de droite à gauche en ignorant les proxys de confiance ; rattrapage de l'export sur 31 jours |
+| D4 | Module désactivé : données (badgeages, demandes) encore envoyées, routes pointages et demandes ouvertes | moyenne | collections vides et routes refusées (403) |
+| D5 | Catégories d'actes manquantes (restaurer, enregistrer une correspondance, rapport, modèle) ; établissements modifiables depuis l'écran des règles de calcul sans droit PAR ; champs obligatoires des règles et circuits non signalés ; textes d'en-tête des règles métier remplacés par ceux de la biométrie ; libellés manquants (fr/en/ar) | basse | corrigés |
+
+Non traité (à planifier) : import de badgeages en grand effectif (tout en mémoire du navigateur) ; convention
+rattachée à un site encore brouillon ; trousseau de clés exporté en clair ; textes de l'État du système en partie en
+français dans l'interface arabe ; recette K2/K3 ; règle « hors effectif » en grand effectif ; matrice « modifier »
+appliquée au serveur pour les salariés seulement.
+
+Vérifié : scripts des quatre analyses rejoués sur des copies neuves du serveur (élévation de privilège bloquée,
+profils attribués protégés, matrice appliquée, circuits : 5 contournements refusés, suppression d'un circuit utilisé
+refusée, sites et conventions invalides refusés, restauration de corbeille par le serveur et refus motivé, routes
+système 403 pour les non-administrateurs, sauvegarde / restauration avec reprise de l'audit, mise à jour : 7 paquets
+invalides refusés sans écriture, réglages invalides refusés, IP derrière proxy) ; flux normal des circuits dans
+Chromium (dépôt au portail → N1 → N2 → acceptée, absences créées) ; 12 écrans en fr / ar sans erreur JavaScript ;
+démonstration : 56 écrans sans erreur ; non-régression des compteurs (seul 10188 diffère, attendu).
+
+Livraison : FIWAKTI-56.33.11-correctif-18.zip (cumulatif : correctifs 2 à 17 inclus).

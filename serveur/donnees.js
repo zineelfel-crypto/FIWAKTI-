@@ -26,10 +26,73 @@ function joursDe(coll, x){
 }
 const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
 const RANG = {lecture:1, saisie:2, validation:3, config:4};
-function decisionDmd(avant, x, P, login, admin){
+/* correctif 18 : circuit de validation appliqué par le serveur (même logique que l'écran) — valideur du niveau en cours :
+   responsable direct (hier), responsable du responsable (hier2), responsable du service ou du service parent
+   (resp, respParent), profil désigné (profil:…, droit Absences ≥ validation, salarié du périmètre) ou compte désigné
+   (user:…) ; délégation de périmètre en cours acceptée ; jamais le demandeur lui-même */
+const jourLocal = () => { const n = new Date(), z = v => String(v).padStart(2, "0"); return n.getFullYear()+"-"+z(n.getMonth()+1)+"-"+z(n.getDate()); };
+function circuitPourSrv(ref, emp, tt){
+  if (!emp) return null;
+  const arbre = id => { const a = new Set([id]); let aj = true; while (aj){ aj = false; (ref.depts || []).forEach(d=>{ if (d && a.has(d.parent) && !a.has(d.id)){ a.add(d.id); aj = true; } }); } return a; };
+  return (ref.circuits || []).find(c=>c && !((c.types || []).length && c.types.indexOf(tt) < 0) && !((c.sites || []).length && c.sites.indexOf(emp.siteId) < 0) && !((c.depts || []).length && !c.depts.some(id=>arbre(id).has(emp.deptId)))) || null;
+}
+function valideurNiveau(ref, emps, niv, emp){
+  if (!niv || !emp) return null;
+  const parMat = m => emps.find(e=>String(e.mat) === String(m)), present = e => !!e && !(e.sortie && e.sortie < jourLocal());
+  const q = niv.qui || "hier";
+  if (q === "hier"){ const c = emp.chefMat ? parMat(emp.chefMat) : null; return present(c) ? {mat:String(c.mat)} : null; }
+  if (q === "hier2"){ const c = emp.chefMat ? parMat(emp.chefMat) : null, c2 = c && c.chefMat ? parMat(c.chefMat) : null; return present(c2) ? {mat:String(c2.mat)} : null; }
+  if (q === "resp" || q === "respParent"){ let d = (ref.depts || []).find(x=>x.id === emp.deptId), n = 0; if (q === "respParent" && d) d = (ref.depts || []).find(x=>x.id === d.parent);
+    while (d && n++ < 12){ if (d.resp){ const e = parMat(d.resp); if (present(e)) return {mat:String(e.mat)}; } d = (ref.depts || []).find(x=>x.id === d.parent); } return null; }
+  if (q.indexOf("profil:") === 0) return (ref.profils || []).some(p=>p.id === q.slice(7)) ? {profilId:q.slice(7)} : null;
+  if (q.indexOf("user:") === 0){ const u = (ref.users || []).find(x=>x.id === q.slice(5) && x.actif !== false); return u ? {userId:u.id} : null; }
+  return null;
+}
+function estValideur(ref, emps, P, v, emp){
+  const u = P.u || {}, d = jourLocal(), moiEmp = u.empId ? emps.find(e=>e.id === u.empId) : null;
+  const delegue = vu => !!vu && (vu.delegPerim || []).some(g=>g && g.a === u.id && g.du <= d && d <= g.au);
+  if (v.mat){ if (moiEmp && String(moiEmp.mat) === v.mat) return true; const ve = emps.find(e=>String(e.mat) === v.mat); return delegue(ve && (ref.users || []).find(x=>x.empId === ve.id && x.actif !== false)); }
+  if (v.userId) return u.id === v.userId || delegue((ref.users || []).find(x=>x.id === v.userId));
+  if (v.profilId){ const pr = P.profil || {}; return pr.id === v.profilId && (RANG[(pr.droits || {}).ABS] || 0) >= 3 && (P.set === null || P.set.has(String(emp.mat))); }
+  return false;
+}
+function decisionDmd(avant, x, P, login, admin, ctx){
   const ea = avant ? (avant.etat || "attente") : null, en = x.etat || "attente";
   if (ETATS_DMD.indexOf(en) < 0) return {refus:"état inconnu"};
   const decision = en === "acceptee" || en === "refusee";
+  if (!admin && ctx){
+    const {ref, emps} = ctx, emp = emps.find(e=>String(e.mat) === String(x.mat)), u = P.u || {};
+    const soi = !!(emp && u.empId && emp.id === u.empId), rangAbs = RANG[((P.profil || {}).droits || {}).ABS] || 0;
+    /* niveau qui ne peut pas être sauté : un valideur existe, autre que le demandeur, sans seuil de durée */
+    const bloquant = n => { if (Number(n && n.min) > 0) return false; const v = valideurNiveau(ref, emps, n, emp); return !!v && !(v.mat && emp && v.mat === String(emp.mat)); };
+    if (!avant){
+      /* création : circuit et niveau fixés par le serveur ; demande déjà décidée seulement par la RH, pour un tiers */
+      if (decision && (soi || rangAbs < 3)) return {refus:"une demande ne peut être créée déjà décidée que par la validation RH, pour un autre salarié"};
+      if (!decision && en === "attente"){
+        const c = circuitPourSrv(ref, emp, x.tt), id = c ? c.id : null;
+        if (String(x.circuitId || "") !== String(id || "")) x = Object.assign({}, x, {circuitId:id});
+        /* niveaux sautés seulement s'ils n'ont aucun valideur (ou un seuil de durée) */
+        const niv = Math.max(0, Math.min(Number(x.niveau) || 0, c ? (c.niveaux || []).length : 0));
+        for (let i = 0; i < niv; i++){ const n = c.niveaux[i]; if (bloquant(n)) return {refus:"niveau de validation sauté"}; }
+        x = Object.assign({}, x, {niveau:niv});
+      }
+    } else if (ea === "attente"){
+      if (String(x.circuitId || "") !== String(avant.circuitId || "")) return {refus:"le circuit d'une demande ne se change pas"};
+      const c = (ref.circuits || []).find(z=>z && z.id === avant.circuitId), nAv = Number(avant.niveau) || 0, nAp = Number(x.niveau) || 0;
+      const avance = (decision || (en === "attente" && nAp !== nAv));
+      if (en === "attente" && nAp < nAv) return {refus:"niveau de validation incohérent"};
+      if (avance){
+        if (soi) return {refus:"le demandeur ne peut pas valider sa propre demande"};
+        const v = c ? valideurNiveau(ref, emps, (c.niveaux || [])[nAv], emp) : null;
+        const ok = v ? estValideur(ref, emps, P, v, emp) : (rangAbs >= 3 && (P.set === null || P.set.has(String(x.mat))));
+        if (!ok) return {refus:"vous n'êtes pas le valideur de ce niveau du circuit"};
+        /* niveaux franchis d'un coup : seulement ceux sans valideur (ou à seuil de durée), comme le fait l'écran */
+        const L = c ? (c.niveaux || []) : [], jusqu = en === "acceptee" ? L.length : en === "attente" ? nAp : nAv + 1;
+        for (let i = nAv + 1; i < Math.min(jusqu, L.length); i++){ const n = L[i]; if (bloquant(n)) return {refus:"des niveaux de validation restent à franchir"}; }
+      }
+      if (en === "annulee" && !soi && rangAbs < 3) return {refus:"seul le demandeur ou la RH annule une demande"};
+    }
+  }
   if (ea && ea !== en){
     /* transitions permises : en attente → acceptée / refusée / annulée ; acceptée → annulée (rectification) */
     const ok = (ea === "attente" && en !== "attente") || (ea === "acceptee" && en === "annulee");
@@ -179,6 +242,8 @@ function creer(B, PERIM){
       empsVue = moi ? empsVue.filter(e=>String(e.mat) === String(moi.mat) || String(e.chefMat||"") === String(moi.mat)) : []; }
     for (const c of COLLS){
       if (c === "emps"){ parties.push('"emps":'+JSON.stringify(empsVue)); continue; }
+      /* correctif 18 : données d'un module désactivé non servies (badgeages, absences, demandes…) */
+      if (API.moduleRefus && API.moduleRefus("coll", c)){ parties.push('"'+c+'":[]'); continue; }
       let sql = "SELECT data FROM enreg WHERE coll=?", a = [c];
       if (DATEES.indexOf(c) >= 0 && du){
         const d0 = (c === "dmd" || c === "notifs") ? depuis : du;
@@ -201,6 +266,9 @@ function creer(B, PERIM){
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
     const refVue = Object.assign({}, vue); COLLS.forEach(c=>{ delete refVue[c]; });
+    /* correctif 18 : copie d'annulation d'import jamais servie ; corbeille (copies complètes d'éléments supprimés, hors
+       périmètre compris) réservée au droit Système */
+    delete refVue.impLast; if (!sysLu) refVue.corbeille = [];
     return '{"ref":'+JSON.stringify(refVue)+',"colls":{'+parties.join(",")+'},"fenetre":{"du":'+JSON.stringify(du||null)+'},"mode":'+JSON.stringify(grand ? "grand" : "normal")+',"effectif":'+nb+',"annuaire":'+JSON.stringify(pagine ? "pagine" : "complet")+'}';
   }
   async function chargerPeriode(login, du, au, mats, colls, admin){
@@ -212,12 +280,14 @@ function creer(B, PERIM){
     const parties = [];
     /* correctif 13 : collections demandées seulement (ex. demandes pour le Tableau de bord, sans les badgeages) */
     const sysLu = !!admin || (!!P.profil && (PERIM.niveauProfil(P.profil) === "admin" || ({lecture:1, saisie:2, validation:3, config:4}[(P.profil.droits || {}).SYS] || 0) >= 1));
-    for (const c of DATEES.filter(x=>(!colls || colls.indexOf(x) >= 0) && (x !== "journal" || sysLu))){
+    for (const c of DATEES.filter(x=>(!colls || colls.indexOf(x) >= 0) && (x !== "journal" || sysLu) && !(API.moduleRefus && API.moduleRefus("coll", x)))){
       const lignes = await B.all("SELECT data FROM enreg WHERE coll=? AND d>=? AND d<=?"+f.sql+((c === "audit" || c === "journal") && !sysLu ? " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'" : ""), c, du, au, ...f.a);
       parties.push('"'+c+'":['+lignes.map(l=>l.data).join(",")+']');
     }
     return '{"colls":{'+parties.join(",")+'},"du":'+JSON.stringify(du)+',"au":'+JSON.stringify(au)+'}';
   }
+  const controleCircuits = (ref, apres, profils, users) => controleCircuitsBase(B, ref, apres, profils, users);
+  const controleSites = async (ref, apres, convs) => controleSitesBase(ref, apres, convs, await employes());
   async function controleJournal(x, P, ref, admin){
     const rang = m => admin ? 4 : (RANG[((P.profil || {}).droits || {})[m]] || 0);
     const codes = l => (Array.isArray(l) ? l : []).map(String).filter(c=>REGLE_ACTIONS.indexOf(c) >= 0);
@@ -225,8 +295,12 @@ function creer(B, PERIM){
       if (!x.mat) return {refus:"salarié manquant"};
       if (rang("EMP") < 2 && !admin) return {refus:"droit Employés (saisie) requis"};
       const r = (ref.regles || []).find(z=>z && z.id === x.regleId);
-      if (!r) return {refus:"règle inconnue"};
-      if (!admin && (r.actif === false || String(r.declencheur) !== String(x.declencheur))) return {refus:"règle inactive ou déclencheur différent"};
+      /* correctif 18 : règle supprimée ou désactivée entre-temps (poste avec l'ancienne liste) : les actions ont pu être
+         faites — l'entrée est gardée, marquée, au lieu d'être refusée (actions sans trace) */
+      const horsRegle = !r || r.actif === false || String(r.declencheur) !== String(x.declencheur);
+      if (horsRegle){ const e0 = (await employes()).find(z=>String(z.mat) === String(x.mat)); if (!e0) return {refus:"salarié inconnu"};
+        return {x:{id:x.id, regleId:String(x.regleId).slice(0, 80), regleNom:coupe(x.regleNom, 120), regleHors:true, declencheur:coupe(x.declencheur, 60), mat:String(e0.mat), employe:coupe((e0.nom || "")+" "+(e0.prenom || ""), 120),
+          codes:codes(x.codes), sansEffet:codes(x.sansEffet), refuses:codes(x.refuses), echecs:codes(x.echecs), detail:coupe(x.detail, 200), par:x.par}}; }
       const e = (await employes()).find(z=>String(z.mat) === String(x.mat)); if (!e) return {refus:"salarié inconnu"};
       const permis = new Set((r.actions || []).map(String)), dans = l => codes(l).filter(c=>permis.has(c));
       const jour = String(x.ts || x.at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
@@ -255,6 +329,17 @@ function creer(B, PERIM){
     const admin = !!P.u && ((opts && opts.admin === true) || (!!P.profil && PERIM.niveauProfil(P.profil) === "admin"));
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
+    /* correctif 18 : un nouveau salarié est dans le périmètre si la règle du compte l'y place (site, service, équipe) —
+       auparavant tout matricule nouveau était refusé à un compte limité, même sur son propre site */
+    let PNOUV = null;
+    const creationDansPerim = async x => { if (!PNOUV){ const nouv = (((paquet.colls || {}).emps || {}).put || []).filter(z=>z && z.mat); const l = (await employes()).concat(nouv.filter(z=>!(CACHE_EMPS || []).some(e=>e.id === z.id)));
+      PNOUV = PERIM.perimetre(Object.assign({}, refL || ref, {emps:l}), login); } return PNOUV.set === null || PNOUV.set.has(String(x.mat)); };
+    const corbSrv = [];
+    /* correctif 18 : matrice des droits par écran appliquée par le serveur pour la création et la suppression des
+       salariés et des badgeages (auparavant seulement masquée dans le navigateur) */
+    const ECRAN_COLL = {emps:"emp", ptg:"ptg", corrections:"ptg"};
+    const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false; const m = (P.profil.menus || {})[v], a = ((P.profil.actions || {})[v] || {})[acte];
+      return m === "masque" || m === "lecture" || a === false; };
     const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [];
     let nbEcrits = 0;
     await B.transaction(async ()=>{
@@ -327,12 +412,26 @@ function creer(B, PERIM){
         /* correctif 14 : un champ personnalisé qui filtre un état ne peut pas être supprimé (filtre devenu invisible) */
         if (k === "champs" && Array.isArray(r.champs)){ const codes = new Set(r.champs.filter(c=>c && typeof c === "object").map(c=>String(c.code))); const et = etatsRetenus().find(e=>e && e.filtres && typeof e.filtres === "object" && Object.keys(e.filtres).some(c=>e.filtres[c] && !codes.has(c)));
           if (et){ ignores.push("champs (champ utilisé comme filtre par l'état « "+et.nom+" »)"); continue; } }
+        /* correctif 18 : profils — un compte non administrateur ne peut ni toucher à son propre profil ni à un profil
+           administrateur, ni créer un administrateur, ni accorder plus que ses propres droits ; un profil encore porté
+           par un compte et le dernier profil administrateur ne se suppriment pas */
+        /* correctif 18 : copie d'annulation d'import (toutes les fiches chargées) jamais stockée dans le paramétrage
+           partagé (elle était renvoyée à tous les comptes) */
+        if (k === "impLast") continue;
+        if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
+        if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
+        if (k === "sites"){ const motif = await controleSites(ref, r.sites, peutK("convs") ? r.convs : ref.convs); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
+        if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, peutK("sites") ? r.sites : ref.sites); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
+        /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
+        if (!(opts || {}).recette && Array.isArray(r[k]) && r[k].some(z=>z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || ""))) && !(ref[k] || []).some(y=>y && y.id === z.id))){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
+        if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
       refCles.forEach(k=>{ vers[k] = Number(vers[k]||0) + 1; nouvellesVersions.ref[k] = vers[k]; });
       if (refModifie){
         (ref.users||[]).forEach(u=>{ if (u){ delete u.mdp; delete u.mdpHisto; delete u.codeReset; } });
+        delete ref.impLast;
         await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), login, CLE_APP);
       }
       /* décisions nouvelles ou retirées : jours à recalculer */
@@ -372,15 +471,28 @@ function creer(B, PERIM){
           /* conflit : l'enregistrement a changé sur le serveur depuis que le client l'a lu */
           if (!immuable && avant && Number(avant.__v||0) !== Number(x.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(x.id), mat:avant.mat||""}); continue; }
           if (UNI){ const d = doublonEmp(UNI, x, avant); if (d){ refus++; refusEmps.push(d); continue; } }
+          if (!admin && !avant && acteRefuse(c, "creer")){ refus++; continue; }
+          if (!(opts || {}).recette && !avant && (x.recette === true || x.src === "recette" || /^rec_/.test(String(x.id)))){ refus++; ignores.push(c+" (outils de recette réservés à une installation de recette)"); continue; }
+          /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
+          if (c === "abs" && !admin && !avant){ let okA = false;
+            if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat); }
+            if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
+            if (!okA){ refus++; ignores.push("abs (absence sans demande acceptée)"); continue; } }
+          /* correctif 18 : fiche salarié — dates, adresse électronique et rattachements contrôlés */
+          if (c === "emps"){ const m = controleEmp(x, ref, avant); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
+          /* modification d'une fiche refusée par la matrice ; les droits d'accès aux zones (écran Droits d'accès) restent
+             modifiables par leur propre écran */
+          if (!admin && avant && c === "emps" && acteRefuse(c, "modifier")){ const sans = o => { const y = Object.assign({}, o); ["acces", "__v"].forEach(k=>delete y[k]); return JSON.stringify(y); };
+            if (sans(avant) !== sans(x)){ refus++; continue; } }
           if (!admin){
             if (avant && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
             /* correctif 13 : une trace d'audit ou du journal ne peut concerner qu'un salarié du périmètre de son auteur
                (seules les notifications restent permises hors périmètre : avis au valideur) */
-            if (x.mat && !dansPerim(x.mat) && !(c === "notifs" && !avant)){ refus++; continue; }
+            if (x.mat && !dansPerim(x.mat) && !(c === "notifs" && !avant) && !(c === "emps" && !avant && await creationDansPerim(x))){ refus++; continue; }
           }
           /* correctif 15 : décisions sur les demandes — transitions d'état contrôlées, date et auteur de la décision imposés
              par le serveur (auparavant ceux du navigateur : « acceptée le 01/01/2019 par Directeur général » acceptés) */
-          if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
+          if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin, {ref, emps:await employes()}); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
           /* correctif 16 : journal des événements — contenu reconstruit par le serveur (règle existante et active, codes
              d'action connus, salarié du périmètre, nom et libellés repris du paramétrage) ; une même règle n'est
              journalisée qu'une fois par salarié, déclencheur et jour ; imports et accueil réservés au droit Système */
@@ -402,6 +514,7 @@ function creer(B, PERIM){
         }
         for (const id of (colls[c].del||[])){
           if (immuable){ refus++; continue; }
+          if (!admin && acteRefuse(c, "supprimer")){ refus++; continue; }
           const av = await B.get("SELECT data FROM enreg WHERE coll=? AND id=?", c, String(id)); if (!av) continue;
           const avant = JSON.parse(av.data);
           if (!admin && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
@@ -409,6 +522,7 @@ function creer(B, PERIM){
           const bv = (colls[c].delv || {})[String(id)];
           if (bv !== undefined && Number(bv) !== Number(avant.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(id), mat:avant.mat||"", suppression:true}); continue; }
           await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++;
+          corbSrv.push({ent:c, row:avant});
           if (c === "ptg" && API.tracerPtg) await API.tracerPtg(login, avant, null);
           if (c === "emps") CACHE_EMPS = null;
           /* correctif 11 : suppression d'un salarié signalée (retrait des appareils, effacement des données biométriques) */
@@ -418,6 +532,15 @@ function creer(B, PERIM){
         if (refus) ignores.push(c+" ("+refus+" refusé(s)"+(clotRefus ? ", dont période clôturée : ajustement de période antérieure requis" : "")+")");
       }
     });
+    /* correctif 18 : corbeille tenue par le serveur pour les suppressions d'un compte qui ne peut pas l'écrire lui-même
+       (le navigateur annonçait « part à la corbeille » mais l'entrée était ignorée : suppression définitive) */
+    if (corbSrv.length && refCles.indexOf("corbeille") < 0) try {
+      const rr = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP), rf = JSON.parse(rr.valeur), z = v => String(v).padStart(2, "0"), n = new Date();
+      const quand = n.getFullYear()+"-"+z(n.getMonth()+1)+"-"+z(n.getDate())+" "+z(n.getHours())+":"+z(n.getMinutes());
+      rf.corbeille = corbSrv.map(e=>({cid:"cb_"+Date.now().toString(36)+Math.random().toString(36).slice(2, 7), ent:e.ent, row:e.row, nom:String(e.row.nom ? e.row.nom+" "+(e.row.prenom || "") : (e.row.mat || "")+" "+(e.row.ts || e.row.d || e.row.du || "")).trim(), ts:Date.now(), quand, par:(P.u && P.u.nom) || login, srv:1, impacts:[]})).concat(Array.isArray(rf.corbeille) ? rf.corbeille : []).slice(0, 2000);
+      rf.__versions = rf.__versions || {}; rf.__versions.corbeille = Number(rf.__versions.corbeille || 0) + 1; nouvellesVersions.ref.corbeille = rf.__versions.corbeille;
+      await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(rf), new Date().toISOString(), CLE_APP);
+    } catch(e){}
     return {ok:true, ignores, ecrits:nbEcrits, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
@@ -472,7 +595,8 @@ function creer(B, PERIM){
       const ref = JSON.parse(r.valeur); if (!Array.isArray(ref.corbeille) || !ref.corbeille.length) return 0;
       const j = CORB_CHOIX.indexOf(Number((ref.corbeilleCfg||{}).jours)) >= 0 ? Number(ref.corbeilleCfg.jours) : 30;
       const limite = Date.now() - j*86400000, avant = ref.corbeille.length;
-      ref.corbeille = ref.corbeille.filter(c=>!c || !c.ts || c.ts > limite);
+      /* correctif 18 : entrée sans date ou datée dans le futur traitée comme expirée (jamais purgée auparavant) */
+      ref.corbeille = ref.corbeille.filter(c=>c && Number.isFinite(Number(c.ts)) && Number(c.ts) > limite && Number(c.ts) <= Date.now() + 86400000);
       const n = avant - ref.corbeille.length; if (!n) return 0;
       ref.__versions = ref.__versions || {}; ref.__versions.corbeille = Number(ref.__versions.corbeille||0) + 1;
       await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), "systeme", CLE_APP);
@@ -486,6 +610,132 @@ function creer(B, PERIM){
    agrégation figées après une clôture ; suppression refusée si une formule ou un état l'utilise */
 /* correctif 14 : définition des états — seuls les états ajoutés ou modifiés sont contrôlés (un état ancien devenu
    incomplet ne bloque pas l'enregistrement des autres) ; un état cité par un profil ne peut pas être supprimé */
+/* correctif 18 : circuits de validation — contenu contrôlé ; un circuit encore utilisé par une demande en attente ne
+   se supprime pas (les demandes restaient sans valideur) */
+async function controleCircuitsBase(B, ref, apres, profils, users){
+  if (!Array.isArray(apres)) return "liste attendue";
+  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, ids = new Set(), QUI = ["hier", "hier2", "resp", "respParent"];
+  const tts = new Set((ref.tt || []).map(x=>x && x.id)), sites = new Set((ref.sites || []).map(x=>x && x.id)), depts = new Set((ref.depts || []).map(x=>x && x.id));
+  const avant = new Map((ref.circuits || []).filter(c=>c && c.id).map(c=>[String(c.id), JSON.stringify(c)]));
+  for (const c of apres){
+    if (!c || typeof c !== "object" || Array.isArray(c) || !ID.test(String(c.id))) return "circuit invalide";
+    if (ids.has(String(c.id))) return "identifiant en double"; ids.add(String(c.id));
+    if (avant.get(String(c.id)) === JSON.stringify(c)) continue;
+    const l = "circuit « "+(c.nom || c.id)+" » : ";
+    if (!String(c.nom || "").trim() || String(c.nom).length > 120) return l+"nom obligatoire (120 caractères au plus)";
+    if (!Array.isArray(c.niveaux) || !c.niveaux.length || c.niveaux.length > 10) return l+"de 1 à 10 niveaux de validation";
+    for (const n of c.niveaux){
+      if (!n || typeof n !== "object") return l+"niveau invalide";
+      const q = String(n.qui || "hier");
+      if (QUI.indexOf(q) < 0 && !(q.indexOf("profil:") === 0 && (profils || []).some(p=>p && p.id === q.slice(7))) && !(q.indexOf("user:") === 0 && (users || []).some(u=>u && u.id === q.slice(5) && u.actif !== false))) return l+"valideur inconnu ("+q+")";
+      for (const k of ["delai", "min"]) if (n[k] !== undefined && n[k] !== null && n[k] !== "" && !(Number(n[k]) >= 0 && Number(n[k]) <= 365)) return l+k+" invalide";
+    }
+    if ((c.types || []).some(x=>!tts.has(x))) return l+"type d'absence inconnu";
+    if ((c.sites || []).some(x=>!sites.has(x))) return l+"site inconnu";
+    if ((c.depts || []).some(x=>!depts.has(x))) return l+"service inconnu";
+  }
+  for (const id of avant.keys()) if (!ids.has(id)){
+    const n = await B.get("SELECT COUNT(*) n FROM enreg WHERE coll='dmd' AND data LIKE ? AND (data LIKE ? OR data NOT LIKE ?)", '%"circuitId":"'+id.replace(/[%_"]/g, "")+'"%', '%"etat":"attente"%', '%"etat":%');
+    if (Number(n && n.n) > 0) return "le circuit « "+id+" » est utilisé par "+n.n+" demande(s) en attente : traitez-les ou modifiez le circuit au lieu de le supprimer";
+  }
+  return "";
+}
+/* correctif 18 : règles automatiques — déclencheur et actions connus, nom, activation */
+function controleRegles(avant, apres){
+  if (!Array.isArray(apres)) return "liste attendue";
+  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, DECL = ["employe.sorti", "employe.mutation", "employe.hors_effectif", "employe.cree"], ids = new Set();
+  const av = new Map((avant || []).filter(r=>r && r.id).map(r=>[String(r.id), JSON.stringify(r)]));
+  for (const r of apres){
+    if (!r || typeof r !== "object" || Array.isArray(r) || !ID.test(String(r.id))) return "règle invalide";
+    if (ids.has(String(r.id))) return "identifiant en double"; ids.add(String(r.id));
+    if (av.get(String(r.id)) === JSON.stringify(r)) continue;
+    const l = "règle « "+String(r.nom || r.id).slice(0, 60)+" » : ";
+    if (!String(r.nom || "").trim() || String(r.nom).length > 120) return l+"nom obligatoire (120 caractères au plus)";
+    if (DECL.indexOf(r.declencheur) < 0) return l+"déclencheur inconnu";
+    if (!Array.isArray(r.actions) || !r.actions.length || r.actions.some(a=>REGLE_ACTIONS.indexOf(a) < 0) || new Set(r.actions).size !== r.actions.length) return l+"actions invalides (au moins une, sans doublon)";
+    if (r.actif !== undefined && typeof r.actif !== "boolean") return l+"activation invalide";
+  }
+  return "";
+}
+/* correctif 18 : sites — identifiant, code unique, nom, fuseau horaire réel ; un site utilisé ne se supprime pas */
+async function controleSitesBase(ref, apres, convs, emps){
+  if (!Array.isArray(apres)) return "liste attendue";
+  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, ids = new Set(), codes = new Set();
+  const av = new Map((ref.sites || []).filter(x=>x && x.id).map(x=>[String(x.id), JSON.stringify(x)]));
+  for (const x of apres){
+    if (!x || typeof x !== "object" || Array.isArray(x) || !ID.test(String(x.id))) return "site invalide (identifiant)";
+    if (ids.has(String(x.id))) return "identifiant en double"; ids.add(String(x.id));
+    const code = String(x.code || "").trim().toLowerCase(); if (code){ if (codes.has(code)) return "code de site en double ("+x.code+")"; codes.add(code); }
+    if (av.get(String(x.id)) === JSON.stringify(x)) continue;
+    if (!String(x.nom || "").trim() || String(x.nom).length > 120) return "site : nom obligatoire (120 caractères au plus)";
+    if (x.fuseau){ try { new Intl.DateTimeFormat("fr", {timeZone:String(x.fuseau)}); } catch(e){ return "fuseau horaire inconnu ("+x.fuseau+")"; } }
+  }
+  for (const id of av.keys()) if (!ids.has(id)){
+    const n = emps.filter(e=>e && e.siteId === id).length, t = (ref.terms || []).filter(z=>z && z.siteId === id).length, d = (ref.depts || []).filter(z=>z && z.siteId === id).length, c = (ref.cals || []).filter(z=>z && z.siteId === id).length;
+    if (n + t + d + c) return "le site « "+id+" » est utilisé ("+[n && n+" salarié(s)", t && t+" terminal(aux)", d && d+" service(s)", c && c+" calendrier(s)"].filter(Boolean).join(", ")+")";
+  }
+  return "";
+}
+/* correctif 18 : conventions — valeurs numériques bornées, sites existants */
+function controleConvs(avant, apres, sites){
+  if (!Array.isArray(apres)) return "liste attendue";
+  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, ids = new Set(), sv = new Set((sites || []).map(s=>s && s.id));
+  const av = new Map((avant || []).filter(x=>x && x.id).map(x=>[String(x.id), JSON.stringify(x)]));
+  const num = (v, min, max) => v === undefined || v === null || v === "" || (Number.isFinite(Number(v)) && Number(v) >= min && Number(v) <= max);
+  for (const c of apres){
+    if (!c || typeof c !== "object" || Array.isArray(c) || !ID.test(String(c.id))) return "convention invalide (identifiant)";
+    if (ids.has(String(c.id))) return "identifiant en double"; ids.add(String(c.id));
+    if (av.get(String(c.id)) === JSON.stringify(c)) continue;
+    const l = "convention « "+String(c.nom || c.id).slice(0, 60)+" » : ";
+    if (!String(c.nom || "").trim()) return l+"nom obligatoire";
+    if (!num(c.baseJour, 1, 24) || !num(c.hebdo, 1, 80) || !num(c.seuil, 0, 80) || !num(c.h1, 0, 80) || !num(c.r1, 0, 300) || !num(c.r2, 0, 300) || !num(c.evStart, 1, 28) || !num(c.cutThresh, 0, 80)) return l+"valeur hors limites";
+    if ((c.siteIds || []).some(s=>!sv.has(s))) return l+"site inconnu";
+  }
+  return "";
+}
+/* correctif 18 : fiche salarié — dates réelles, entrée avant sortie, adresse électronique, site et service existants */
+function controleEmp(x, ref, avant){
+  /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
+  const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
+  const dv = k => !chg(k) || !x[k] || (/^\d{4}-\d{2}-\d{2}$/.test(String(x[k])) && new Date(x[k]+"T00:00:00Z").toISOString().slice(0, 10) === x[k]);
+  for (const k of ["entree", "sortie", "naissance"]) if (!dv(k)) return "date "+k+" invalide";
+  if ((chg("entree") || chg("sortie")) && x.entree && x.sortie && x.sortie < x.entree) return "sortie avant l'entrée";
+  if (chg("email") && x.email && x.email !== "•••" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x.email))) return "adresse électronique invalide";
+  if (chg("siteId") && x.siteId && !(ref.sites || []).some(s=>s && s.id === x.siteId)) return "site inconnu";
+  if (chg("deptId") && x.deptId && !(ref.depts || []).some(d=>d && d.id === x.deptId)) return "service inconnu";
+  return "";
+}
+function controleProfils(avant, apres, P, admin, users, niveau){
+  const PERIM = {niveauProfil:niveau};
+  if (!Array.isArray(apres)) return "liste attendue";
+  const RG = {aucun:0, lecture:1, saisie:2, validation:3, config:4}, ID = /^[A-Za-z0-9_.:-]{1,80}$/;
+  const estAdmin = p => !!p && (PERIM.niveauProfil(p) === "admin" || ((p.droits || {}).SYS === "config"));
+  const ids = new Set();
+  for (const p of apres){ if (!p || typeof p !== "object" || Array.isArray(p) || !ID.test(String(p.id))) return "profil invalide"; if (ids.has(String(p.id))) return "identifiant en double"; ids.add(String(p.id)); }
+  const avantId = new Map((avant || []).filter(p=>p && p.id).map(p=>[String(p.id), p])), apresId = new Map(apres.map(p=>[String(p.id), p]));
+  /* profil supprimé encore porté par un compte (ou une délégation en cours) */
+  for (const [id, p] of avantId) if (!apresId.has(id)){
+    const u = (users || []).find(x=>x && (x.profilId === id || (x.deleg || []).some(d=>d && d.profilId === id)));
+    if (u) return "le profil « "+(p.nom || id)+" » est attribué au compte "+(u.login || u.id)+" : changez d'abord son profil";
+  }
+  if (Array.from(avantId.values()).some(estAdmin) && !apres.some(p=>PERIM.niveauProfil(p) === "admin")) return "le dernier profil administrateur ne peut pas être supprimé ni rétrogradé";
+  if (admin) return "";
+  const moi = P.u || {}, mesProfils = new Set([moi.profilId].concat((moi.deleg || []).map(d=>d && d.profilId)).filter(Boolean).map(String));
+  const mesDroits = (P.profil || {}).droits || {};
+  for (const id of new Set(Array.from(avantId.keys()).concat(Array.from(apresId.keys())))){
+    const a = avantId.get(id), n = apresId.get(id);
+    if (a && n && JSON.stringify(a) === JSON.stringify(n)) continue;
+    if (mesProfils.has(id)) return "vous ne pouvez pas modifier votre propre profil";
+    if (estAdmin(a)) return "seul un administrateur modifie ou supprime un profil administrateur";
+    if (n){
+      if (estAdmin(n)) return "seul un administrateur crée un profil administrateur (niveau administrateur ou droit Système en paramétrage)";
+      const trop = Object.keys(n.droits || {}).find(m=>(RG[(n.droits || {})[m]] || 0) > (RG[mesDroits[m]] || 0));
+      if (trop) return "droit "+trop+" supérieur au vôtre";
+      if (n.a2f === false && a && a.a2f === true) return "la double authentification d'un profil ne peut être retirée que par un administrateur";
+    }
+  }
+  return "";
+}
 function controleEtats(avant, apres, arits, champs, profils){
   if (!Array.isArray(apres)) return "liste attendue";
   const DATE = /^\d{4}-\d{2}-\d{2}$/, ID = /^[A-Za-z0-9_.:-]{1,80}$/;

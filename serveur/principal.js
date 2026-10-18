@@ -277,13 +277,17 @@ function audit(login, action, detail, ip){
 /* export quotidien des entrées de la veille vers un emplacement externe (partage en écriture seule, stockage à rétention verrouillée) */
 async function exporterAudit(){
   const dest = String(CONFIG.auditExterne||"").trim(); if (!dest) return null;
-  const hier = ajoutJours(aujourdhui(), -1);
-  const l = await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE ts >= ? AND ts < ? ORDER BY id", hier, aujourdhui());
+  /* correctif 18 : rattrapage des jours non exportés (serveur arrêté, destination indisponible), 31 jours au plus */
   fs.mkdirSync(dest, {recursive:true});
-  const f = path.join(dest, "fiwakti-audit-"+hier+".jsonl");
-  if (fs.existsSync(f)) return f;                       /* jamais réécrit */
-  fs.writeFileSync(f, l.map(r=>JSON.stringify(r)).join("\n")+"\n", {flag:"wx"});
-  await meta("audit_export", {le:maintenant(), fichier:f, lignes:l.length});
+  const hier = ajoutJours(aujourdhui(), -1), der = await meta("audit_export");
+  let j = der && der.jour ? ajoutJours(der.jour, 1) : hier; if (j < ajoutJours(hier, -30)) j = ajoutJours(hier, -30);
+  let f = null;
+  for (; j <= hier; j = ajoutJours(j, 1)){
+    const l = await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE ts >= ? AND ts < ? ORDER BY id", j, ajoutJours(j, 1));
+    f = path.join(dest, "fiwakti-audit-"+j+".jsonl");
+    if (!fs.existsSync(f)) fs.writeFileSync(f, l.map(r=>JSON.stringify(r)).join("\n")+"\n", {flag:"wx"});   /* jamais réécrit */
+    await meta("audit_export", {le:maintenant(), jour:j, fichier:f, lignes:l.length});
+  }
   return f;
 }
 /* correctif 13 : vérification renforcée — une ligne non scellée n'est admise qu'avant la première ligne scellée (lignes
@@ -409,7 +413,7 @@ async function synchroniserComptes(doc, par, empIds){
     if (!u || !u.login) continue;
     const login = String(u.login).trim(); vus.add(login.toLowerCase());
     const pr = profils[u.profilId] || {}, d = pr.droits || {};
-    const niveau = pr.niveauMenu || (d.SYS === "config" ? "admin" : "");
+    const niveau = u.profilId && profils[u.profilId] ? PERIM.niveauProfil(pr) : "";
     const role = niveau === "admin" || login.toLowerCase() === String(CONFIG.adminInitial||"").toLowerCase() ? "admin" : "utilisateur";
     const emp = emps[u.empId]; const mat = emp ? String(emp.mat||"") : "";
     const actif = u.actif !== false && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
@@ -568,7 +572,13 @@ async function fermerSession(res, sess){
 const ipBrute = req => String((req.socket && req.socket.remoteAddress) || "").replace(/^::ffff:/, "");
 function ipDe(req){
   const brute = ipBrute(req);
-  if ((CONFIG.proxyConfiance||[]).indexOf(brute) >= 0 && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim().replace(/^::ffff:/, "");
+  /* correctif 18 : la chaîne X-Forwarded-For est lue de droite à gauche : première adresse qui n'est pas un proxy de
+     confiance (la plus à gauche est fournie par le client et peut être inventée) */
+  if ((CONFIG.proxyConfiance||[]).indexOf(brute) >= 0 && req.headers["x-forwarded-for"]){
+    const l = String(req.headers["x-forwarded-for"]).split(",").map(x=>x.trim().replace(/^::ffff:/, "")).filter(Boolean);
+    for (let i = l.length - 1; i >= 0; i--) if ((CONFIG.proxyConfiance||[]).indexOf(l[i]) < 0) return l[i];
+    return l[0] || brute;
+  }
   return brute;
 }
 /* limites : par adresse (20 échecs / 15 min), globale (300 échecs / 15 min, toutes adresses),
@@ -619,6 +629,7 @@ async function sauvegarderInterne(par, motif){
     await meta("cles_empreintes", CF.inventaire());
     const attendus = {};
     for (const t of ["kv","enreg","comptes"]) attendus[t] = Number((await B.get("SELECT COUNT(*) n FROM "+t)).n);
+    await AUDIT_FILE; let auditMaxSv = null; try { const am = await B.get("SELECT id, empreinte FROM audit ORDER BY id DESC LIMIT 1"); if (am) auditMaxSv = {id:Number(am.id), empreinte:am.empreinte || null}; } catch(e){}
     try { await B.exporter(brut);
       if (chiffrer) await CF.chiffrerFichier(brut, f, "sauvegarde"); }
     catch(e){ try { fs.unlinkSync(f); } catch(x){} throw e; }
@@ -627,6 +638,8 @@ async function sauvegarderInterne(par, motif){
       /* v56.23 : empreintes des clés en service (aucune clé elle-même) : une restauration est refusée si une clé
          nécessaire aux données chiffrées manque ou diffère sur le serveur cible */
       cles:CF.inventaire(),
+      /* correctif 18 : dernière entrée d'audit contenue dans la sauvegarde (reprise exacte à la restauration) */
+      auditMax:auditMaxSv,
       chiffre:chiffrer, cle:chiffrer ? CF.empreinte("sauvegarde") : null};
     man.verification = await verifierFichier(f, man);
     man.verification.le = maintenant();
@@ -696,7 +709,10 @@ async function restaurerInterne(fichier, par){
   await AUDIT_FILE;
   const fAud = path.join(D_JOURN, "audit-avant-restauration-"+maintenant().replace(/[^0-9]/g, "")+".jsonl");
   const depuisSauv = ajoutJours(String(man.cree || "0000-00-00").slice(0, 10), -1);
-  { const out = fs.openSync(fAud, "w", 0o600); try { for (let dernier = 0; ; ){ const l = await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? AND ts >= ? ORDER BY id LIMIT 5000", dernier, depuisSauv); if (!l.length) break; fs.writeSync(out, l.map(r=>JSON.stringify(r)).join("\n")+"\n"); dernier = Number(l[l.length-1].id); } } finally { fs.closeSync(out); } }
+  /* correctif 18 : extraction à partir de la dernière entrée de la sauvegarde (manifeste), sans filtre de date ; filtre
+     de date seulement pour une sauvegarde ancienne sans cette information */
+  const depuisId = man.auditMax && Number.isFinite(+man.auditMax.id) ? Math.max(0, +man.auditMax.id - 1) : null;
+  { const out = fs.openSync(fAud, "w", 0o600); try { for (let dernier = depuisId === null ? 0 : depuisId; ; ){ const l = depuisId === null ? await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? AND ts >= ? ORDER BY id LIMIT 5000", dernier, depuisSauv) : await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? ORDER BY id LIMIT 5000", dernier); if (!l.length) break; fs.writeSync(out, l.map(r=>JSON.stringify(r)).join("\n")+"\n"); dernier = Number(l[l.length-1].id); } } finally { fs.closeSync(out); } }
   let source = f, tmp = null;
   if (man.chiffre){ tmp = path.join(os.tmpdir(), "fiwakti-rest-"+crypto.randomBytes(6).toString("hex")+B.extension); await CF.dechiffrerFichier(f, tmp, "sauvegarde"); source = tmp; }
   try { B = await B.restaurer(source); } finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
@@ -746,6 +762,12 @@ async function appliquerMiseAJour(paquet, par){
   if (contenu.nodeMin && vNum(process.versions.node) < vNum(contenu.nodeMin)) throw new Error("Cette mise à jour demande Node.js "+contenu.nodeMin+" ou plus (installé : "+process.versions.node+").");
   if (contenu.depuis && vNum(VERSION) < vNum(contenu.depuis)) throw new Error("Cette mise à jour s'installe à partir de la version "+contenu.depuis+" (installée : "+VERSION+") : installez d'abord la mise à jour intermédiaire.");
   if (contenu.bases && contenu.bases.indexOf(B.type) < 0) throw new Error("Cette mise à jour ne prend pas en charge la base "+B.type+".");
+  /* correctif 18 : contenu vérifié (chemins, empreintes) AVANT la sauvegarde préalable — un paquet refusé déclenchait
+     d'abord une sauvegarde complète */
+  { const base = path.resolve(cible+".tmp");
+    for (const [rel, info] of Object.entries(contenu.fichiers || {})){
+      const dest = path.resolve(base, rel); if (!dest.startsWith(base+path.sep)) throw new Error("Chemin refusé : "+rel);
+      if (!info || typeof info.b64 !== "string" || crypto.createHash("sha256").update(Buffer.from(info.b64, "base64")).digest("hex") !== info.sha256) throw new Error("Fichier altéré : "+rel); } }
   journalMaj("début "+VERSION+" → "+contenu.version+" par "+par);
   /* 56.33.11 : mise à jour seulement avec une sauvegarde préalable vérifiée (restaurable) */
   const manAv = await sauvegarder(par, "avant mise à jour vers "+contenu.version);
@@ -1387,7 +1409,13 @@ async function traiter(req, res){
   const sess = await sessionDe(req);
   if (p === "/api/v1/deconnexion" && req.method === "POST"){ if (sess) await audit(sess.compte.login, "deconnexion", "", ip); await fermerSession(res, sess); return json(res, 200, {ok:true}); }
   if (!sess){ if (p.startsWith("/api/")) return erreur(res, 401, "Session requise"); return redirige(res, "/connexion.html"); }
-  const C = sess.compte, admin = C.role === "admin";
+  const C = sess.compte;
+  /* correctif 18 : rôle administrateur revérifié à chaque requête d'après le profil EN VIGUEUR (le rôle enregistré
+     n'était recalculé qu'à la prochaine synchronisation des comptes : un profil rétrogradé restait administrateur) */
+  let admin = C.role === "admin";
+  if (admin && String(C.login).toLowerCase() !== String(CONFIG.adminInitial || "").toLowerCase() && D && D.referentielLecture){ try { const refA = await D.referentielLecture();
+    const uA = refA && (refA.users || []).find(x=>x && String(x.login || "").toLowerCase() === String(C.login).toLowerCase());
+    if (uA && PERIM.niveauProfil((refA.profils || []).find(x=>x && x.id === uA.profilId)) !== "admin") admin = false; } catch(e){} }
   if (C.role === "fournisseur"){
     const exp = JETONS_SESS.get(sess.sid);
     if (!exp || Date.now() > exp){ JETONS_SESS.delete(sess.sid); await fermerSession(res, sess); return p.startsWith("/api/") ? erreur(res, 401, "Intervention terminée : le jeton a expiré.") : redirige(res, "/connexion.html"); }
@@ -1456,7 +1484,7 @@ async function traiter(req, res){
   }
   if (p === "/api/v1/session"){
     const lic = await licenceActive();
-    return json(res, 200, {login:C.login, nom:C.nom, role:C.role, csrf:sess.csrf, must_change_password:!!Number(C.changer), raison:C.raison||"",
+    return json(res, 200, {login:C.login, nom:C.nom, role:C.role === "admin" && !admin ? "utilisateur" : C.role, csrf:sess.csrf, recette:!!CONFIG.recette, must_change_password:!!Number(C.changer), raison:C.raison||"",
       licence: lic ? Object.assign({client:lic.client, modules:MOD ? MOD.lettres() : lic.modules, fw:MOD ? MOD.liste().filter(m=>m.actif).map(m=>m.id) : [], expire:LICENCE.normaliser(lic).fin}, licencePublique(await licenceEtat())) : null, version:VERSION, entreprise:CONFIG.entreprise||""});
   }
 
@@ -1570,7 +1598,7 @@ async function traiter(req, res){
       await B.run("INSERT INTO kv(cle,valeur,version,maj,par) VALUES(?,?,1,?,?)", CLE_APP, JSON.stringify(ref), maintenant(), C.login);
       paquet.ref = {};
     }
-    const r = await D.synchroniser(C.login, paquet, {admin});
+    const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
     if ((paquet.ref && paquet.ref.users) || (paquet.colls && paquet.colls.emps)){
       /* 56.33.11 : enregistrement de salariés seul → comptes de ces salariés seulement (50 000 comptes examinés et deux
@@ -1595,6 +1623,30 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
+  /* ---- correctif 18 : restauration d'un élément de la corbeille par le serveur — l'élément est réinséré avec tous les
+     contrôles d'un enregistrement normal (unicité, clôture, périmètre) et l'entrée n'est retirée qu'en cas de succès
+     (auparavant retirée par le navigateur avant la réponse : un refus la faisait disparaître définitivement) ---- */
+  if (p === "/api/v1/corbeille/restaurer" && req.method === "POST"){
+    const b = await corpsJson(req), ref0 = await D.referentiel() || {}, {P} = await D.perimetreDe(ref0, C.login);
+    if (!admin && !PERIM.peutEcrire(P.profil, "corbeille")) return erreur(res, 403, "Droit de restauration requis.");
+    const e = (ref0.corbeille || []).find(x=>x && x.cid === String(b.cid || "")); if (!e) return erreur(res, 404, "Élément introuvable dans la corbeille.");
+    const row = Object.assign({}, e.row); delete row.__v;
+    let r;
+    if (DONNEES_MOD.COLLS.indexOf(e.ent) >= 0){
+      const av = await B.get("SELECT 1 x FROM enreg WHERE coll=? AND id=?", e.ent, String(row.id)); if (av) return erreur(res, 409, "Un élément de même identifiant existe déjà.");
+      r = await D.synchroniser(C.login, {colls:{[e.ent]:{put:[row]}}}, {admin, recette:!!CONFIG.recette});
+    } else {
+      const liste = Array.isArray(ref0[e.ent]) ? ref0[e.ent] : null; if (!liste) return erreur(res, 400, "Type d'élément non restaurable.");
+      if (liste.some(x=>x && x.id === row.id)) return erreur(res, 409, "Un élément de même identifiant existe déjà.");
+      r = await D.synchroniser(C.login, {ref:{[e.ent]:liste.concat([row])}, basesRef:{[e.ent]:(ref0.__versions || {})[e.ent] || 0}}, {admin, recette:!!CONFIG.recette});
+    }
+    const ok = r && r.ok !== false && Number(r.ecrits || 0) + ((r.refCles || []).indexOf(e.ent) >= 0 ? 1 : 0) > 0 && !(r.conflits || []).length;
+    if (!ok) return erreur(res, 409, "Restauration refusée : "+(((r && r.refusEmps) || []).map(x=>x && x.message).filter(Boolean).concat((r && r.ignores) || []).join(" ; ") || ((r && r.conflits || []).length ? "conflit de version" : "élément non enregistrable")));
+    const ref1 = await D.referentiel() || {}; ref1.corbeille = (ref1.corbeille || []).filter(x=>!x || x.cid !== e.cid); ref1.__versions = ref1.__versions || {}; ref1.__versions.corbeille = Number(ref1.__versions.corbeille || 0) + 1;
+    await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref1), new Date().toISOString(), C.login, CLE_APP);
+    K.invalider([], ["corbeille"]); await audit(C.login, "corbeille.restauree", e.ent+" "+(e.nom || row.id), ip);
+    return json(res, 200, {ok:true});
+  }
   /* ---- correctif 15 : Tableau de bord des demandes — demandes DÉCIDÉES ou DÉPOSÉES sur la période (quelle que soit la
      date d'absence : une régularisation acceptée ce mois-ci pour une absence de février y figure), périmètre du compte,
      site et nom des demandeurs joints (fiches non chargées en grand effectif) ---- */
@@ -2208,12 +2260,15 @@ async function traiter(req, res){
     const b = await corpsJson(req);
     if (b.copie !== undefined){
       const d = String(b.copie||"").trim();
+      /* correctif 18 : la copie « hors serveur » ne peut pas être dans le dossier des données (ni celui des sauvegardes) */
+      if (d){ const rd = path.resolve(d), rD = path.resolve(DONNEES); if (rd === rD || rd.startsWith(rD+path.sep) || rD.startsWith(rd+path.sep)) return erreur(res, 400, "La copie hors serveur doit être sur un autre emplacement que le dossier des données ("+DONNEES+")."); }
       if (d){ try { fs.mkdirSync(d, {recursive:true}); const t = path.join(d, ".fiwakti-essai"); fs.writeFileSync(t, "x"); fs.unlinkSync(t); } catch(e){ return erreur(res, 400, "Emplacement inaccessible en écriture : "+d); } }
       CONFIG.sauvegarde = Object.assign({}, CONFIG.sauvegarde, {copie:d});
     }
     if (b.pushReseaux !== undefined){
       const l = (Array.isArray(b.pushReseaux) ? b.pushReseaux : String(b.pushReseaux).split(/[\s,;]+/)).map(x=>String(x).trim()).filter(Boolean);
-      if (l.some(x=>!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(x))) return erreur(res, 400, "Réseau invalide : notation attendue 10.20.0.0/16 ou 10.20.1.15.");
+      const reseauOk = x => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(x); return !!m && [1,2,3,4].every(i=>+m[i] <= 255) && (m[5] === undefined || +m[5] <= 32); };
+      if (l.some(x=>!reseauOk(x))) return erreur(res, 400, "Réseau invalide : notation attendue 10.20.0.0/16 ou 10.20.1.15.");
       CONFIG.pushReseaux = l;
     }
     if (b.syslog !== undefined){
@@ -2229,13 +2284,15 @@ async function traiter(req, res){
     }
     if (b.proxyConfiance !== undefined){
       const l = (Array.isArray(b.proxyConfiance) ? b.proxyConfiance : String(b.proxyConfiance).split(/[\s,;]+/)).map(x=>String(x).trim()).filter(Boolean);
-      if (l.some(x=>!/^[0-9a-fA-F.:]+$/.test(x))) return erreur(res, 400, "Adresse de proxy invalide.");
+      if (l.some(x=>!net.isIP(x))) return erreur(res, 400, "Adresse de proxy invalide.");
       CONFIG.proxyConfiance = l;
     }
     if (b.conservation){
       const c = b.conservation, ok = (v, min) => Number.isFinite(+v) && +v >= min;
-      if (!ok(c.badgeagesAns, 1) || !ok(c.auditAns, 1)) return erreur(res, 400, "Durées de conservation : au moins 1 an.");
-      CONFIG.conservation = {badgeagesAns:+c.badgeagesAns, auditAns:+c.auditAns, calculsJours:Math.max(60, +c.calculsJours||400)};
+      /* correctif 18 : durées entières bornées (une valeur énorme rendait la limite invalide : « NaN-NaN-NaN ») */
+      const ent = (v, min, max) => Number.isInteger(+v) && +v >= min && +v <= max;
+      if (!ent(c.badgeagesAns, 1, 50) || !ent(c.auditAns, 1, 50) || (c.journalAns !== undefined && c.journalAns !== null && c.journalAns !== "" && !ent(c.journalAns, 1, 50)) || (c.calculsJours !== undefined && c.calculsJours !== "" && !ent(c.calculsJours, 60, 3650))) return erreur(res, 400, "Durées de conservation : de 1 à 50 ans (calculs : de 60 à 3 650 jours).");
+      CONFIG.conservation = {badgeagesAns:+c.badgeagesAns, auditAns:+c.auditAns, journalAns:c.journalAns ? +c.journalAns : undefined, calculsJours:+c.calculsJours || 400};
     }
     ecrireConfig(CONFIG);
     await audit(C.login, "systeme.reglages", JSON.stringify({copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance}), ip);
@@ -2654,7 +2711,7 @@ async function demarrer(){
   const installe = () => !!CONFIG.installe;
   PLAN.planifier("sauvegarde-quotidienne", {intervalle:10*60000, priorite:1, delai:30*60000, actif:installe, fn:async ()=>{
     const h = new Date().getHours(), j = aujourdhui(), der = listeSauvegardes().find(m=>m.par === "automatique");
-    if (!(h >= (Number((CONFIG.sauvegarde||{}).heure) || 2) && (!der || der.cree.slice(0,10) < j))) return "pas encore l'heure";
+    const hS = Number((CONFIG.sauvegarde||{}).heure); if (!(h >= (Number.isFinite(hS) && hS >= 0 && hS <= 23 ? hS : 2) && (!der || der.cree.slice(0,10) < j))) return "pas encore l'heure";
     await sauvegarder("automatique", "quotidienne");
     try { await conservation(false); } catch(e){ journal("conservation : "+e.message); }
     try { const v = await verifierAudit(); fs.appendFileSync(path.join(D_JOURN, "ancrages-audit.log"), maintenant()+" "+(v.ok ? v.dernier+" "+v.n : "RUPTURE "+JSON.stringify(v.rupture))+"\n"); } catch(e){}

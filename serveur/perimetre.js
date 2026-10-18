@@ -18,7 +18,7 @@ const ECRITURE = {
   cals:["CAL",4], feries:["CAL",4], jours:["CAL",4], tt:["CAL",4], arits:["CAL",4], convs:["PAR",4], etats:["ETA",4],
   sites:["PAR",4], depts:["PAR",4], champs:["PAR",4], impMod:["PAR",2],
   terms:["TER",4], zones:["TER",4], aplages:["TER",4], aplans:["TER",4], bio:["TER",2], bioRegles:["TER",4], msgp:["TER",2],
-  reglesV:["CAL",4], etablissements:["PAR",4], corbeilleCfg:["SYS",4], users:["SYS",4], profils:["SYS",4], circuits:["SYS",4], regles:["SYS",4], journal:["SYS",0], corbeille:["SYS",4], clotures:["PTG",4]
+  reglesV:["CAL",4], etablissements:["PAR",4], corbeilleCfg:["SYS",4], users:["SYS",4], profils:["SYS",4], circuits:["ABS",4], regles:["SYS",4], impCorresp:["SYS",2], journal:["SYS",0], corbeille:["SYS",4], clotures:["PTG",4]
 };
 const CHAMPS_PERSO = ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"];
 const MASQUE = "•••";
@@ -37,6 +37,9 @@ function niveauProfil(p){
   /* 56.33.11 : profil introuvable (supprimé, jamais attribué) = refus par défaut (avant : « admin », tout le personnel
      et la réécriture des comptes et des profils) */
   if (!p) return "simple";
+  /* correctif 18 : le niveau de menu « admin » ne fait un administrateur qu'avec le droit Système en paramétrage (un
+     auditeur « niveau admin, Système lecture » obtenait tous les pouvoirs : trousseau, réglages, modules, profils) */
+  if (p.niveauMenu === "admin" && (p.droits || {}).SYS !== "config") return "rh";
   if (p.niveauMenu && NIV_MENU[p.niveauMenu] !== undefined) return p.niveauMenu;
   const d = p.droits || {};
   if (d.SYS === "config") return "admin";
