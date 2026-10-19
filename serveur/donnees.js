@@ -2,6 +2,7 @@
    Référentiel (paramétrage) = un document ; données volumineuses = une ligne par
    enregistrement dans « enreg », indexée par collection, matricule, date et mois. */
 "use strict";
+const crypto = require("crypto");
 const COLLS = ["emps","ptg","abs","dmd","corrections","audit","notifs","bio","msgp","journal","ajust"];
 const DATEES = ["ptg","abs","dmd","corrections","audit","notifs","journal","msgp","ajust"];
 const CLE_APP = "fiwakti:ref:v1";
@@ -26,6 +27,12 @@ function joursDe(coll, x){
 }
 const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
 const RANG = {lecture:1, saisie:2, validation:3, config:4};
+/* correctif 31 : rubriques du paramétrage dont les éléments retirés passent par la corbeille ; libellé lisible d'une entrée */
+const CORB_REF = ["sites","depts","terms","tt","jours","cals","arits","etats","champs","profils","users","circuits","aplages","aplans","zones","bioRegles","convs","regles","etablissements"];
+const corbNom = (ent, r) => { r = r || {}; if (ent === "emps") return ((r.nom || "")+" "+(r.prenom || "")).trim()+(r.mat ? " ("+r.mat+")" : "");
+  if (ent === "ptg") return String(r.mat || "")+" "+String(r.ts || ((r.d || "")+" "+(r.h || ""))).replace("T", " ").slice(0, 16);
+  if (ent === "dmd" || ent === "abs" || ent === "corrections" || ent === "ajust") return String(r.mat || "")+" "+String(r.du || r.d || "")+(r.au && r.au !== r.du ? " → "+r.au : "")+(r.type ? " "+r.type : "");
+  return String(r.nom || r.login || r.code || r.texte || r.id || ""); };
 const marqueRecette = z => !!z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || "")));
 const PERIM_NIV = p => require("./perimetre.js").niveauProfil(p);
 /* correctif 18 : circuit de validation appliqué par le serveur (même logique que l'écran) — valideur du niveau en cours :
@@ -321,7 +328,9 @@ function creer(B, PERIM){
     const refVue = Object.assign({}, vue); COLLS.forEach(c=>{ delete refVue[c]; });
     /* correctif 18 : copie d'annulation d'import jamais servie ; corbeille (copies complètes d'éléments supprimés, hors
        périmètre compris) réservée au droit Système */
-    delete refVue.impLast; if (!sysLu) refVue.corbeille = [];
+    /* correctif 31 : la corbeille n'est plus servie avec le paramétrage (table dédiée, lue par /api/v1/corbeille avec droits,
+       périmètre et pagination) — elle partait entière, hors périmètre et sans masquage, à tout compte Système en lecture */
+    delete refVue.impLast; delete refVue.corbeille;
     return '{"ref":'+JSON.stringify(refVue)+',"colls":{'+parties.join(",")+'},"fenetre":{"du":'+JSON.stringify(du||null)+'},"mode":'+JSON.stringify(grand ? "grand" : "normal")+',"effectif":'+nb+',"annuaire":'+JSON.stringify(pagine ? "pagine" : "complet")+'}';
   }
   async function chargerPeriode(login, du, au, mats, colls, admin){
@@ -399,7 +408,7 @@ function creer(B, PERIM){
     let PNOUV = null;
     const creationDansPerim = async x => { if (!PNOUV){ const nouv = (((paquet.colls || {}).emps || {}).put || []).filter(z=>z && z.mat); const l = (await employes()).concat(nouv.filter(z=>!(CACHE_EMPS || []).some(e=>e.id === z.id)));
       PNOUV = PERIM.perimetre(Object.assign({}, refL || ref, {emps:l}), login); } return PNOUV.set === null || PNOUV.set.has(String(x.mat)); };
-    const corbSrv = [];
+    const corbSrv = [], recrees = [];
     /* correctif 18 : matrice des droits par écran appliquée par le serveur pour la création et la suppression des
        salariés et des badgeages (auparavant seulement masquée dans le navigateur) */
     const ECRAN_COLL = {emps:"emp", ptg:"ptg", corrections:"ptg", dmd:"dmd", abs:"dmd"};
@@ -499,6 +508,10 @@ function creer(B, PERIM){
           Object.keys(r.anoDec||{}).forEach(id=>{ const mat = id.split("|")[1]; if (dansPerim(mat) && String(mat) !== String(moi)) n[id] = r.anoDec[id]; });
           ref.anoDec = n; refModifie = true; refCles.push(k); continue;
         }
+        /* correctif 31 : la corbeille est tenue par le serveur seul (le navigateur pouvait y retirer ou y injecter des entrées,
+           hors périmètre et sans trace) */
+        if (k === "corbeille") continue;
+        if (k === "corbeilleCfg" && !admin){ ignores.push("corbeilleCfg (réservé à un administrateur)"); continue; }
         if (k === "corbeilleCfg" && !(r.corbeilleCfg && CORB_CHOIX.indexOf(Number(r.corbeilleCfg.jours)) >= 0)){ ignores.push("corbeilleCfg (durée non prévue)"); continue; }
         /* v55 : rubrique d'un module inactif ou non accordé par la licence : refusée par le serveur */
         if (API.moduleRefus){ const mo = API.moduleRefus("ref", k); if (mo){ ignores.push(k+" (module "+mo+" non activé)"); continue; } }
@@ -564,7 +577,13 @@ function creer(B, PERIM){
            configuration » de niveau RH élargissait par l'API un profil attribué (périmètre, écrans, matrice) */
         if (k === "profils" && !admin){ ignores.push("profils (réservé à un administrateur)"); continue; }
         if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil) || validerProfils(ref.profils || [], r.profils, ref) || (admin ? "" : controleProfilsFins(ref.profils || [], r.profils, P, await sitesP(), ref)); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
-        if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
+        if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){
+          /* correctif 31 : élément de paramétrage retiré → corbeille, quel que soit le compte (un compte sans droit Système
+             le perdait définitivement) ; élément recréé avec le même identifiant → retiré de la corbeille */
+          if (CORB_REF.indexOf(k) >= 0 && Array.isArray(r[k])){ const avL = (ref[k] || []).filter(y=>y && y.id), apIds = new Set(r[k].filter(y=>y && y.id).map(y=>String(y.id))), avIds = new Set(avL.map(y=>String(y.id)));
+            avL.filter(y=>!apIds.has(String(y.id))).forEach(y=>corbSrv.push({ent:k, row:y}));
+            r[k].forEach(y=>{ if (y && y.id && !avIds.has(String(y.id))) recrees.push({ent:k, id:String(y.id)}); }); }
+          ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
       refCles.forEach(k=>{ vers[k] = Number(vers[k]||0) + 1; nouvellesVersions.ref[k] = vers[k]; });
@@ -636,7 +655,7 @@ function creer(B, PERIM){
           }
           /* l'origine « badge » (pointeuse) est réservée à la chaîne d'ingestion : un navigateur ne peut pas se faire passer
              pour un terminal */
-          if (c === "ptg" && x.src === "badge" && (!avant || avant.src !== "badge") && !(opts || {}).recette){ refus++; ignores.push("ptg (origine « badge » réservée aux pointeuses)"); continue; }
+          if (c === "ptg" && x.src === "badge" && (!avant || avant.src !== "badge") && !(opts || {}).recette && !(opts || {}).restauration){ refus++; ignores.push("ptg (origine « badge » réservée aux pointeuses)"); continue; }
           /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
           /* correctif 26 : une seule absence par demande et par jour (le navigateur régénérait les absences des demandes
              acceptées avec de nouveaux identifiants à chaque ouverture : 2 à 3 lignes par jour, soldes faussés) */
@@ -679,7 +698,7 @@ function creer(B, PERIM){
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
           if (c === "emps" && avant && PERIM.masquePerso(P)){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
-          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; ECR.add(String(v.id)); { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
+          await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; ECR.add(String(v.id)); if (!avant) recrees.push({ent:c, id:String(v.id)}); { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
           if (c === "notifs" && !avant) nouvellesNotifs.push(v);
           if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
           if (c === "ptg" && API.tracerPtg && (!avant || JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, v, {__v:0})))) await API.tracerPtg(login, avant, v);
@@ -691,6 +710,7 @@ function creer(B, PERIM){
           PUTS.forEach((x, i)=>{ if (!x || x.id === undefined) return; const id = String(x.id); if (ECR.has(id) || conf.has(id) || dejaE.has(id)) return;
             const m = ignores.slice(IGN0[i], IGN0[i+1]).join(" ; ") || (c === "emps" ? "hors de votre périmètre ou droit insuffisant" : "refusé (périmètre, droit ou période clôturée)");
             if (c === "emps") refusEmps.push({id, mat:String(x.mat || ""), message:m}); else (refusPar[c] = refusPar[c] || []).push({id, mat:String(x.mat || ""), message:m}); }); }
+        let CHEFS = null, DEL_IDS = null;
         for (const id of (colls[c].del||[])){
           if (immuable){ refus++; continue; }
           if (!admin && acteRefuse(c, "supprimer")){ refus++; continue; }
@@ -705,6 +725,14 @@ function creer(B, PERIM){
           /* correctif 20 : un salarié présent dans une période clôturée ne se supprime plus (ses journées closes
              disparaissaient des états) : saisir une date de sortie */
           if (c === "emps" && clotC && ((avant.entree && avant.entree <= clotC) || await B.get("SELECT 1 x FROM enreg WHERE coll IN ('ptg','abs') AND mat=? AND d<=? LIMIT 1", String(avant.mat || ""), clotC))){ refus++; ignores.push("emps ("+(avant.mat || id)+" : présent dans une période clôturée — saisissez une date de sortie au lieu de supprimer)"); continue; }
+          /* correctif 31 : un salarié qui a des pointages, absences, demandes ou corrections ne se supprime pas (ses données
+             restaient en base et passaient au prochain titulaire du matricule) ; ni un responsable encore désigné */
+          if (c === "emps" && !marqueRecette(avant) && avant.mat){ const m0 = String(avant.mat); let lie = null;
+            for (const cc of ["ptg","abs","dmd","corrections","ajust"]) if (await B.get("SELECT 1 x FROM enreg WHERE coll=? AND mat=? LIMIT 1", cc, m0)){ lie = cc; break; }
+            if (lie){ refus++; ignores.push("emps ("+m0+" : des pointages, absences ou demandes lui sont rattachés — saisissez une date de sortie au lieu de le supprimer)"); continue; }
+            if (!CHEFS){ CHEFS = new Map(); DEL_IDS = new Set((colls[c].del || []).map(String)); (await employes()).forEach(e=>{ if (e && e.chefMat){ const k = String(e.chefMat); if (!CHEFS.has(k)) CHEFS.set(k, []); CHEFS.get(k).push(e); } }); }
+            const sub = (CHEFS.get(m0) || []).find(e=>!DEL_IDS.has(String(e.id)));
+            if (sub){ refus++; ignores.push("emps ("+m0+" : responsable de "+(sub.mat || sub.id)+" — désignez d'abord un autre responsable)"); continue; } }
           const bv = (colls[c].delv || {})[String(id)];
           if (bv !== undefined && Number(bv) !== Number(avant.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(id), mat:avant.mat||"", suppression:true}); continue; }
           await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++; (parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]})).suppr++;
@@ -718,16 +746,18 @@ function creer(B, PERIM){
         if (refus) ignores.push(c+" ("+refus+" refusé(s)"+(clotRefus ? ", dont période clôturée : ajustement de période antérieure requis" : "")+")");
       }
     });
-    /* correctif 18 : corbeille tenue par le serveur pour les suppressions d'un compte qui ne peut pas l'écrire lui-même
-       (le navigateur annonçait « part à la corbeille » mais l'entrée était ignorée : suppression définitive) */
-    if (corbSrv.length && refCles.indexOf("corbeille") < 0) try {
-      const rr = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP), rf = JSON.parse(rr.valeur), z = v => String(v).padStart(2, "0"), n = new Date();
-      const quand = n.getFullYear()+"-"+z(n.getMonth()+1)+"-"+z(n.getDate())+" "+z(n.getHours())+":"+z(n.getMinutes());
-      rf.corbeille = corbSrv.map(e=>({cid:"cb_"+Date.now().toString(36)+Math.random().toString(36).slice(2, 7), ent:e.ent, row:e.row, nom:String(e.row.nom ? e.row.nom+" "+(e.row.prenom || "") : (e.row.mat || "")+" "+(e.row.ts || e.row.d || e.row.du || "")).trim(), ts:Date.now(), quand, par:(P.u && P.u.nom) || login, srv:1, impacts:[]})).concat(Array.isArray(rf.corbeille) ? rf.corbeille : []).slice(0, 2000);
-      rf.__versions = rf.__versions || {}; rf.__versions.corbeille = Number(rf.__versions.corbeille || 0) + 1; nouvellesVersions.ref.corbeille = rf.__versions.corbeille;
-      await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(rf), new Date().toISOString(), CLE_APP);
-    } catch(e){}
-    return {ok:true, ignores, ecrits:nbEcrits, parColl, refusPar, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs, decisionsDmd};
+    /* correctif 31 : corbeille tenue par le serveur pour TOUTES les suppressions, dans sa table (sans plafond : la liste du
+       paramétrage était tronquée à 2 000 éléments, au-delà la suppression devenait définitive sans le dire) ; un élément
+       recréé avec le même identifiant en sort */
+    const corbAjout = {n:0, ents:{}};
+    if (corbSrv.length || recrees.length) await B.transaction(async ()=>{
+      const par = (P.u && (P.u.nom || P.u.login)) || login, ts = Date.now(), parMat = new Map((await employes()).map(e=>[String(e.mat), e]));
+      for (const e of recrees) await B.run("DELETE FROM corbeille WHERE ent=? AND rid=?", e.ent, e.id);
+      for (const e of corbSrv){ const row = e.row || {}, mat = row.mat != null ? String(row.mat) : null;
+        const site = e.ent === "emps" ? (row.siteId || null) : (mat && parMat.get(mat) ? parMat.get(mat).siteId || null : null);
+        await B.run("INSERT INTO corbeille(cid,ent,rid,nom,mat,site,ts,par,data) VALUES(?,?,?,?,?,?,?,?,?)", "cb_"+crypto.randomBytes(9).toString("hex"), e.ent, row.id != null ? String(row.id) : null, corbNom(e.ent, row).slice(0, 200), mat, site, ts, String(par).slice(0, 120), JSON.stringify(row));
+        corbAjout.n++; corbAjout.ents[e.ent] = (corbAjout.ents[e.ent] || 0) + 1; } });
+    return {ok:true, ignores, ecrits:nbEcrits, corbAjout, parColl, refusPar, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs, decisionsDmd};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
   const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
@@ -775,21 +805,38 @@ function creer(B, PERIM){
      même si personne n'ouvre l'écran : les copies d'éléments supprimés (données personnelles comprises) ne dépassent
      jamais la durée annoncée */
   const CORB_CHOIX = [7, 15, 30, 60, 90, 180, 365];
+  /* correctif 31 : purge dans la table (et dans les anciennes copies de sauvegarde du navigateur gardées par le serveur) */
+  async function corbJours(){ const r = await referentielLecture() || {}; return CORB_CHOIX.indexOf(Number((r.corbeilleCfg||{}).jours)) >= 0 ? Number(r.corbeilleCfg.jours) : 30; }
   async function purgerCorbeille(){
-    return B.transaction(async ()=>{
-      const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP); if (!r) return 0;
-      const ref = JSON.parse(r.valeur); if (!Array.isArray(ref.corbeille) || !ref.corbeille.length) return 0;
-      const j = CORB_CHOIX.indexOf(Number((ref.corbeilleCfg||{}).jours)) >= 0 ? Number(ref.corbeilleCfg.jours) : 30;
-      const limite = Date.now() - j*86400000, avant = ref.corbeille.length;
-      /* correctif 18 : entrée sans date ou datée dans le futur traitée comme expirée (jamais purgée auparavant) */
-      ref.corbeille = ref.corbeille.filter(c=>c && Number.isFinite(Number(c.ts)) && Number(c.ts) > limite && Number(c.ts) <= Date.now() + 86400000);
-      const n = avant - ref.corbeille.length; if (!n) return 0;
-      ref.__versions = ref.__versions || {}; ref.__versions.corbeille = Number(ref.__versions.corbeille||0) + 1;
-      await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), "systeme", CLE_APP);
-      return n;
-    });
+    await migrerCorbeille();
+    const j = await corbJours(), limite = Date.now() - j*86400000, futur = Date.now() + 86400000;
+    /* entrée datée dans le futur traitée comme expirée */
+    const n = (await B.run("DELETE FROM corbeille WHERE ts<=? OR ts>?", limite, futur)).n;
+    if (Date.now() - BAK_PURGE_T > 86400000) try { BAK_PURGE_T = Date.now(); for (const k of await B.all("SELECT cle FROM kv WHERE cle LIKE ? OR cle LIKE ?", "%fiwakti:bak:%", "%fiwakti:avant-migration%")){
+      const r = await B.get("SELECT valeur FROM kv WHERE cle=?", k.cle); let v = null; try { v = JSON.parse(r.valeur); } catch(e){ continue; }
+      const dbv = v && v.db && typeof v.db === "object" ? v.db : v; if (!dbv || !Array.isArray(dbv.corbeille)) continue;
+      const av = dbv.corbeille.length; dbv.corbeille = dbv.corbeille.filter(c=>c && Number(c.ts) > limite && Number(c.ts) <= futur); if (dbv.corbeille.length === av) continue;
+      if (v.db && v.empreinte) v.empreinte = "sha256:"+crypto.createHash("sha256").update(JSON.stringify(v.db)).digest("hex");
+      await B.run("UPDATE kv SET valeur=?, maj=? WHERE cle=?", JSON.stringify(v), new Date().toISOString(), k.cle); } } catch(e){}
+    return n;
   }
-  const API = {purgerCorbeille, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
+  /* correctif 31 : reprise unique de l'ancienne corbeille (liste dans le paramétrage) vers la table */
+  let BAK_PURGE_T = 0, MIG_CORB = false;
+  async function migrerCorbeille(forcer){
+    if (MIG_CORB && !forcer) return 0;
+    const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP); if (!r) return 0;
+    let ref; try { ref = JSON.parse(r.valeur); } catch(e){ return 0; } if (!ref || !Array.isArray(ref.corbeille)){ MIG_CORB = true; return 0; }
+    const l = ref.corbeille.filter(c=>c && c.row && typeof c.row === "object"), parMat = new Map((await employes()).map(e=>[String(e.mat), e]));
+    await B.transaction(async ()=>{
+      for (const c of l){ const row = c.row, mat = row.mat != null ? String(row.mat) : null, cid = /^[A-Za-z0-9_.:-]{1,80}$/.test(String(c.cid || "")) ? String(c.cid) : "cb_"+crypto.randomBytes(9).toString("hex");
+        if (await B.get("SELECT 1 x FROM corbeille WHERE cid=?", cid)) continue;
+        await B.run("INSERT INTO corbeille(cid,ent,rid,nom,mat,site,ts,par,data) VALUES(?,?,?,?,?,?,?,?,?)", cid, String(c.ent || ""), row.id != null ? String(row.id) : null, corbNom(c.ent, row).slice(0, 200), mat,
+          c.ent === "emps" ? (row.siteId || null) : (mat && parMat.get(mat) ? parMat.get(mat).siteId || null : null), Number.isFinite(Number(c.ts)) ? Number(c.ts) : 0, String(c.par || "").slice(0, 120), JSON.stringify(row)); }
+      const r2 = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP), ref2 = JSON.parse(r2.valeur); delete ref2.corbeille;
+      await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref2), new Date().toISOString(), "systeme", CLE_APP); });
+    MIG_CORB = true; return l.length;
+  }
+  const API = {purgerCorbeille, migrerCorbeille, corbJours, CORB_CHOIX, tracerPtg:null, verifierCloture:null, moduleRefus:null, oublierEmployes(){ CACHE_EMPS = null; }, surEmp(fn){ SUR_EMP = fn; }, COLLS, DATEES, migrer, referentiel, employes, unicite, perimetreDe, charger, chargerPeriode, synchroniser, statistiques, ecrire, ecrireLot, filtreMat, referentielLecture};
   return API;
 }
 /* recette Arithmétique : code figé ; formule en vigueur jusqu'à la clôture inchangée (formule datée) ; unité, période et

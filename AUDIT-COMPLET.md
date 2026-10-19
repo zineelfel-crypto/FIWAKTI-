@@ -1953,3 +1953,47 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-30.zip (cumulatif : correctifs 2 à 29 inclus).
+
+## Correctif 31 — Administration › Corbeille (analyse approfondie)
+
+Deux analyses (serveur : chemins de suppression, restauration, purge, droits, conformité ; écran : mode serveur et mode poste) sur le serveur réel, Chromium et la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| C1 | Corbeille tronquée à 2 000 éléments (1 000 côté navigateur) : au-delà, suppression définitive sans avertissement ni trace (2 100 salariés supprimés → 100 perdus) | **haute** | table `corbeille` dédiée (SQLite et PostgreSQL, sauvegardée), une ligne par élément, sans plafond ; purge seulement à l'échéance |
+| C2 | Le serveur faisait confiance à la corbeille envoyée par le navigateur : entrée retirée = suppression définitive, injection d'entrées, vidage accepté pour un profil en lecture | **haute** | corbeille alimentée par le serveur seul (clé ignorée à l'enregistrement) ; effacement et vidage par une route dédiée (droit « supprimer » de l'écran, périmètre) |
+| C3 | Corbeille servie entière avec le paramétrage à tout compte Système en lecture, hors périmètre et sans masquage (CIN, téléphone) | **haute** | plus jamais servie avec le paramétrage ; `GET /api/v1/corbeille` réservé à l'écran (administrateur ou profil de niveau administrateur), filtré par périmètre, masqué, paginé |
+| C4 | Pointages, absences et demandes d'un salarié supprimé restés en base et repris par le nouveau titulaire du matricule ; responsable supprimé rendant ses subordonnés impossibles à restaurer | **haute** | suppression refusée si des données sont rattachées (saisir une date de sortie) ou si le salarié est encore responsable |
+| C5 | Badgeage de pointeuse supprimé impossible à restaurer (« origine badge réservée ») | **haute** | restauration à l'identique autorisée par le serveur |
+| C6 | « Corbeille vidée » / « Effacé » affiché alors que le serveur avait refusé | **haute** | succès affiché seulement après la réponse du serveur |
+| C7 | Élément de paramétrage supprimé par un compte sans droit Système perdu définitivement | moyenne | tout élément retiré du paramétrage passe par la corbeille ; élément recréé retiré de la corbeille |
+| C8 | Vidage, effacement et mise en corbeille non tracés | moyenne | audit `corbeille.ajout`, `corbeille.effacee`, `corbeille.videe`, `corbeille.restauration.refusee` |
+| C9 | Compte d'un salarié supprimé resté actif avec son profil | moyenne | compte désactivé |
+| C10 | Durée de conservation proposée à un compte que le serveur refuse ; anciennes copies du navigateur gardant des entrées au-delà de la durée | moyenne | réglage réservé à l'administrateur des deux côtés ; purge étendue aux anciennes copies (empreinte recalculée) |
+| C11 | Restauration en double clic (« restauré » puis « introuvable »), retour sur l'accueil après rechargement, avertissement biométrique absent | basse | bouton occupé, entrée réservée avant enregistrement et remise en cas de refus ; retour sur la corbeille ; réinscription biométrique signalée |
+| C12 | 2 000 lignes sans pagination (480 ms par frappe), recherche limitée au nom ; types « dmd » bruts, pointage « undefined undefined », dates ISO et heure du serveur ; boutons répétés sans nom ; erreurs réseau brutes | basse | 50 par page, recherche (nom, matricule, auteur) avec délai, filtre par type, colonne « effacé le » ; libellés traduits, dates jj/mm/aaaa locales ; libellés accessibles ; messages traduits |
+
+Effet de bord maîtrisé : la recherche des responsables à la suppression est faite une fois par lot (2 100 salariés supprimés en 168 ms au lieu de 8,5 s).
+
+Non traité : badgeages orphelins déjà présents avant ce correctif (à purger au cas par cas) ; effacement « droit à l'oubli » d'une personne sur demande (route dédiée à prévoir) ; exécution réelle sous PostgreSQL (indisponible dans le banc).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Salarié avec pointages et responsable encore désigné : suppression refusée avec motif.
+  - Salarié sans données : en corbeille, compte désactivé.
+  - Badgeage : mis en corbeille puis restauré ; double restauration → 404.
+  - Corbeille vide envoyée par le navigateur : sans effet.
+  - Accès : rh.s1, tech.s1 et chef.s1 refusés (403).
+  - Jour type retiré par chef.s1 : bien en corbeille.
+  - Effacement et vidage tracés.
+  - 2 100 salariés supprimés : 2 100 entrées, aucune perte ; recherche paginée en 215 ms.
+  - Ancienne corbeille du paramétrage reprise au démarrage ; entrée de 400 jours purgée, celle de 2 jours conservée.
+- **Chromium.**
+  - Pagination, recherche (focus conservé), filtre par type.
+  - Effacement confirmé ; restauration avec bouton occupé et retour sur la corbeille.
+  - Enregistrement du navigateur sans avertissement parasite.
+  - Anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration.** Libellés des demandes et pointages, dates jj/mm/aaaa, libellés accessibles, entrée sans date purgée.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-31.zip (cumulatif : correctifs 2 à 30 inclus).

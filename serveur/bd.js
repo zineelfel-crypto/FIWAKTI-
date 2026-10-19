@@ -5,7 +5,7 @@
 const fs = require("fs"), path = require("path"), zlib = require("zlib"), crypto = require("crypto"), os = require("os");
 const { AsyncLocalStorage } = require("async_hooks");
 const TABLES = ["kv","comptes","sessions","audit","meta","bases","enreg","calc_jour","ingestion_queue","raw_events","normalized_events","event_retransmissions",
-  "day_states","day_transitions","anomalies","adjustments","recalculs","counter_snapshots","event_keys"];
+  "day_states","day_transitions","anomalies","adjustments","recalculs","counter_snapshots","event_keys","corbeille"];
 /* v56.2 : les modules FW- livrés déclarent leurs propres tables (schéma, sauvegarde, restauration, vérification) */
 const SCHEMA_MODULES = {pg:[], sqlite:[]};
 function ajouterModule(m){
@@ -94,7 +94,12 @@ function schemaBase(type){
               "CREATE OR REPLACE TRIGGER audit_immuable BEFORE UPDATE OR DELETE ON audit FOR EACH ROW EXECUTE FUNCTION fiwakti_audit_immuable()"]
            : ["CREATE TRIGGER IF NOT EXISTS audit_immuable_maj BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'journal d''audit non modifiable'); END",
               "CREATE TRIGGER IF NOT EXISTS audit_immuable_sup BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'journal d''audit non modifiable'); END"]),
-    "CREATE INDEX IF NOT EXISTS calc_jour_dept ON calc_jour(dept, d)"
+    "CREATE INDEX IF NOT EXISTS calc_jour_dept ON calc_jour(dept, d)",
+    /* correctif 31 : une ligne par élément supprimé, tenue par le serveur seul (auparavant une liste dans le
+       document de paramétrage, écrite par le navigateur et tronquée à 2 000 éléments) */
+    "CREATE TABLE IF NOT EXISTS corbeille (cid TEXT PRIMARY KEY, ent TEXT NOT NULL, rid TEXT, nom TEXT, mat TEXT, site TEXT, ts "+BIG+" NOT NULL, par TEXT, data TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS corbeille_ts ON corbeille(ts)",
+    "CREATE INDEX IF NOT EXISTS corbeille_ent ON corbeille(ent, rid)"
   ];
 }
 const INDEX_FILE_TERMINAL = "CREATE INDEX IF NOT EXISTS ingestion_queue_term ON ingestion_queue(terminal_id, recu_utc)";
@@ -476,7 +481,7 @@ async function chargerFichier(c, f, sch){
 /* copie complète d'une base vers une autre (passage de SQLite à PostgreSQL), par lots */
 const CLES = {kv:"cle", comptes:"login", sessions:"id", audit:"id", meta:"k", bases:"id", enreg:"coll, id", calc_jour:"mat, d",
   ingestion_queue:"id", raw_events:"raw_event_id", normalized_events:"id", event_retransmissions:"id", event_keys:"idempotency_key",
-  day_states:"mat, d", day_transitions:"id", anomalies:"id", adjustments:"id", recalculs:"id", counter_snapshots:"mat, du, au, version"};
+  day_states:"mat, d", day_transitions:"id", anomalies:"id", adjustments:"id", recalculs:"id", counter_snapshots:"mat, du, au, version", corbeille:"cid"};
 async function copier(src, dst, progression){
   const n = {};
   for (const t of TABLES){

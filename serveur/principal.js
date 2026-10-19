@@ -529,7 +529,8 @@ async function synchroniserComptes(doc, par, empIds){
     const niveau = u.profilId && profils[u.profilId] ? PERIM.niveauProfil(pr) : "";
     const role = niveau === "admin" || login.toLowerCase() === String(CONFIG.adminInitial||"").toLowerCase() ? "admin" : "utilisateur";
     const emp = emps[u.empId]; const mat = emp ? String(emp.mat||"") : "";
-    const actif = u.actif !== false && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
+    /* correctif 31 : compte rattaché à un salarié supprimé désactivé (il restait actif avec son profil) */
+    const actif = u.actif !== false && !(u.empId && !emp) && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
     let c = existants.get(login.toLowerCase());
     const rn = !c && u.id ? parUid.get(String(u.id)) : null;
     if (rn && Number(rn.actif)){ await B.run("UPDATE comptes SET login=?, maj=? WHERE login=?", login, maintenant(), rn.login); await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", rn.login);
@@ -1030,6 +1031,7 @@ async function restaurerInterne(fichier, par){
   /* correctif 30 : sauvegarde d'un ancien format (salariés dans le document) : migration immédiate, et non au prochain
      redémarrage (aucun salarié affiché d'ici là) */
   try { const nm = await D.migrer(null); if (nm) await audit(par, "migration", "après restauration : "+Object.keys(nm).map(k=>k+" "+nm[k]).join(", ")); } catch(e){ journal("migration après restauration : "+e.message); }
+  try { await D.migrerCorbeille(); } catch(e){}
   K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
   const reprise = await reprendreAudit(fAud); let cloturesRouvertes = [];
@@ -1662,7 +1664,8 @@ async function traiter(req, res){
         { let vs = null; try { const r = await B.get("SELECT v FROM meta WHERE k='version_logiciel'"); vs = r && r.v ? JSON.parse(r.v) : null; } catch(e){}
           const vN = v => String(v||"0").split(".").map(Number).reduce((s, x, i)=>s + (x||0) * Math.pow(1000, 2 - i), 0);
           if (vs && vN(vs) > vN(VERSION)) throw new Error("Cette sauvegarde provient d'une version plus récente ("+vs+") : installez d'abord FIWAKTI "+vs+", puis relancez la reprise."); }
-        try { await D.migrer(null); } catch(e){ journal("migration après reprise : "+e.message); } K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
+        try { await D.migrer(null); } catch(e){ journal("migration après reprise : "+e.message); }
+        try { await D.migrerCorbeille(); } catch(e){} K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
         /* v56.23 : clés des données chiffrées présentes et identiques, sinon reprise refusée (importer le trousseau
            complet, puis relancer la restauration) */
         { let attendu = {}; try { const r = await B.get("SELECT v FROM meta WHERE k='cles_empreintes'"); attendu = r && r.v ? JSON.parse(r.v) : {}; if (typeof attendu === "string") attendu = JSON.parse(attendu); if (!attendu || typeof attendu !== "object") attendu = {}; } catch(e){}
@@ -2036,6 +2039,8 @@ async function traiter(req, res){
     }
     if (r.ignores.length) await audit(C.login, "donnees.refusees", r.ignores.join(", "), ip);
     if (r.ecrits) await audit(C.login, "donnees.enregistrees", r.ecrits+" ligne(s)", ip);
+    /* correctif 31 : mises en corbeille tracées (entités et nombre) */
+    if (r.corbAjout && r.corbAjout.n) await audit(C.login, "corbeille.ajout", r.corbAjout.n+" élément(s) : "+Object.keys(r.corbAjout.ents).map(k=>k+" "+r.corbAjout.ents[k]).join(", "), ip);
     /* correctif 21 : paramétrage modifié tracé par le serveur (rubriques), détail des sites créés, modifiés, supprimés */
     { const cles = (r.refCles || []).filter(k=>["anoDec","corbeille","journal","notifs"].indexOf(k) < 0);
       if (cles.length) await audit(C.login, "parametrage.modifie", cles.join(", ").slice(0, 300), ip);
@@ -2098,26 +2103,73 @@ async function traiter(req, res){
   /* ---- correctif 18 : restauration d'un élément de la corbeille par le serveur — l'élément est réinséré avec tous les
      contrôles d'un enregistrement normal (unicité, clôture, périmètre) et l'entrée n'est retirée qu'en cas de succès
      (auparavant retirée par le navigateur avant la réponse : un refus la faisait disparaître définitivement) ---- */
-  if (p === "/api/v1/corbeille/restaurer" && req.method === "POST"){
-    const b = await corpsJson(req), ref0 = await D.referentiel() || {}, {P} = await D.perimetreDe(ref0, C.login);
-    if (!admin && !PERIM.peutEcrire(P.profil, "corbeille")) return erreur(res, 403, "Droit de restauration requis.");
-    const e = (ref0.corbeille || []).find(x=>x && x.cid === String(b.cid || "")); if (!e) return erreur(res, 404, "Élément introuvable dans la corbeille.");
-    const row = Object.assign({}, e.row); delete row.__v;
-    let r;
-    if (DONNEES_MOD.COLLS.indexOf(e.ent) >= 0){
-      const av = await B.get("SELECT 1 x FROM enreg WHERE coll=? AND id=?", e.ent, String(row.id)); if (av) return erreur(res, 409, "Un élément de même identifiant existe déjà.");
-      r = await D.synchroniser(C.login, {colls:{[e.ent]:{put:[row]}}}, {admin, recette:!!CONFIG.recette});
-    } else {
-      const liste = Array.isArray(ref0[e.ent]) ? ref0[e.ent] : null; if (!liste) return erreur(res, 400, "Type d'élément non restaurable.");
-      if (liste.some(x=>x && x.id === row.id)) return erreur(res, 409, "Un élément de même identifiant existe déjà.");
-      r = await D.synchroniser(C.login, {ref:{[e.ent]:liste.concat([row])}, basesRef:{[e.ent]:(ref0.__versions || {})[e.ent] || 0}}, {admin, recette:!!CONFIG.recette});
+  /* correctif 31 : corbeille tenue par le serveur (table « corbeille ») — même règle que l'écran (administrateur ou profil
+     de niveau administrateur), matrice de l'écran Corbeille (lecture, restauration = modifier, effacement = supprimer),
+     périmètre de chaque entrée, masquage des données personnelles, pagination ; toute opération tracée */
+  if (/^\/api\/v1\/corbeille(\/|$)/.test(p)){
+    const ref0 = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref0, C.login);
+    const niv = admin || (P.profil && PERIM.niveauProfil(P.profil) === "admin"), menu = ((P.profil || {}).menus || {}).corbeille, act = ((P.profil || {}).actions || {}).corbeille || {};
+    if (!niv || menu === "masque") return erreur(res, 403, "Écran Corbeille réservé aux administrateurs.");
+    /* périmètre : salarié supprimé jugé avec sa fiche (site, service), autres entrées par matricule */
+    let PE; const prep = async l => { if (P.set === null) return; const rows = []; l.forEach(e=>{ if (e.ent === "emps") try { const r = JSON.parse(e.data); if (r && r.mat) rows.push(r); } catch(x){} });
+      PE = rows.length ? PERIM.perimetre(Object.assign({}, ref0, {emps:(await D.employes()).concat(rows)}), C.login).set : P.set; };
+    const dansPerim = async e => { if (P.set === null || !e.mat) return true; const s0 = e.ent === "emps" && PE !== undefined ? PE : P.set; return s0 === null || s0.has(String(e.mat)); };
+    const masque = PERIM.masquePerso(P), CH = PERIM.CHAMPS_PERSO || ["cin","email","tel","adresse","naissance"];
+    const resume = (e, jours) => { let row = null; try { row = JSON.parse(e.data); } catch(x){} if (row && masque){ row = Object.assign({}, row); CH.forEach(k=>{ if (row[k] != null && row[k] !== "") row[k] = PERIM.MASQUE || "•••"; }); }
+      return {cid:e.cid, ent:e.ent, rid:e.rid, nom:e.nom, mat:e.mat, site:e.site, ts:Number(e.ts), par:e.par, echeance:Number(e.ts) + jours*86400000, row}; };
+    if (p === "/api/v1/corbeille" && req.method === "GET"){
+      await D.migrerCorbeille(); const jours = await D.corbJours();
+      const q = String(u.searchParams.get("q") || "").trim().toLowerCase().slice(0, 80), ent = String(u.searchParams.get("ent") || ""), parPage = Math.min(200, Math.max(10, Number(u.searchParams.get("parPage")) || 50)), page = Math.max(1, Number(u.searchParams.get("page")) || 1);
+      let sql = "SELECT cid, ent, rid, nom, mat, site, ts, par, data FROM corbeille WHERE 1=1", a = [];
+      if (ent){ sql += " AND ent=?"; a.push(ent); }
+      if (q){ sql += " AND (lower(nom) LIKE ? OR lower(par) LIKE ? OR lower(COALESCE(mat,'')) LIKE ?)"; a.push("%"+q+"%", "%"+q+"%", "%"+q+"%"); }
+      const tous = await B.all(sql+" ORDER BY ts DESC, cid", ...a), vis = []; await prep(tous);
+      for (const e of tous) if (await dansPerim(e)) vis.push(e);
+      const types = {}; (await B.all("SELECT ent, COUNT(*) n FROM corbeille GROUP BY ent")).forEach(r=>{ types[r.ent] = Number(r.n); });
+      return json(res, 200, {total:vis.length, page, parPage, jours, types, lecture:menu === "lecture", restaurer:menu !== "lecture" && act.modifier !== false, effacer:menu !== "lecture" && act.supprimer !== false,
+        elements:vis.slice((page - 1) * parPage, page * parPage).map(e=>resume(e, jours))});
     }
-    const ok = r && r.ok !== false && Number(r.ecrits || 0) + ((r.refCles || []).indexOf(e.ent) >= 0 ? 1 : 0) > 0 && !(r.conflits || []).length;
-    if (!ok) return erreur(res, 409, "Restauration refusée : "+(((r && r.refusEmps) || []).map(x=>x && x.message).filter(Boolean).concat((r && r.ignores) || []).join(" ; ") || ((r && r.conflits || []).length ? "conflit de version" : "élément non enregistrable")));
-    const ref1 = await D.referentiel() || {}; ref1.corbeille = (ref1.corbeille || []).filter(x=>!x || x.cid !== e.cid); ref1.__versions = ref1.__versions || {}; ref1.__versions.corbeille = Number(ref1.__versions.corbeille || 0) + 1;
-    await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref1), new Date().toISOString(), C.login, CLE_APP);
-    K.invalider([], ["corbeille"]); await audit(C.login, "corbeille.restauree", e.ent+" "+(e.nom || row.id), ip);
-    return json(res, 200, {ok:true});
+    /* restauration : l'entrée est retirée de la corbeille AVANT l'enregistrement (deux demandes simultanées ne restaurent
+       qu'une fois), remise en cas de refus ; réinsertion avec tous les contrôles d'un enregistrement normal */
+    if (p === "/api/v1/corbeille/restaurer" && req.method === "POST"){
+      if (menu === "lecture" || act.modifier === false) return erreur(res, 403, "Restauration non permise pour votre profil (écran Corbeille).");
+      const b = await corpsJson(req), cid = String(b.cid || "");
+      const e = await B.get("SELECT cid, ent, rid, nom, mat, site, ts, par, data FROM corbeille WHERE cid=?", cid); if (!e) return erreur(res, 404, "Élément introuvable dans la corbeille.");
+      await prep([e]); if (!(await dansPerim(e))) return erreur(res, 403, "Élément hors de votre périmètre.");
+      if (!(await B.run("DELETE FROM corbeille WHERE cid=?", cid)).n) return erreur(res, 404, "Élément introuvable dans la corbeille.");
+      const remettre = async () => { try { await B.run("INSERT INTO corbeille(cid,ent,rid,nom,mat,site,ts,par,data) VALUES(?,?,?,?,?,?,?,?,?)", e.cid, e.ent, e.rid, e.nom, e.mat, e.site, e.ts, e.par, e.data); } catch(x){} };
+      let row; try { row = JSON.parse(e.data); delete row.__v; } catch(x){ await remettre(); return erreur(res, 400, "Élément illisible."); }
+      let r;
+      try {
+        if (DONNEES_MOD.COLLS.indexOf(e.ent) >= 0){
+          if (await B.get("SELECT 1 x FROM enreg WHERE coll=? AND id=?", e.ent, String(row.id))){ await remettre(); return erreur(res, 409, "Un élément de même identifiant existe déjà."); }
+          r = await D.synchroniser(C.login, {colls:{[e.ent]:{put:[row]}}}, {admin, recette:!!CONFIG.recette, restauration:true});
+        } else {
+          const refA = await D.referentiel() || {}, liste = Array.isArray(refA[e.ent]) ? refA[e.ent] : null; if (!liste){ await remettre(); return erreur(res, 400, "Type d'élément non restaurable."); }
+          if (liste.some(x=>x && x.id === row.id)){ await remettre(); return erreur(res, 409, "Un élément de même identifiant existe déjà."); }
+          r = await D.synchroniser(C.login, {ref:{[e.ent]:liste.concat([row])}, basesRef:{[e.ent]:(refA.__versions || {})[e.ent] || 0}}, {admin, recette:!!CONFIG.recette, restauration:true});
+        }
+      } catch(x){ await remettre(); return erreur(res, 500, "Restauration impossible : "+x.message); }
+      const ok = r && r.ok !== false && Number(r.ecrits || 0) + ((r.refCles || []).indexOf(e.ent) >= 0 ? 1 : 0) > 0 && !(r.conflits || []).length;
+      if (!ok){ await remettre(); const m = "Restauration refusée : "+(((r && r.refusEmps) || []).map(x=>x && x.message).concat(Object.values((r && r.refusPar) || {}).flat().map(x=>x && x.message)).filter(Boolean).concat((r && r.ignores) || []).join(" ; ") || ((r && r.conflits || []).length ? "conflit de version" : "élément non enregistrable"));
+        await audit(C.login, "corbeille.restauration.refusee", e.ent+" "+(e.nom || e.rid)+" — "+m.slice(0, 300), ip); return erreur(res, 409, m); }
+      K.invalider([], [e.ent]); await audit(C.login, "corbeille.restauree", e.ent+" "+(e.nom || row.id), ip);
+      return json(res, 200, {ok:true, ent:e.ent, id:row.id, avertissement:e.ent === "emps" ? "Les gabarits biométriques effacés à la suppression ne sont pas restaurés : réinscrivez le salarié sur les pointeuses." : ""});
+    }
+    /* effacement définitif (une sélection ou tout le visible) : droit « supprimer » de l'écran, périmètre, trace */
+    if (p === "/api/v1/corbeille/effacer" && req.method === "POST"){
+      if (menu === "lecture" || act.supprimer === false) return erreur(res, 403, "Effacement non permis pour votre profil (écran Corbeille).");
+      const b = await corpsJson(req), tout = b.tout === true, cids = Array.isArray(b.cids) ? b.cids.map(String).slice(0, 5000) : [];
+      if (!tout && !cids.length) return erreur(res, 400, "Aucun élément désigné.");
+      const l = tout ? await B.all("SELECT cid, ent, rid, nom, mat, site, ts, par, data FROM corbeille") : [];
+      if (!tout) for (const c of cids){ const e = await B.get("SELECT cid, ent, rid, nom, mat, site, ts, par, data FROM corbeille WHERE cid=?", c); if (e) l.push(e); }
+      await prep(l); const cibles = []; for (const e of l) if (await dansPerim(e)) cibles.push(e);
+      let n = 0; const ents = {};
+      await B.transaction(async ()=>{ for (const e of cibles){ const k = (await B.run("DELETE FROM corbeille WHERE cid=?", e.cid)).n; if (k){ n += k; ents[e.ent] = (ents[e.ent] || 0) + 1; } } });
+      if (n) await audit(C.login, tout ? "corbeille.videe" : "corbeille.effacee", n+" élément(s) effacé(s) définitivement : "+Object.keys(ents).map(k=>k+" "+ents[k]).join(", ")+(tout ? "" : " — "+cibles.slice(0, 10).map(e=>e.nom || e.rid).join(" ; ").slice(0, 600)), ip);
+      return json(res, 200, {ok:true, effaces:n, horsPerimetre:l.length - cibles.length});
+    }
+    return erreur(res, 404, "Introuvable");
   }
   /* ---- correctif 15 : Tableau de bord des demandes — demandes DÉCIDÉES ou DÉPOSÉES sur la période (quelle que soit la
      date d'absence : une régularisation acceptée ce mois-ci pour une absence de février y figure), périmètre du compte,
@@ -3211,6 +3263,7 @@ async function traiter(req, res){
     for (const e of emps) await B.run("DELETE FROM enreg WHERE coll='emps' AND id=?", String(e.id));
     if (emps.length){ D.oublierEmployes(); }
     ["convs","sites","jours","cals","etats"].forEach(k=>{ if (Array.isArray(ref[k])){ const n0 = ref[k].length; ref[k] = ref[k].filter(x=>!marque(x)); bilan.parametrage += n0 - ref[k].length; if (n0 !== ref[k].length){ const v = ref.__versions || (ref.__versions = {}); v[k] = (Number(v[k]) || 0) + 1; } } });
+    try { bilan.autres += Number(((await B.run("DELETE FROM corbeille WHERE rid LIKE 'rec!_%' ESCAPE '!' OR data LIKE ? OR data LIKE ?", '%"recette":true%', '%"src":"recette"%')) || {}).n || 0); } catch(e){}
     if (Array.isArray(ref.corbeille)){ const n0 = ref.corbeille.length; ref.corbeille = ref.corbeille.filter(c=>!(c && marque(c.row))); if (n0 !== ref.corbeille.length){ const v = ref.__versions || (ref.__versions = {}); v.corbeille = (Number(v.corbeille) || 0) + 1; } }
     await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), maintenant(), CLE_APP);
     try { await K.invalider([], ["convs","sites","jours","cals"]); } catch(e){}
@@ -3442,6 +3495,7 @@ async function demarrer(){
     try {
       const n = await D.migrer((par, motif)=>sauvegarder(par, motif));
       if (n){ journal("migration vers le stockage structuré : "+JSON.stringify(n)); await audit("systeme", "migration", "stockage structuré : "+Object.keys(n).map(k=>k+" "+n[k]).join(", ")); }
+      try { const nc = await D.migrerCorbeille(); if (nc) journal("corbeille : "+nc+" élément(s) repris dans la table dédiée"); } catch(e){ journal("corbeille : "+e.message); }
     } catch(e){ journal("migration impossible : "+e.message); console.error("Migration impossible : "+e.message); process.exit(1); }
   }
   const cert = certificat();
