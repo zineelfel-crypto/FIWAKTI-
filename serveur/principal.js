@@ -1682,6 +1682,8 @@ async function traiter(req, res){
       await B.run("INSERT INTO kv(cle,valeur,version,maj,par) VALUES(?,?,1,?,?)", CLE_APP, JSON.stringify(ref), maintenant(), C.login);
       paquet.ref = {};
     }
+    /* correctif 21 : sites avant l'envoi, pour tracer précisément ce qui change (fuseau compris) */
+    const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
     if ((paquet.ref && paquet.ref.users) || (paquet.colls && paquet.colls.emps)){
@@ -1703,6 +1705,15 @@ async function traiter(req, res){
     }
     if (r.ignores.length) await audit(C.login, "donnees.refusees", r.ignores.join(", "), ip);
     if (r.ecrits) await audit(C.login, "donnees.enregistrees", r.ecrits+" ligne(s)", ip);
+    /* correctif 21 : paramétrage modifié tracé par le serveur (rubriques), détail des sites créés, modifiés, supprimés */
+    { const cles = (r.refCles || []).filter(k=>["anoDec","corbeille","journal","notifs"].indexOf(k) < 0);
+      if (cles.length) await audit(C.login, "parametrage.modifie", cles.join(", ").slice(0, 300), ip);
+      if (sitesAvant && (r.refCles || []).indexOf("sites") >= 0){ const av = new Map(sitesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).sites || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [];
+        ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé "+(x.code || id)+" « "+String(x.nom || "").slice(0, 60)+" » ("+(x.tz || "")+")"); return; }
+          const ch = ["code","nom","ville","tz","actif"].filter(k=>JSON.stringify(a[k]) !== JSON.stringify(x[k])).map(k=>k+" : "+String(a[k] === undefined ? "" : a[k]).slice(0, 60)+" → "+String(x[k] === undefined ? "" : x[k]).slice(0, 60));
+          if (ch.length) l.push("modifié "+(x.code || id)+" — "+ch.join(" ; ")); });
+        av.forEach((a, id)=>{ if (!ap.has(id)) l.push("supprimé "+(a.code || id)+" « "+String(a.nom || "").slice(0, 60)+" »"); });
+        if (l.length) await audit(C.login, "sites.modifies", l.join(" | ").slice(0, 1500), ip); } }
     /* correctif 19 : import (ou son annulation) tracé par le serveur d'après ce qu'il a RÉELLEMENT écrit — auparavant
        seule une trace rédigée par le navigateur (« emp x2 »), refusée pour un compte au périmètre limité */
     if (paquet.import && typeof paquet.import === "object"){

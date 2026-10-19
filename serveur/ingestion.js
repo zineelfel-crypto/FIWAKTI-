@@ -23,6 +23,8 @@ function partiesDans(tz, ms){
    ronde) : 2 à 4 formatages Intl par badgeage auparavant, soit ~10 % du temps d'ingestion */
 const DECALAGES = new Map();
 function localVersUtc(local, tz){
+  /* correctif 21 : fuseau inconnu (paramétrage erroné) → fuseau par défaut au lieu d'une exception (erreur 500, lot perdu) */
+  if (!fuseauValide(tz)) tz = FUSEAU_DEFAUT;
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(local));
   if (!m) return null;
   const cle = tz+"|"+m[1]+m[2]+m[3]+m[4]+m[5];
@@ -46,6 +48,7 @@ function localVersUtcCalcule(m, tz, sec){
   return new Date(t).toISOString();
 }
 function utcVersLocal(iso, tz){
+  if (!fuseauValide(tz)) tz = FUSEAU_DEFAUT;   /* correctif 21 */
   const ms = partiesDans(tz, new Date(iso).getTime()), d = new Date(ms);
   const p = n => String(n).padStart(2, "0");
   return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate())+" "+p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":"+p(d.getUTCSeconds());
@@ -194,7 +197,7 @@ function creer(o){
       const rawId = q.id+"-"+i;
       const util = String(b.utilisateur == null ? "" : b.utilisateur).trim();
       const e = util ? corr.get(util) : null;
-      const tz = (T && T.fuseau) || (site && site.tz) || (e && (ref.sites||[]).find(s=>s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT;
+      const tz0 = (T && T.fuseau) || (site && site.tz) || (e && (ref.sites||[]).find(s=>s.id === e.siteId) || {}).tz || FUSEAU_DEFAUT, tz = fuseauValide(tz0) ? tz0 : FUSEAU_DEFAUT;
       /* 56.33.11 : instant avec fuseau (« …Z », « +01:00 » : API BioStar 2, pilotes externes) → heure locale du site ;
          sans fuseau : heure locale de l'appareil, comme avant */
       const brut = String(b.horodatage||"").trim(), absM = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})$/i.exec(brut);

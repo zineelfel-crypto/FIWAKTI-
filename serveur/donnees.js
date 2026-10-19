@@ -356,6 +356,13 @@ function creer(B, PERIM){
       let MOTIF_ETATS;
       const motifEtats = () => MOTIF_ETATS !== undefined ? MOTIF_ETATS : (MOTIF_ETATS = controleEtats(ref.etats || [], r.etats, peutK("arits") ? r.arits : ref.arits, peutK("champs") ? r.champs : ref.champs, peutK("profils") ? r.profils : ref.profils));
       const etatsRetenus = () => (Array.isArray(r.etats) && peutK("etats") && !motifEtats()) ? r.etats : (ref.etats || []);
+      /* correctif 21 : sites RETENUS (ceux du paramétrage si l'envoi est refusé) pour contrôler les références des autres
+         rubriques — auparavant ceux envoyés, même refusés : une convention pouvait viser un site inexistant ; sites du
+         périmètre d'un compte limité */
+      let SITESP, MOTIF_S, SITES_RET;
+      const sitesP = async () => SITESP !== undefined ? SITESP : (SITESP = admin || P.set === null ? null : new Set((await employes()).filter(e=>P.set.has(String(e.mat))).map(e=>e.siteId).concat(((P.profil || {}).sites) || []).filter(Boolean)));
+      const motifSites = async () => MOTIF_S !== undefined ? MOTIF_S : (MOTIF_S = !Array.isArray(r.sites) ? "liste attendue" : ((await controleSites(ref, r.sites, peutK("convs") ? r.convs : ref.convs)) || (admin ? "" : controleSitesDroits(ref.sites || [], r.sites, (v, a)=>!P.profil || acteEcran(v, a), await sitesP()))));
+      const sitesRetenus = async () => SITES_RET !== undefined ? SITES_RET : (SITES_RET = (Array.isArray(r.sites) && peutK("sites") && !(await motifSites())) ? r.sites : (ref.sites || []));
       for (const k of Object.keys(r)){
         if (COLLS.indexOf(k) >= 0 || k.indexOf("__") === 0) continue;
         const fusion = (k === "users" && !admin) || (k === "anoDec" && !admin);
@@ -399,16 +406,15 @@ function creer(B, PERIM){
         if (k === "reglesV"){ const motif = controleReglesV(ref.reglesV || [], r.reglesV || [], ref); if (motif){ ignores.push("reglesV ("+motif+")"); continue; } }
         /* recette Calendrier : une période clôturée ne change pas (exceptions et trame en vigueur jusqu'à la clôture) */
         /* correctif 7 : zones et portes — pas de zone supprimée encore utilisée, pas de porte retirée avec des lecteurs, identifiants de porte uniques */
-        if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
+        if (k === "zones"){ const motif = controleZones(ref.zones || [], r.zones || [], Array.isArray(r.terms) ? r.terms : (ref.terms || []), await employes()) || siteInconnu(ref.zones, r.zones, await sitesRetenus(), "zone"); if (motif){ ignores.push("zones ("+motif+")"); continue; } }
         /* correctif 8 : plages d'accès — pas de plage supprimée encore utilisée par un planning, intervalles valides */
         /* correctif 9 : plannings d'accès — pas de planning supprimé encore référencé, plages existantes, au moins un jour ouvert */
         /* correctif 10 : terminaux — contrôles côté serveur (adresse, port, n° de série unique, site, usage, bornes), terminaux hors
            périmètre intouchables pour un non-administrateur, dossier du pilote réservé à l'administrateur */
-        if (k === "terms"){ const sitesP = admin || P.set === null ? null : new Set((await employes()).filter(e=>P.set.has(String(e.mat))).map(e=>e.siteId));
-          const motif = controleTerms(ref.terms || [], r.terms || [], Array.isArray(r.sites) ? r.sites : (ref.sites || []), sitesP, admin); if (motif){ ignores.push("terms ("+motif+")"); continue; } }
+        if (k === "terms"){ const motif = controleTerms(ref.terms || [], r.terms || [], await sitesRetenus(), await sitesP(), admin); if (motif){ ignores.push("terms ("+motif+")"); continue; } }
         if (k === "aplans"){ const motif = controleAplans(ref.aplans || [], r.aplans || [], Array.isArray(r.aplages) ? r.aplages : (ref.aplages || []), await employes()); if (motif){ ignores.push("aplans ("+motif+")"); continue; } }
         if (k === "aplages"){ const motif = controleAplages(ref.aplages || [], r.aplages || [], Array.isArray(r.aplans) ? r.aplans : (ref.aplans || [])); if (motif){ ignores.push("aplages ("+motif+")"); continue; } }
-        if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref) || controleSupprClos("cals", ref.cals || [], r.cals || [], ref, await employes()); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
+        if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref) || siteInconnu(ref.cals, r.cals, await sitesRetenus(), "calendrier") || controleSupprClos("cals", ref.cals || [], r.cals || [], ref, await employes()); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
         if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref) || controleSupprClos("jours", ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
         if (k === "feries"){ const motif = controleFeriesClos(ref.feries || [], r.feries, clotDe(ref)); if (motif){ ignores.push("feries ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
@@ -429,8 +435,8 @@ function creer(B, PERIM){
         if (k === "impLast") continue;
         if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
         if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
-        if (k === "sites"){ const motif = await controleSites(ref, r.sites, peutK("convs") ? r.convs : ref.convs); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
-        if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, peutK("sites") ? r.sites : ref.sites) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
+        if (k === "sites"){ const motif = await motifSites(); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
+        if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, await sitesRetenus()) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)) || controleConvsPerim(ref.convs || [], r.convs, await sitesP()); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
         if (!(opts || {}).recette && Array.isArray(r[k]) && r[k].some(z=>z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || ""))) && !(ref[k] || []).some(y=>y && y.id === z.id))){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
         if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
@@ -694,22 +700,61 @@ function controleRegles(avant, apres){
   return "";
 }
 /* correctif 18 : sites — identifiant, code unique, nom, fuseau horaire réel ; un site utilisé ne se supprime pas */
+/* correctif 21 : sites — contrôle complet. Le fuseau réellement utilisé (« tz ») n'était pas contrôlé (seul un
+   champ « fuseau » inexistant l'était) : un fuseau faux faisait échouer en erreur 500 tout envoi de badgeages et
+   classait « invalides » ceux des pointeuses. Champs typés et bornés, code unique après normalisation (casse,
+   espaces, pleine chasse, caractères invisibles), et références de toutes les rubriques vérifiées avant suppression. */
+const SITE_ID = /^[A-Za-z0-9_.:-]{1,80}$/, CLES_INTERDITES = new Set(["__proto__", "constructor", "prototype"]);
+function codeNorm(c){ return String(c == null ? "" : c).normalize("NFKC").replace(/[\s​-‍⁠﻿]/g, "").toLowerCase(); }
+function fuseauOk(tz){ if (typeof tz !== "string" || !tz || tz.length > 64) return false; try { new Intl.DateTimeFormat("en-GB", {timeZone:tz}); return true; } catch(e){ return false; } }
 async function controleSitesBase(ref, apres, convs, emps){
   if (!Array.isArray(apres)) return "liste attendue";
-  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, ids = new Set(), codes = new Set();
-  const av = new Map((ref.sites || []).filter(x=>x && x.id).map(x=>[String(x.id), JSON.stringify(x)]));
+  const ids = new Set(), av = new Map((ref.sites || []).filter(x=>x && x.id).map(x=>[String(x.id), x]));
+  const codes = new Map();
   for (const x of apres){
-    if (!x || typeof x !== "object" || Array.isArray(x) || !ID.test(String(x.id))) return "site invalide (identifiant)";
+    if (!x || typeof x !== "object" || Array.isArray(x) || !SITE_ID.test(String(x.id)) || CLES_INTERDITES.has(String(x.id))) return "site invalide (identifiant)";
     if (ids.has(String(x.id))) return "identifiant en double"; ids.add(String(x.id));
-    const code = String(x.code || "").trim().toLowerCase(); if (code){ if (codes.has(code)) return "code de site en double ("+x.code+")"; codes.add(code); }
-    if (av.get(String(x.id)) === JSON.stringify(x)) continue;
-    if (!String(x.nom || "").trim() || String(x.nom).length > 120) return "site : nom obligatoire (120 caractères au plus)";
-    if (x.fuseau){ try { new Intl.DateTimeFormat("fr", {timeZone:String(x.fuseau)}); } catch(e){ return "fuseau horaire inconnu ("+x.fuseau+")"; } }
+    const cn = codeNorm(x.code); if (cn) (codes.get(cn) || codes.set(cn, []).get(cn)).push(x);
   }
+  for (const x of apres){
+    const a = av.get(String(x.id)); if (a && JSON.stringify(a) === JSON.stringify(x)) continue;
+    const l = "site « "+String(typeof x.nom === "string" ? x.nom : x.id).slice(0, 60)+" » : ";
+    if (Object.keys(x).some(k=>CLES_INTERDITES.has(k))) return l+"champ interdit";
+    if (JSON.stringify(x).length > 4000) return l+"fiche trop volumineuse";
+    if (typeof x.nom !== "string" || !x.nom.trim() || x.nom.length > 120) return l+"nom obligatoire (120 caractères au plus)";
+    if (x.code != null && x.code !== "" && (typeof x.code !== "string" || x.code.length > 20 || !/^[\p{L}\p{N}_.-]+$/u.test(x.code))) return l+"code invalide (20 caractères au plus : lettres, chiffres, « _ », « - », « . »)";
+    if (x.ville != null && (typeof x.ville !== "string" || x.ville.length > 120)) return l+"ville invalide (120 caractères au plus)";
+    if (x.actif !== undefined && typeof x.actif !== "boolean") return l+"état actif/inactif invalide";
+    if (!fuseauOk(x.tz)) return l+"fuseau horaire inconnu ("+String(x.tz == null ? "" : x.tz).slice(0, 40)+") — exemple : Africa/Tunis";
+    if (x.fuseau !== undefined && !fuseauOk(x.fuseau)) return l+"fuseau horaire inconnu";
+    const cn = codeNorm(x.code); if (cn && (codes.get(cn) || []).length > 1) return "code de site en double ("+x.code+")";
+  }
+  /* suppression : aucune référence restante, dans aucune rubrique */
+  const contient = (l, id) => Array.isArray(l) && l.some(v=>String(v) === id);
   for (const id of av.keys()) if (!ids.has(id)){
-    const n = emps.filter(e=>e && e.siteId === id).length, t = (ref.terms || []).filter(z=>z && z.siteId === id).length, d = (ref.depts || []).filter(z=>z && z.siteId === id).length, c = (ref.cals || []).filter(z=>z && z.siteId === id).length;
-    if (n + t + d + c) return "le site « "+id+" » est utilisé ("+[n && n+" salarié(s)", t && t+" terminal(aux)", d && d+" service(s)", c && c+" calendrier(s)"].filter(Boolean).join(", ")+")";
+    const n = (emps || []).filter(e=>e && e.siteId === id).length, f = (k, test) => (ref[k] || []).filter(z=>z && test(z)).length;
+    const parts = [[n, "salarié(s)"], [f("terms", z=>z.siteId === id), "terminal(aux)"], [f("depts", z=>z.siteId === id), "service(s)"], [f("cals", z=>z.siteId === id), "calendrier(s)"],
+      [(convs || ref.convs || []).filter(c=>c && contient(c.siteIds, id)).length, "convention(s)"], [f("zones", z=>z.siteId === id), "zone(s) d'accès"],
+      [f("profils", z=>contient(z.sites, id) || JSON.stringify(z.filtres || {}).indexOf('"'+id+'"') >= 0), "profil(s)"],
+      [f("users", z=>contient((z.perim || {}).sites, id) || JSON.stringify(z.delegPerim || []).indexOf('"'+id+'"') >= 0 || JSON.stringify(z.deleg || []).indexOf('"'+id+'"') >= 0), "compte(s)"],
+      [f("circuits", z=>contient(z.sites, id)), "circuit(s)"], [f("feries", z=>z.siteId === id || contient(z.sites, id)), "jour(s) férié(s)"], [f("regles", z=>contient(z.siteIds, id) || contient(z.sites, id)), "règle(s)"]];
+    const u = parts.filter(x=>x[0]);
+    if (u.length) return "le site « "+((av.get(id) || {}).nom || id)+" » est utilisé ("+u.map(x=>x[0]+" "+x[1]).join(", ")+") : désactivez-le plutôt que de le supprimer";
   }
+  return "";
+}
+/* droits sur les sites : matrice de l'écran Sites (créer, modifier, supprimer) et, pour un compte limité, seulement
+   les sites de son périmètre (auparavant un profil Paramétrage limité au site s1 renommait, désactivait ou supprimait
+   tous les sites malgré l'écran en lecture seule) */
+function controleSitesDroits(avant, apres, acteEcran, sitesP){
+  if (!Array.isArray(apres)) return "";
+  const av = new Map((avant || []).filter(x=>x && x.id).map(x=>[String(x.id), x])), ap = new Map(apres.filter(x=>x && x.id).map(x=>[String(x.id), x]));
+  const crees = [...ap.keys()].filter(id=>!av.has(id)), suppr = [...av.keys()].filter(id=>!ap.has(id)), modif = [...ap.keys()].filter(id=>av.has(id) && JSON.stringify(av.get(id)) !== JSON.stringify(ap.get(id)));
+  if (crees.length && acteEcran("sites", "creer")) return "création non permise par la matrice de l'écran Sites";
+  if (modif.length && acteEcran("sites", "modifier")) return "modification non permise par la matrice de l'écran Sites";
+  if (suppr.length && acteEcran("sites", "supprimer")) return "suppression non permise par la matrice de l'écran Sites";
+  if (sitesP){ if (crees.length) return "la création d'un site est réservée à un compte sans limite de périmètre";
+    const hors = modif.concat(suppr).find(id=>!sitesP.has(id)); if (hors) return "site « "+((av.get(hors) || {}).nom || hors)+" » hors de votre périmètre"; }
   return "";
 }
 /* correctif 18 : conventions — valeurs numériques bornées, sites existants */
@@ -774,6 +819,20 @@ function controleConvsClos(avant, apres, clot){
     if (CONV_CALC.some(k=>JSON.stringify(a[k]) !== JSON.stringify(n[k]))) return "paramètres de calcul de « "+(a.nom || a.id)+" » figés depuis la clôture du "+jjD(clot)+" : créez une version de règle datée (Règles de calcul)"; }
   return "";
 }
+/* correctif 21 : référence à un site inexistant (calendrier, zone) refusée pour un élément créé ou modifié */
+function siteInconnu(avant, apres, sites, lib){
+  if (!Array.isArray(apres)) return ""; const ok = new Set((sites || []).map(x=>x && x.id)), av = new Map((avant || []).map(x=>[x && x.id, JSON.stringify(x)]));
+  const x = apres.find(z=>z && z.siteId && !ok.has(z.siteId) && av.get(z.id) !== JSON.stringify(z));
+  return x ? lib+" « "+String(x.nom || x.id).slice(0, 60)+" » : site inconnu ("+String(x.siteId).slice(0, 40)+")" : "";
+}
+/* convention partagée avec un site hors du périmètre d'un compte limité : non modifiable par lui */
+function controleConvsPerim(avant, apres, sitesP){
+  if (!sitesP || !Array.isArray(apres)) return "";
+  const av = new Map((avant || []).map(c=>[c && c.id, c])), ap = new Map(apres.map(c=>[c && c.id, c]));
+  for (const id of new Set([...av.keys(), ...ap.keys()])){ const a = av.get(id), n = ap.get(id); if (JSON.stringify(a) === JSON.stringify(n)) continue;
+    const s2 = ((a && a.siteIds) || []).concat((n && n.siteIds) || []); if (!s2.length || s2.some(x=>!sitesP.has(x))) return "convention « "+String((a || n || {}).nom || id).slice(0, 60)+" » commune à des sites hors de votre périmètre"; }
+  return "";
+}
 function controleEmp(x, ref, avant, mats){
   /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
   const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
@@ -782,6 +841,8 @@ function controleEmp(x, ref, avant, mats){
   if ((chg("entree") || chg("sortie")) && x.entree && x.sortie && x.sortie < x.entree) return "sortie avant l'entrée";
   if (chg("email") && x.email && x.email !== "•••" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x.email))) return "adresse électronique invalide";
   if (chg("siteId") && x.siteId && !(ref.sites || []).some(s=>s && s.id === x.siteId)) return "site inconnu";
+  /* correctif 21 : pas de nouvelle affectation vers un site désactivé */
+  if (chg("siteId") && x.siteId && (ref.sites || []).some(s=>s && s.id === x.siteId && s.actif === false)) return "site désactivé";
   if (chg("deptId") && x.deptId && !(ref.depts || []).some(d=>d && d.id === x.deptId)) return "service inconnu";
   /* correctif 19 : nom obligatoire à la création ; responsable existant et différent du salarié */
   if (!avant && !String(x.nom || "").trim()) return "nom obligatoire";
@@ -942,6 +1003,7 @@ function controleTerms(avant, apres, sites, sitesP, admin){
     if (!admin && !v && String(T.dossier||"").trim()) return "dossier du pilote de "+nom+" : réservé à l'administrateur";
     if (!String(T.nom||"").trim()) return "terminal sans nom";
     if (!T.siteId || !idSites.has(T.siteId)) return "site du terminal "+nom+" introuvable";
+    if ((sites || []).some(x=>x && x.id === T.siteId && x.actif === false) && !(parId.get(T.id) && parId.get(T.id).siteId === T.siteId)) return "site du terminal "+nom+" désactivé";
     if (T.usage && ["clocking", "door", "both"].indexOf(T.usage) < 0) return "usage du terminal "+nom+" invalide";
     if (T.ip && !/^[A-Za-z0-9.:-]{1,253}$/.test(String(T.ip).trim())) return "adresse du terminal "+nom+" invalide";
     if (T.port !== undefined && T.port !== "" && !(Number.isInteger(Number(T.port)) && Number(T.port) >= 1 && Number(T.port) <= 65535)) return "port du terminal "+nom+" hors de 1-65535";

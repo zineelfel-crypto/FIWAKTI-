@@ -1571,3 +1571,45 @@ Vérifié (copie neuve du serveur, Chromium) :
   - Compteurs inchangés : seul le salarié 10188 diffère, ce qui était attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-20.zip (cumulatif : correctifs 2 à 19 inclus).
+
+## Correctif 21 — Administration › Sites (analyse approfondie)
+
+Deux analyses (données et effets côté serveur ; écran et usages) sur le serveur réel, Chromium, 200 sites et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| S1 | Fuseau réellement utilisé (`tz`) jamais contrôlé (seul un champ `fuseau` inexistant l'était) : « Mars/Olympus » accepté, puis tout envoi de badgeages d'un salarié du site en erreur 500 (lot entier perdu) et badgeages des pointeuses classés invalides | **critique** | fuseau obligatoire et valide (serveur et fiche) ; repli sur le fuseau par défaut pour un ancien paramétrage erroné (saisie, import, pointeuses) |
+| S2 | Profil Paramétrage limité au site s1 : renomme, désactive, supprime ou crée n'importe quel site et modifie une convention commune à d'autres sites, malgré l'écran en lecture seule | **critique** | matrice de l'écran Sites appliquée par le serveur ; compte limité : ses sites seulement, pas de création, pas de convention commune à des sites hors périmètre |
+| S3 | Suppression d'un site cité par une convention, une zone, un profil, un compte, un circuit, un jour férié ou une règle : références orphelines, convention ensuite impossible à modifier | **haute** | toutes les références vérifiées ; désactivation proposée ; même règle à l'écran (et en démonstration) avec la liste des éléments rattachés |
+| S4 | Références contrôlées contre les sites envoyés même refusés ; calendrier ou zone vers un site inexistant acceptés | **haute** | sites retenus utilisés pour les conventions et les terminaux ; site inconnu refusé pour les calendriers et les zones |
+| S5 | Aucune trace serveur des créations, modifications (fuseau compris) et suppressions de sites | **haute** | audit `sites.modifies` (avant → après) et `parametrage.modifie` pour toute rubrique du paramétrage |
+| S6 | Écran annonçant « supprimé » ou « enregistré » alors que le serveur refuse ; site disparu et corbeille fantôme jusqu'au rechargement ; décompte « aucun » avant l'arrivée du décompte du serveur | moyenne | rubrique refusée remise à la version du serveur avec le motif ; entrée de corbeille retirée ; « … » et suppression bloquée pendant le décompte |
+| S7 | Champs non typés ni bornés (code de 10 000 caractères, ville de 2 Mo, `actif:"non"`, id `__proto__`, erreur 500 sur `nom:{toString}`) ; doublons de code en pleine chasse ou avec caractère invisible | moyenne | types et longueurs contrôlés, fiche bornée, identifiants réservés refusés, code normalisé pour l'unicité ; un ancien doublon ne bloque plus les autres sites |
+| S8 | Site désactivé : salarié et terminal encore affectables, site toujours proposé dans les listes, état invisible dans la liste | moyenne | nouvelle affectation refusée ; site désactivé retiré des listes de choix ; colonnes Fuseau et État |
+| S9 | Assistant : code « TUN » en double pour « Tunis Nord » ; convention choisie sur un site non enregistré (identifiant fantôme) ; exports texte et tableur sans neutralisation des formules ; PDF illisible en arabe | basse / moyenne | code unique généré ; convention après enregistrement du site ; formules neutralisées ; PDF → impression du navigateur pour un texte non latin |
+
+Non traité : historique daté du fuseau (un changement de fuseau s'applique aux envois reçus ensuite ; les journées passées ne bougent pas) ; libellés en dur de l'assistant d'installation ; liste fermée des fuseaux dans la fiche.
+
+Vérifié (copie neuve du serveur, Chromium) :
+- **Refus par le serveur** :
+  - fuseaux et champs piégés ;
+  - code en double en pleine chasse ou avec un caractère invisible ;
+  - suppression d'un site cité par une convention ;
+  - convention vers un site refusé ;
+  - calendrier vers un site inconnu ;
+  - salarié affecté à un site désactivé.
+- **rh.s1** (Paramétrage « configuration », limité à s1) :
+  - modifie son propre site ;
+  - refusé pour un site hors périmètre, une création, une convention commune à d'autres sites, et selon la matrice.
+- **Audit** : les modifications de sites sont détaillées.
+- **Fuseau ancien erroné** : badgeages et import sans erreur 500.
+- **Écran** :
+  - contrôles de la fiche et code unique de l'assistant ;
+  - suppression d'un site utilisé refusée avec la liste détaillée ;
+  - refus du serveur rétabli à l'écran ;
+  - site désactivé retiré des listes ;
+  - export neutralisé ;
+  - en et ar.
+- **Démonstration et non-régression** : la démonstration fonctionne ; les 56 écrans s'affichent sans erreur ; seul le salarié 10188 a des compteurs différents, ce qui est attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-21.zip (cumulatif : correctifs 2 à 20 inclus).
