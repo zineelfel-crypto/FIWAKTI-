@@ -413,6 +413,9 @@ function creer(B, PERIM){
               ignores.push("users (compte « "+String(x.login).slice(0, 40)+" » valideur du circuit « "+String(ci.nom || ci.id).slice(0, 60)+" » : changez d'abord le circuit)"); continue; }
             const dg = r.users.find(u=>u && (u.delegPerim || []).some(g=>g && pid.has(g.a)));
             if (dg){ ignores.push("users (compte « "+String(dg.login).slice(0, 40)+" » : sa délégation de périmètre vise un compte retiré ou désactivé)"); continue; } } }
+        /* correctif 24 : politique de sécurité contrôlée (bornes de l'écran, types, clés connues, envoi d'e-mails) — tout était
+           enregistré : « tentatives -1 », « minLen 10000 », une chaîne à la place de la rubrique, un champ de 3 Mo… */
+        if (k === "secu"){ const mS = controleSecu(ref.secu, r.secu); if (mS){ ignores.push("secu ("+mS+")"); continue; } }
         /* correctif 23 : comptes du portail salarié (mot de passe initial = matricule) : profil de niveau « simple » seulement */
         if (k === "secu" && r.secu && r.secu.premiere && r.secu.premiere.profilId){ const pp = (Array.isArray(r.profils) && peutK("profils") ? r.profils : (ref.profils || [])).find(p=>p && p.id === r.secu.premiere.profilId);
           if (!pp || PERIM.niveauProfil(pp) !== "simple"){ ignores.push("secu (profil des comptes du portail : niveau « simple » requis)"); continue; } }
@@ -881,6 +884,36 @@ function controleUsers(avant, apres, emps, refs){
         const deja = new Set((Array.isArray(q0[c]) ? q0[c] : []).map(String)), num = c === "mats" || c === "exclus";
         const x = l.find(v=>!deja.has(String(v)) && !set.has(num ? String(v) : v)); if (x !== undefined) return "périmètre de "+lib(u)+" : "+n+" « "+String(x).slice(0, 30)+" » inexistant"; } }
   }
+  return "";
+}
+const SECU_NUM = {minLen:[8, 64], historique:[0, 24], expirationJours:[0, 365], tentatives:[1, 20], verrouillageMin:[1, 1440], sessionInactivite:[1, 480], sessionMax:[1, 72], resetValiditeMin:[5, 1440]};
+const SECU_LIB = {minLen:"longueur minimale", historique:"historique", expirationJours:"expiration", tentatives:"tentatives avant verrouillage", verrouillageMin:"durée de verrouillage", sessionInactivite:"inactivité de session", sessionMax:"durée maximale de session", resetValiditeMin:"validité du mot de passe temporaire"};
+function controleSecu(avant, apres){
+  const obj = o => o && typeof o === "object" && !Array.isArray(o);
+  if (!obj(apres)) return "objet attendu";
+  if (JSON.stringify(apres).length > 65536) return "trop volumineux";
+  const av = obj(avant) ? avant : {}, chg = k => JSON.stringify(av[k]) !== JSON.stringify(apres[k]);
+  const entier = (v, a, b) => v === undefined || (typeof v === "number" || (typeof v === "string" && /^\d+$/.test(v))) && Number.isInteger(Number(v)) && Number(v) >= a && Number(v) <= b;
+  for (const k of Object.keys(SECU_NUM)) if (chg(k) && !entier(apres[k], SECU_NUM[k][0], SECU_NUM[k][1])) return SECU_LIB[k]+" : entier de "+SECU_NUM[k][0]+" à "+SECU_NUM[k][1];
+  for (const k of ["exigerMix", "interdireCourants", "memoriser"]) if (chg(k) && apres[k] !== undefined && typeof apres[k] !== "boolean") return k+" : oui ou non attendu";
+  const connues = new Set(Object.keys(SECU_NUM).concat(["exigerMix", "interdireCourants", "memoriser", "smtp", "premiere", "resetValid", "a2f"]));
+  const inc = Object.keys(apres).find(k=>!connues.has(k) && chg(k)); if (inc) return "réglage inconnu « "+String(inc).slice(0, 40)+" »";
+  if (chg("premiere") && apres.premiere !== undefined){ const p = apres.premiere; if (!obj(p)) return "comptes du portail : objet attendu";
+    if (!entier(p.validiteJours, 0, 365)) return "validité du mot de passe initial : entier de 0 à 365";
+    for (const b of ["auto", "portailSeul", "exigerMajChiffre", "aideConnexion"]) if (p[b] !== undefined && typeof p[b] !== "boolean") return "comptes du portail : "+b+" oui ou non attendu";
+    if (p.profilId !== undefined && typeof p.profilId !== "string") return "comptes du portail : profil invalide"; }
+  if (chg("smtp") && apres.smtp !== undefined){ const m = apres.smtp; if (!obj(m)) return "envoi d'e-mails : objet attendu";
+    const h = String(m.hote == null ? "" : m.hote).trim();
+    if (h && (h.length > 253 || !/^[A-Za-z0-9.:-]+$/.test(h))) return "envoi d'e-mails : nom de serveur invalide";
+    if (m.port !== undefined && m.port !== "" && [25, 465, 587, 2525].indexOf(Number(m.port)) < 0) return "envoi d'e-mails : port 25, 465, 587 ou 2525";
+    if (m.securite !== undefined && ["aucune", "starttls", "ssl"].indexOf(m.securite) < 0) return "envoi d'e-mails : sécurité aucune, starttls ou ssl";
+    if (m.auth === true && m.securite === "aucune" && !/^(localhost|127(\.\d+){3}|::1)$/i.test(h)) return "envoi d'e-mails : authentification sans chiffrement refusée";
+    for (const b of ["auth", "notifMail"]) if (m[b] !== undefined && typeof m[b] !== "boolean") return "envoi d'e-mails : "+b+" oui ou non attendu";
+    if (String(m.user == null ? "" : m.user).length > 200) return "envoi d'e-mails : identifiant trop long";
+    const ex = String(m.expediteur == null ? "" : m.expediteur).trim(); if (ex && (ex.length > 254 || !/^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/.test(ex))) return "envoi d'e-mails : adresse d'expédition invalide";
+    if (String(m.nomExpediteur == null ? "" : m.nomExpediteur).length > 100 || /[\r\n\u0000-\u001f]/.test(String(m.nomExpediteur || ""))) return "envoi d'e-mails : nom d'expéditeur invalide (100 caractères)";
+    if (m.mdp !== undefined && m.mdp !== "") return "envoi d'e-mails : le mot de passe ne s'enregistre pas dans le paramétrage";
+    const inc2 = Object.keys(m).find(k=>["hote", "port", "securite", "auth", "user", "expediteur", "nomExpediteur", "notifMail", "mdp"].indexOf(k) < 0); if (inc2) return "envoi d'e-mails : réglage inconnu « "+String(inc2).slice(0, 40)+" »"; }
   return "";
 }
 function jjD(j){ return String(j || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1"); }

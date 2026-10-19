@@ -3,7 +3,22 @@
    Sécurité : « aucune » (port 25), « starttls » (port 587 : connexion simple puis chiffrement obligatoire) ou « ssl »
    (port 465, chiffré dès la connexion). Authentification PLAIN ou LOGIN si le serveur l'exige. Le certificat du serveur
    de messagerie est vérifié (une connexion non vérifiable est refusée). Le mot de passe n'est jamais journalisé. */
-const net = require("net"), tls = require("tls"), crypto = require("crypto"), os = require("os");
+const net = require("net"), tls = require("tls"), crypto = require("crypto"), os = require("os"), dns = require("dns");
+/* correctif 24 : réglages contrôlés (sécurité dans une liste fermée — une valeur inconnue valait « aucune » ; ports
+   d'envoi seulement ; jamais d'authentification en clair hors du poste lui-même) et adresses interdites (lien local,
+   métadonnées d'un hébergeur : le test d'envoi servait à sonder le réseau interne) */
+const SECURITES = ["aucune", "starttls", "ssl"], PORTS = [25, 465, 587, 2525];
+const bouclage = h => /^(localhost|127(\.\d+){3}|::1)$/i.test(String(h || "").trim());
+function controleReglages(cfg){
+  const h = String((cfg && cfg.hote) || "").trim();
+  if (!h) return "serveur non renseigné";
+  if (h.length > 253 || !(/^[A-Za-z0-9.-]+$/.test(h) || net.isIP(h))) return "nom de serveur invalide";
+  if (cfg.securite !== undefined && cfg.securite !== "" && SECURITES.indexOf(cfg.securite) < 0) return "sécurité inconnue (aucune, starttls ou ssl)";
+  if (cfg.port !== undefined && cfg.port !== "" && PORTS.indexOf(Number(cfg.port)) < 0) return "port non prévu pour l'envoi d'e-mails (25, 465, 587 ou 2525)";
+  if (cfg.auth && (cfg.securite || "starttls") === "aucune" && !bouclage(h)) return "authentification sans chiffrement refusée : choisissez STARTTLS ou SSL/TLS";
+  return "";
+}
+const interdite = a => /^(169\.254\.|0\.|100\.100\.100\.200$|fe80:|::$|::ffff:169\.254\.)/i.test(String(a || "")) || a === "0.0.0.0";
 
 const b64 = s => Buffer.from(String(s), "utf8").toString("base64");
 /* en-tête encodé (accents, arabe) : =?UTF-8?B?…?= */
@@ -24,6 +39,7 @@ function envoyer(cfg, m){
   return new Promise((ok, ko)=>{
     const hote = String(cfg.hote || "").trim(), sec = cfg.securite || "starttls";
     if (!hote) return ko(new Error("serveur d'envoi non renseigné"));
+    const motif = controleReglages(cfg); if (motif) return ko(new Error(motif));
     if (!adresseValide(cfg.expediteur)) return ko(new Error("adresse d'expédition invalide"));
     if (!adresseValide(m.a)) return ko(new Error("adresse du destinataire invalide"));
     if (cfg.auth && (!cfg.user || !cfg.mdp)) return ko(new Error("identifiant ou mot de passe du compte d'envoi manquant"));
@@ -53,7 +69,7 @@ function envoyer(cfg, m){
         if (!/STARTTLS/i.test(ext)) throw new Error("le serveur ne propose pas STARTTLS : choisissez SSL/TLS ou vérifiez le port");
         await cmd("STARTTLS", [220]);
         await new Promise((res, rej)=>{ const brut = s; brut.removeAllListeners("data"); brut.removeAllListeners("close"); brut.removeAllListeners("error");
-          s = tls.connect({socket:brut, servername:net.isIP(hote) ? undefined : hote}, res); s.once("error", rej); brancher(s); });
+          s = tls.connect({socket:brut, servername:net.isIP(hote) ? undefined : hote, checkServerIdentity:(n, cert)=>tls.checkServerIdentity(hote, cert)}, res); s.once("error", rej); brancher(s); });
         r = await cmd("EHLO "+nomPoste, [250]); ext = r.texte;
       }
       if (cfg.auth){
@@ -67,12 +83,18 @@ function envoyer(cfg, m){
       await cmd(message({expediteur:String(cfg.expediteur).trim(), nomExpediteur:cfg.nomExpediteur, a:String(m.a).trim(), sujet:m.sujet, texte:m.texte}).replace(/\r\n\./g, "\r\n..")+"\r\n.", [250], "message");
       try { s.write("QUIT\r\n"); } catch(e){}
     };
-    try {
-      s = sec === "ssl" ? tls.connect({host:hote, port, servername:net.isIP(hote) ? undefined : hote}) : net.connect({host:hote, port});
-      brancher(s);
-      dialogue().then(()=>fin(null), e=>fin(e));
-    } catch(e){ fin(e); }
+    /* adresse résolue puis vérifiée ; la connexion vise cette adresse (pas de nouvelle résolution) */
+    dns.lookup(hote, {all:true}, (err, l)=>{
+      if (fini) return; if (err || !l || !l.length) return fin(new Error("serveur "+hote+" introuvable"));
+      if (l.some(x=>interdite(x.address))) return fin(new Error("adresse du serveur "+hote+" non autorisée"));
+      try {
+        const adr = l[0].address;
+        s = sec === "ssl" ? tls.connect({host:adr, port, servername:net.isIP(hote) ? undefined : hote, checkServerIdentity:(n, cert)=>tls.checkServerIdentity(hote, cert)}) : net.connect({host:adr, port});
+        brancher(s);
+        dialogue().then(()=>fin(null), e=>fin(e));
+      } catch(e){ fin(e); }
+    });
   });
 }
 
-module.exports = {envoyer, adresseValide};
+module.exports = {envoyer, adresseValide, controleReglages, SECURITES, PORTS};

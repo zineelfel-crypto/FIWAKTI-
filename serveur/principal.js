@@ -434,8 +434,23 @@ const COURANTS = ["password","motdepasse","azerty","azertyuiop","qwerty","qwerty
   "soleil","tunisie","tunis","sfax","sousse","fiwakti","marquardt","welcome","bienvenue","changeme","secret","iloveyou","letmein","monkey","dragon","football",
   "master","superman","batman","princesse","chocolat","doudou","loulou","nicolas","jeanne","ahmed","mohamed","fatma","amine","salah","leila","sonia","karim",
   "employe","utilisateur","pointage","rh","ressources","entreprise","societe","travail","juillet","janvier","printemps","hiver","ete","automne"];
-function secuDe(ref){ return Object.assign({minLen:12, exigerMix:false, interdireCourants:true, historique:5, expirationJours:0, tentatives:5, verrouillageMin:15,
-  sessionInactivite:30, sessionMax:12, memoriser:false, resetValiditeMin:60}, (ref && ref.secu) || {}); }
+/* correctif 24 : politique BORNÉE à la lecture (valeurs absurdes ou mal typées : « tentatives -1 » supprimait le
+   verrouillage, « verrouillageMin 1e7 » bloquait un compte jusqu'en 2045, « exigerMix "false" » valait vrai,
+   « historique "abc" » désactivait l'historique) — mêmes bornes que l'écran et que le contrôle à l'enregistrement */
+const SECU_BORNES = {minLen:[8, 64, 12], historique:[0, 24, 5], expirationJours:[0, 365, 0], tentatives:[1, 20, 5], verrouillageMin:[1, 1440, 15],
+  sessionInactivite:[1, 480, 30], sessionMax:[1, 72, 12], resetValiditeMin:[5, 1440, 60]};
+const SECU_BOOL = {exigerMix:false, interdireCourants:true, memoriser:false};
+function secuDe(ref){ const brut = ref && ref.secu && typeof ref.secu === "object" && !Array.isArray(ref.secu) ? ref.secu : {}, s = Object.assign({}, brut);
+  Object.keys(SECU_BORNES).forEach(k=>{ const [a, b, d] = SECU_BORNES[k], v = Number(brut[k]); s[k] = brut[k] === undefined || brut[k] === null || brut[k] === "" || !Number.isFinite(v) || v < a && k === "tentatives" ? d : Math.min(b, Math.max(a, Math.round(v))); });
+  Object.keys(SECU_BOOL).forEach(k=>{ s[k] = brut[k] === undefined ? SECU_BOOL[k] : brut[k] === true; });
+  const pr = brut.premiere && typeof brut.premiere === "object" ? brut.premiere : {}, vj = Number(pr.validiteJours);
+  s.premiere = Object.assign({}, pr, {validiteJours:pr.validiteJours === undefined || pr.validiteJours === null || pr.validiteJours === "" || !Number.isFinite(vj) ? 30 : Math.min(365, Math.max(0, Math.round(vj)))});
+  return s; }
+/* « verrouillé jusqu'à » : date jj/mm/aaaa quand ce n'est pas aujourd'hui */
+function jusquA(v){ const d = new Date(v), h = d.toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"});
+  return d.toDateString() === new Date().toDateString() ? h : String(d.getDate()).padStart(2, "0")+"/"+String(d.getMonth()+1).padStart(2, "0")+"/"+d.getFullYear()+" à "+h; }
+/* date d'un mot de passe temporaire : jamais dans le futur (elle venait du navigateur et prolongeait la validité) */
+const leTemp = u => /^\d{4}-\d{2}-\d{2}$/.test(String(u && u.mdpTempLe || "")) && u.mdpTempLe <= aujourdhui() ? u.mdpTempLe : aujourdhui();
 async function politique(mdp, compte, secu){
   secu = secu || secuDe(await D.referentielLecture());
   const v = String(mdp||"");
@@ -443,7 +458,7 @@ async function politique(mdp, compte, secu){
   if (v.length < min) return "Au moins "+min+" caractères.";
   if (secu.exigerMix){
     if (!/[a-zà-ÿ]/.test(v) || !/[A-ZÀ-Þ]/.test(v) || !/[0-9]/.test(v) || !/[^A-Za-z0-9À-ÿ]/.test(v)) return "Minuscule, majuscule, chiffre et caractère spécial obligatoires.";
-  } else if (!/[A-ZÀ-Þ]/.test(v) || !/[0-9]/.test(v)) return "Au moins une majuscule et un chiffre.";
+  } else if ((!/[A-ZÀ-Þ]/.test(v) || !/[0-9]/.test(v)) && !(secu.premiere && secu.premiere.exigerMajChiffre === false && await comptePortail(compte))) return "Au moins une majuscule et un chiffre.";
   const interdits = [compte.login, compte.matricule, compte.nom].filter(Boolean).map(x=>String(x).toLowerCase()).filter(x=>x.length >= 3);
   if (interdits.some(x=>v.toLowerCase().indexOf(x) >= 0)) return "Le mot de passe ne doit contenir ni l'identifiant, ni le matricule, ni le nom.";
   if (secu.interdireCourants !== false){
@@ -456,6 +471,10 @@ async function politique(mdp, compte, secu){
   if (n) for (const h of JSON.parse(compte.historique || "[]").slice(0, n)) if (await verifier(v, h)) return "Ce mot de passe a déjà été utilisé : choisissez-en un autre ("+n+" derniers refusés).";
   return "";
 }
+/* correctif 24 : compte du portail salarié (profil de niveau « simple ») — l'option « exiger une majuscule et un chiffre »
+   de l'écran Sécurité n'était lue nulle part */
+async function comptePortail(compte){ try { const ref = await D.referentielLecture() || {}, lg = String((compte && compte.login) || "").trim().toLowerCase();
+  const u = (ref.users || []).find(x=>x && String(x.login).trim().toLowerCase() === lg); return !!u && PERIM.niveauProfil((ref.profils || []).find(p=>p && p.id === u.profilId)) === "simple"; } catch(e){ return false; } }
 /* enregistre le nouveau mot de passe et garde les précédents pour la règle d'historique */
 async function definirMdp(c, nouveau, secu){
   const n = Math.max(0, Number(secu.historique) || 0);
@@ -523,19 +542,19 @@ async function synchroniserComptes(doc, par, empIds){
          d'écriture en Administration (un matricule se devine) : ces comptes attendent un mot de passe (invitation) */
       const temp = !!u.mdpTemp && matOk;
       await B.run("INSERT INTO comptes(login,uid,nom,matricule,role,actif,etat,temp_le,changer,raison,maj) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        login, u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, 1, temp ? "premiere" : "invitation", maintenant());
+        login, u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? leTemp(u) : null, 1, temp ? "premiere" : "invitation", maintenant());
       await audit(par, "compte.cree", login+" — profil "+(pr.nom || u.profilId || "aucun")+(role === "admin" ? " (administrateur)" : "")+" ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
-      existants.set(login.toLowerCase(), {login, uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null});
+      existants.set(login.toLowerCase(), {login, uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? leTemp(u) : null});
     } else {
       /* correctif 23 : compte retiré puis recréé, ou identifiant repris par une autre personne (autre identifiant interne) :
          remis à zéro — il héritait du mot de passe, de la double authentification et de l'historique de l'ancien titulaire */
       const repris = (c.uid && u.id && String(c.uid) !== String(u.id) && login.toLowerCase() !== String(CONFIG.adminInitial||"").toLowerCase()) || (!Number(c.actif) && c.raison === "retire" && actif);
       if (repris){ const temp = !!u.mdpTemp && matOk;
         await B.run("UPDATE comptes SET uid=?, nom=?, matricule=?, role=?, actif=?, hash=NULL, historique=NULL, mdp_le=NULL, a2f_secret=NULL, a2f_actif=0, a2f_pas=NULL, etat=?, temp_le=?, changer=1, raison=?, echecs=0, verrou=NULL, maj=? WHERE login=?",
-          u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, temp ? "premiere" : "invitation", maintenant(), c.login);
+          u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? leTemp(u) : null, temp ? "premiere" : "invitation", maintenant(), c.login);
         await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", c.login);
         await audit(par, "compte.reactive", login+" — nouveau titulaire ou compte recréé : mot de passe et double authentification remis à zéro ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
-        Object.assign(c, {uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null, raison:temp ? "premiere" : "invitation"}); }
+        Object.assign(c, {uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? leTemp(u) : null, raison:temp ? "premiere" : "invitation"}); }
       const nv = {uid:u.id||c.uid, nom:u.nom||c.nom, matricule:mat, role, actif};
       if (Object.keys(nv).some(k=>String(nv[k] == null ? "" : nv[k]) !== String(c[k] == null ? "" : c[k]))){
         const ch = []; if (String(c.role) !== role) ch.push("rôle "+c.role+" → "+role); if (Number(c.actif) !== actif) ch.push(actif ? "activé" : "désactivé");
@@ -545,8 +564,8 @@ async function synchroniserComptes(doc, par, empIds){
         Object.assign(c, nv);
       }
       if (u.mdpTemp && matOk && c.etat !== "temp_matricule" && u.mdpChangeRaison === "reinit" && (u.mdpTempLe||"") > (c.temp_le||"")){
-        await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", u.mdpTempLe, c.login);
-        c.etat = "temp_matricule"; c.temp_le = u.mdpTempLe;
+        await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", leTemp(u), c.login);
+        c.etat = "temp_matricule"; c.temp_le = leTemp(u);
         await audit(par, "compte.reinitialise", login+" (matricule)");
       }
     }
@@ -1461,6 +1480,8 @@ async function traiter(req, res){
   if (p === "/connexion" || p === "/connexion.html") return fichierStatique(res, PUBLIC, "connexion.html");
   if (p === "/api/v1/connexion/options"){ const s = secuDe(await D.referentielLecture()); return json(res, 200, {memoriser:!!s.memoriser, minLen:Math.max(8, Number(s.minLen)||12), exigerMix:!!s.exigerMix, entreprise:CONFIG.entreprise||""}); }
   if (p === "/api/v1/connexion" && req.method === "POST"){
+    /* correctif 24 : entrées périmées purgées (la table grossissait sans fin derrière un proxy ou un balayage d'adresses) */
+    if (ESSAIS_IP.size > 5000){ const lim = Date.now() - 15*60000; for (const [k, v] of ESSAIS_IP) if (v.t < lim) ESSAIS_IP.delete(k); if (ESSAIS_IP.size > 50000) ESSAIS_IP.clear(); }
     const e = ESSAIS_IP.get(ip) || {n:0, t:Date.now()};
     if (Date.now() - e.t > 15*60000){ e.n = 0; e.t = Date.now(); }
     if (e.n >= 20){ if (e.n === 20){ e.n++; await audit("", "connexion.limite_adresse", "20 échecs en 15 min", ip); } return erreur(res, 429, "Trop de tentatives depuis ce poste. Réessayez dans quelques minutes."); }
@@ -1471,7 +1492,7 @@ async function traiter(req, res){
     if (!c || !Number(c.actif) || await salarieSorti(c)){
       const cle = String(b.login||"").toLowerCase().slice(0, 200), secuI = secuDe(await D.referentielLecture());
       const maxI = Number(secuI.tentatives) || 5, vmI = Math.max(1, Number(secuI.verrouillageMin)||15), x = ECHECS_INCONNUS.get(cle) || {n:0, verrou:0};
-      if (x.verrou > Date.now()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(x.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
+      if (x.verrou > Date.now()) return erreur(res, 423, "Compte verrouillé jusqu'à "+jusquA(x.verrou)+".");
       await hacher("leurre");
       x.n++; if (x.n >= maxI){ x.n = 0; x.verrou = Date.now() + vmI*60000; }
       if (ECHECS_INCONNUS.size > 50000) ECHECS_INCONNUS.clear();
@@ -1480,11 +1501,11 @@ async function traiter(req, res){
     }
     if (CONFIG.adminProvisoire && c.login === CONFIG.adminInitial && Number(c.changer) && !estLocalDirect(req))
       return erreur(res, 403, "Compte administrateur provisoire : première connexion uniquement depuis le serveur FIWAKTI lui-même (https://localhost), le temps de choisir un vrai mot de passe.");
-    if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+new Date(c.verrou).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+".");
+    if (c.verrou && c.verrou > maintenant()) return erreur(res, 423, "Compte verrouillé jusqu'à "+jusquA(c.verrou)+".");
     let ok = false;
     const secu = secuDe(await D.referentielLecture());
     if (c.etat === "temp_matricule"){
-      const validite = Number((secu.premiere||{}).validiteJours) || 30;
+      const validite = secu.premiere.validiteJours;   /* correctif 24 : 0 = sans limite, comme l'annonce l'écran (valait 30 jours) */
       /* correctif 23 : même coût et même réponse qu'un mot de passe faux tant que le mot de passe n'est pas vérifié
          (l'état du compte se lisait dans le message et le temps de réponse) */
       await hacher("leurre");
@@ -1495,6 +1516,10 @@ async function traiter(req, res){
       const lim = Math.max(5, Number(secu.resetValiditeMin)||60)*60000;
       ok = await verifier(b.mdp, c.hash);
       if (ok && c.temp_le && new Date(c.temp_le).getTime() + lim < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez-en un nouveau à l'administrateur.");
+      /* correctif 24 : usage unique — une fois utilisé, le mot de passe temporaire ne rouvre plus de session (il reste
+         valable pour le changement de mot de passe de la session ouverte) */
+      if (ok) await B.run("UPDATE comptes SET etat='temp_code_utilise' WHERE login=?", c.login);
+    } else if (c.etat === "temp_code_utilise"){ await hacher("leurre"); ok = false;
     } else if (c.hash) ok = await verifier(b.mdp, c.hash);
     else { await hacher("leurre"); ok = false; }   /* correctif 23 : compte sans mot de passe — réponse générique, tentatives comptées */
     if (!ok){
@@ -1724,6 +1749,7 @@ async function traiter(req, res){
     /* correctif 21 : sites avant l'envoi, pour tracer précisément ce qui change (fuseau compris) */
     const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
     const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
+    const secuAvant = paquet.ref && paquet.ref.secu !== undefined ? secuDe(await D.referentielLecture()) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
@@ -1742,9 +1768,16 @@ async function traiter(req, res){
     try { await K.invalider(r.touches, r.refCles); } catch(e){ journal("invalidation : "+e.message); }
     if ((r.nouvellesNotifs || []).length) notifierParCourriel(r.nouvellesNotifs, C.login).catch(e=>journal("notifications par e-mail : "+e.message));
     if ((r.refCles||[]).indexOf("terms") >= 0) try { await GERER_PUSH(); } catch(e){}
-    if ((r.refCles||[]).indexOf("secu") >= 0){
-      const n = (await B.run("DELETE FROM sessions WHERE id<>?", sess.sid)).n;
-      if (n) await audit(C.login, "sessions.revoquees", "politique de sécurité modifiée : "+n+" session(s) fermée(s)", ip);
+    /* correctif 24 : politique tracée en détail (avant → après, sans secret) ; sessions fermées seulement si les règles de
+       SESSION se durcissent (auparavant tout enregistrement — même du seul envoi d'e-mails — déconnectait tout le monde) */
+    if ((r.refCles||[]).indexOf("secu") >= 0 && secuAvant){
+      const ap = secuDe(r.ref), ch = [], plat = (o, pre) => Object.keys(o || {}).reduce((m, k)=>{ const v = o[k]; if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(m, plat(v, pre+k+".")); else m[pre+k] = v; return m; }, {});
+      const fa = plat(secuAvant, ""), fb = plat(ap, "");
+      new Set(Object.keys(fa).concat(Object.keys(fb))).forEach(k=>{ if (JSON.stringify(fa[k]) !== JSON.stringify(fb[k])) ch.push(k+" "+String(fa[k] === undefined ? "—" : fa[k]).slice(0, 60)+" → "+String(fb[k] === undefined ? "—" : fb[k]).slice(0, 60)); });
+      if (ch.length) await audit(C.login, "securite.politique", ch.join(" ; ").slice(0, 1500), ip);
+      if (ap.sessionMax < secuAvant.sessionMax || ap.sessionInactivite < secuAvant.sessionInactivite || (secuAvant.memoriser && !ap.memoriser)){
+        const n = (await B.run("DELETE FROM sessions WHERE id<>?", sess.sid)).n;
+        if (n) await audit(C.login, "sessions.revoquees", "règles de session durcies : "+n+" session(s) fermée(s)", ip); }
     }
     if (r.ignores.length) await audit(C.login, "donnees.refusees", r.ignores.join(", "), ip);
     if (r.ecrits) await audit(C.login, "donnees.enregistrees", r.ecrits+" ligne(s)", ip);
@@ -2789,10 +2822,17 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, mdpDefini:!!mdp});
   }
   if (p === "/api/v1/systeme/courriel/test" && req.method === "POST"){
-    const b = await corpsJson(req), cfg = await smtpReglages(b.smtp);
+    const b = await corpsJson(req), so = b.smtp && typeof b.smtp === "object" ? b.smtp : {}, smS = ((((await D.referentielLecture()) || {}).secu) || {}).smtp || {};
+    /* correctif 24 : réglages d'essai différents de ceux enregistrés (serveur, port, sécurité, identifiant) → le mot de passe
+       enregistré n'est PAS joint (il partait en clair vers un hôte au choix) : il doit être saisi pour l'essai */
+    const autres = ["hote","port","securite","user","auth"].some(k=>so[k] !== undefined && String(so[k]) !== String(smS[k] === undefined ? "" : smS[k]));
+    const cfg = await smtpReglages(so);
+    if (autres){ if (typeof b.mdp === "string" && b.mdp) cfg.mdp = b.mdp.slice(0, 512); else if (cfg.auth) return erreur(res, 400, "Réglages modifiés : enregistrez-les d'abord, ou saisissez le mot de passe du compte d'envoi pour cet essai."); else cfg.mdp = ""; }
+    const motifS = COURRIEL.controleReglages(cfg); if (motifS) return erreur(res, 400, "Réglages d'envoi : "+motifS+".");
+    const cible = String(cfg.hote || "").slice(0, 120)+":"+(cfg.port || "")+" → "+String(b.a || "").slice(0, 120);
     try { await COURRIEL.envoyer(cfg, {a:b.a, sujet:"FIWAKTI — message de test", texte:"Ce message confirme que FIWAKTI peut envoyer des e-mails avec les réglages enregistrés.\r\n\r\nThis message confirms that FIWAKTI can send e-mails.\r\n\r\nتؤكد هذه الرسالة أن FIWAKTI قادر على إرسال الرسائل الإلكترونية."});
-      await audit(C.login, "courriel.test", "réussi", ip); return json(res, 200, {ok:true}); }
-    catch(e){ await audit(C.login, "courriel.test", "échec : "+e.message, ip); return erreur(res, 400, "Envoi impossible : "+e.message); }
+      await audit(C.login, "courriel.test", "réussi — "+cible, ip); return json(res, 200, {ok:true}); }
+    catch(e){ await audit(C.login, "courriel.test", "échec — "+cible+" : "+e.message, ip); return erreur(res, 400, "Envoi impossible : "+e.message); }
   }
   if (p === "/api/v1/comptes/reinitialiser" && req.method === "POST"){
     const b = await corpsJson(req);
