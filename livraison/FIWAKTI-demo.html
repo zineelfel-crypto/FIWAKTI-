@@ -1440,12 +1440,25 @@ const L = {
     termine:"انتهى الاستيراد", lot:"الدفعة", annulerLot:"إلغاء هذا الاستيراد", nouveau:"استيراد جديد", annule:"ألغي الاستيراد: استرجع {n} عنصر.", statut:"الحالة", date:"التاريخ", source:"المصدر", par:"بواسطة",
     s_termine:"منتهي", s_annule:"ملغى", s_en_cours:"جار", rien:"لا استيراد بعد.", profilTrouve:"استعملت المطابقة «{n}» تلقائيا.", formulaire:"استمارات"}
 };
+/* correctif 33 : libellés des champs, encodage, rapport, annulation, statuts */
+Object.assign(L.fr, {champ_mat:"Matricule", champ_nom:"Nom", champ_prenom:"Prénom", champ_cin:"CIN", champ_naissance:"Date de naissance", champ_entree:"Date d'entrée", champ_sortie:"Date de sortie", champ_email:"Adresse électronique", champ_tel:"Téléphone", champ_badge:"Badge", champ_pin:"Code PIN", champ_site:"Site", champ_dept:"Service", champ_calendrier:"Calendrier", champ_poste:"Poste", champ_horodatage:"Date et heure", champ_date:"Date", champ_heure:"Heure", champ_sens:"Sens", champ_terminal:"Terminal", champ_code:"Code", champ_plages:"Plages", champ_debut:"Début", champ_fin:"Fin", champ_pause:"Pause", champ_theorique:"Durée théorique", champ_tolEntree:"Tolérance entrée", champ_tolSortie:"Tolérance sortie", champ_nuit:"Nuit", champ_lundi:"Lundi", champ_mardi:"Mardi", champ_mercredi:"Mercredi", champ_jeudi:"Jeudi", champ_vendredi:"Vendredi", champ_samedi:"Samedi", champ_dimanche:"Dimanche", champ_journee:"Journée", champ_formule:"Formule", champ_unite:"Unité", champ_periode:"Période", champ_agregation:"Agrégation",
+  encodage:"Encodage des fichiers texte", enc_auto:"Automatique", enc_1256:"Arabe Windows (1256)", enc_1252:"Occidental Windows (1252)", vider:"Vider un champ existant quand la cellule de la source est vide", importEnCours:"Import en cours…", ecrits:"Écrits", refusImport:"Refusés par les contrôles", rapportCsv:"Télécharger le rapport (CSV)", annuleTitre:"Import annulé", annuleMsg:"{n} élément(s) rétabli(s), {c} conservé(s).", annulerConf:"Annuler l'import « {s} » du {d} ({t}) ? Les éléments créés seront supprimés (via la corbeille) et les fiches modifiées rétablies ; une fiche modifiée depuis l'import est conservée telle quelle.", annulerOk:"Annuler l'import", fermer:"Fermer", s_interrompu:"Interrompu", s_annule_partiel:"Annulé en partie", s_echec:"Refusé", demoMig:"Démonstration : la migration des données nécessite le serveur FIWAKTI.", expire:"Les données lues ont expiré (2 h) ou le serveur a redémarré : relisez la source.", conserves:"Conservés"});
+Object.assign(L.en, {champ_mat:"Employee ID", champ_nom:"Last name", champ_prenom:"First name", champ_cin:"ID card", champ_naissance:"Date of birth", champ_entree:"Hire date", champ_sortie:"Leave date", champ_email:"Email", champ_tel:"Phone", champ_badge:"Badge", champ_pin:"PIN", champ_site:"Site", champ_dept:"Department", champ_calendrier:"Calendar", champ_poste:"Position", champ_horodatage:"Date and time", champ_date:"Date", champ_heure:"Time", champ_sens:"Direction", champ_terminal:"Terminal", champ_code:"Code", champ_plages:"Time ranges", champ_debut:"Start", champ_fin:"End", champ_pause:"Break", champ_theorique:"Expected duration", champ_tolEntree:"Late tolerance", champ_tolSortie:"Early-leave tolerance", champ_nuit:"Night", champ_lundi:"Monday", champ_mardi:"Tuesday", champ_mercredi:"Wednesday", champ_jeudi:"Thursday", champ_vendredi:"Friday", champ_samedi:"Saturday", champ_dimanche:"Sunday", champ_journee:"Day type", champ_formule:"Formula", champ_unite:"Unit", champ_periode:"Period", champ_agregation:"Aggregation",
+  encodage:"Text file encoding", enc_auto:"Automatic", enc_1256:"Arabic Windows (1256)", enc_1252:"Western Windows (1252)", vider:"Clear an existing field when the source cell is empty", importEnCours:"Import running…", ecrits:"Written", refusImport:"Refused by checks", rapportCsv:"Download the report (CSV)", annuleTitre:"Import undone", annuleMsg:"{n} item(s) restored, {c} kept.", annulerConf:"Undo the import “{s}” of {d} ({t})? Created items are deleted (via the recycle bin) and modified records restored; a record changed since the import is kept as is.", annulerOk:"Undo the import", fermer:"Close", s_interrompu:"Interrupted", s_annule_partiel:"Partly undone", s_echec:"Refused", demoMig:"Demo: data migration needs the FIWAKTI server.", expire:"The data read has expired (2 h) or the server restarted: read the source again.", conserves:"Kept"});
+Object.assign(L.ar, {champ_mat:"المعرّف", champ_nom:"اللقب", champ_prenom:"الاسم", champ_cin:"بطاقة التعريف", champ_naissance:"تاريخ الولادة", champ_entree:"تاريخ الانتداب", champ_sortie:"تاريخ الخروج", champ_email:"البريد الإلكتروني", champ_tel:"الهاتف", champ_badge:"الشارة", champ_pin:"الرمز السري", champ_site:"الموقع", champ_dept:"المصلحة", champ_calendrier:"الرزنامة", champ_poste:"الوظيفة", champ_horodatage:"التاريخ والساعة", champ_date:"التاريخ", champ_heure:"الساعة", champ_sens:"الاتجاه", champ_terminal:"آلة التأشير", champ_code:"الرمز", champ_plages:"الفترات", champ_debut:"البداية", champ_fin:"النهاية", champ_pause:"الاستراحة", champ_theorique:"المدة النظرية", champ_tolEntree:"تسامح الدخول", champ_tolSortie:"تسامح الخروج", champ_nuit:"ليلي", champ_lundi:"الاثنين", champ_mardi:"الثلاثاء", champ_mercredi:"الأربعاء", champ_jeudi:"الخميس", champ_vendredi:"الجمعة", champ_samedi:"السبت", champ_dimanche:"الأحد", champ_journee:"اليوم النموذجي", champ_formule:"الصيغة", champ_unite:"الوحدة", champ_periode:"الفترة", champ_agregation:"التجميع",
+  encodage:"ترميز الملفات النصية", enc_auto:"آلي", enc_1256:"عربي ويندوز (1256)", enc_1252:"غربي ويندوز (1252)", vider:"إفراغ حقل موجود عندما تكون خانة المصدر فارغة", importEnCours:"جارٍ التوريد…", ecrits:"المكتوبة", refusImport:"مرفوضة من المراقبة", rapportCsv:"تنزيل التقرير (CSV)", annuleTitre:"تم إلغاء التوريد", annuleMsg:"تمت استعادة {n} عنصر، والإبقاء على {c}.", annulerConf:"إلغاء توريد «{s}» بتاريخ {d} ({t})؟ تُحذف العناصر المنشأة (عبر سلة المحذوفات) وتُستعاد البطاقات المعدّلة؛ وتبقى البطاقة المعدّلة منذ التوريد كما هي.", annulerOk:"إلغاء التوريد", fermer:"إغلاق", s_interrompu:"متوقف", s_annule_partiel:"ملغى جزئيا", s_echec:"مرفوض", demoMig:"عرض توضيحي: ترحيل البيانات يتطلب خادم FIWAKTI.", expire:"انتهت صلاحية البيانات المقروءة (ساعتان) أو أعيد تشغيل الخادم: أعد قراءة المصدر.", conserves:"المُبقاة"});
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
+const dateHeure = (ctx, iso) => { const d = new Date(iso); if (isNaN(d)) return String(iso || ""); const z = n => String(n).padStart(2, "0"); return ctx.dateAff(d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate()))+" "+z(d.getHours())+":"+z(d.getMinutes()); };
+const enDemo = () => { try { return typeof DEMO !== "undefined" && !!DEMO; } catch(e){ return false; } };
+/* progression gardée pendant la session (changer d'écran ou recharger ne ramène plus à l'étape 1) */
+const CLE_ETAT = "fwm-etat-v1", GARDE = ["etape", "onglet", "jeux", "jeu", "cible", "mapping", "tr", "corr", "creer", "defauts", "cleSalarie", "remplacer", "accepter", "profil", "enc"];
 const val = id => ((document.getElementById(id)||{}).value || "").trim();
 const lireB64 = f => new Promise((ok, ko)=>{ const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => ko(new Error(f.name)); r.readAsDataURL(f); });
 const EXT = /\.(csv|txt|tsv|xlsx|xls|xlsm|ods|json|xml|pdf|zip|sqlite|sqlite3|db|sl3|s3db|db3|sdb)$/i, BASE = /\.(sqlite|sqlite3|db|sl3|s3db|db3|sdb)$/i;
-function S(ctx){ const E = ctx.etat; if (!E.init) Object.assign(E, {init:true, etape:1, onglet:"fichiers", jeux:[], cible:"salaries", mapping:{}, tr:{date:"", zeros:"", sens:{}}, corr:{site:{}, dept:{}, calendrier:{}, journee:{}}, creer:{site:[], dept:[]},
-  base:{type:"postgres", hote:"", port:"", base:"", utilisateur:"", ssl:false, limite:"200000"}, tables:null, bases:[], erreurs:[]}); return E; }
+function S(ctx){ const E = ctx.etat; if (!E.init){ Object.assign(E, {init:true, etape:1, onglet:"fichiers", jeux:[], cible:"salaries", mapping:{}, tr:{date:"", zeros:"", sens:{}}, corr:{site:{}, dept:{}, calendrier:{}, journee:{}}, creer:{site:[], dept:[]},
+  base:{type:"postgres", hote:"", port:"", base:"", utilisateur:"", ssl:false, limite:"200000"}, tables:null, bases:[], erreurs:[]});
+  try { const g = JSON.parse(sessionStorage.getItem(CLE_ETAT) || "null"); if (g && g.etape >= 2 && g.etape <= 4 && g.jeu) Object.assign(E, g, {etape:g.etape === 4 ? 3 : g.etape}); } catch(e){} } return E; }
+function garderEtat(E){ try { const g = {}; GARDE.forEach(k=>{ if (E[k] !== undefined) g[k] = E[k]; }); sessionStorage.setItem(CLE_ETAT, JSON.stringify(g)); } catch(e){} }
 /* 1.1.2 : un fichier d'extension inconnue (.bck, .mov de Netime…) est reconnu à sa signature : base SQLite ou archive ZIP */
 const signature = f => new Promise(ok=>{ const r = new FileReader(); r.onload = () => { const b = new Uint8Array(r.result), t = String.fromCharCode.apply(null, Array.from(b));
   ok(t.indexOf("SQLite format 3") === 0 ? "sqlite" : (b[0] === 0x50 && b[1] === 0x4B) ? "zip" : ""); }; r.onerror = () => ok(""); r.readAsArrayBuffer(f.slice(0, 16)); });
@@ -1454,15 +1467,16 @@ async function envoyerFichiers(ctx, liste){
   for (const f of tous){ if (EXT.test(f.name)){ fs.push(f); continue; } const sg = await signature(f);
     if (sg === "sqlite") fs.push(new File([f], f.name+".sqlite")); else if (sg === "zip") fs.push(new File([f], f.name+".zip")); }
   if (!fs.length) return ctx.flash(T(ctx, "formatInconnu").replace("{n}", tous.map(f=>f.name).join(", ")), "err");
+  if (enDemo()) return ctx.flash(T(ctx, "demoMig"), "warn");
   E.charge = true; ctx.rendre();
   /* 56.33.3 : une base SQLite (.sl3 Netime, .sqlite, .db…) est envoyée telle quelle, sans limite de 60 Mo */
   const base = fs.find(f=>BASE.test(f.name));
   if (base) { try { const r = await fetch("api/v1/migration/depot-base", {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/octet-stream", "X-Nom-Fichier":encodeURIComponent(base.name), "X-CSRF":(window.CSRF_JETON||"")}, body:base});
       const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.message || ("HTTP "+r.status));
-      E.bases = j.basesSqlite; E.erreurs = []; E.charge = false; E.onglet = "base"; E.base = Object.assign({}, E.base, {type:"sqlite", fichier:E.bases[0]}); E.tables = null; ctx.flash(T(ctx, "baseDeposee").replace("{n}", base.name).replace("{t}", Math.round(j.taille/1048576)), "ok"); return ctx.rendre(); }
+      E.bases = j.basesSqlite; E.erreurs = []; E.charge = false; E.onglet = "base"; E.base = Object.assign({}, E.base, {type:"sqlite", fichier:E.bases[0], nomOrigine:base.name}); E.tables = null; ctx.flash(T(ctx, "baseDeposee").replace("{n}", base.name).replace("{t}", Math.round(j.taille/1048576)), "ok"); return ctx.rendre(); }
     catch(e){ E.charge = false; ctx.flash(e.message, "err"); return ctx.rendre(); } }
   try { const fichiers = []; for (const f of fs) fichiers.push({nom:f.webkitRelativePath || f.name, contenu:await lireB64(f)});
-    const j = await ctx.api("api/v1/migration/fichiers", {corps:{fichiers}});
+    const j = await ctx.api("api/v1/migration/fichiers", {corps:{fichiers, encodage:E.enc || ""}});
     E.jeux = j.jeux; E.erreurs = j.erreurs || []; E.bases = j.basesSqlite || []; E.charge = false;
     /* 1.1.5 : un seul jeu lu → il est sélectionné d'office (l'écran semblait bloqué en attendant un clic sur la carte) */
     E.jeu = E.jeux.length === 1 ? E.jeux[0] : null;
@@ -1475,14 +1489,15 @@ function vueSource(ctx){
   const tabs = '<div class="fwm-modes">'+["fichiers", "base", "histo"].map(o=>'<button type="button" class="fwm-f'+(E.onglet === o ? ' on' : '')+'" data-act="fwm:onglet" data-o="'+o+'">'+h(T(ctx, o))+'</button>').join("")+'</div>';
   if (E.onglet === "histo") return tabs+vueHisto(ctx);
   if (E.onglet === "fichiers") return tabs+'<div class="fw-card fw-u-p fwm-depot"><p>'+h(T(ctx, "formats"))+'</p>'+
-    '<label class="fw-btn pri">'+h(T(ctx, "choisirFichiers"))+'<input type="file" multiple hidden data-fwmc="fichiers" accept="*/*"></label> '+
-    '<label class="fw-btn">'+h(T(ctx, "choisirDossier"))+'<input type="file" hidden webkitdirectory data-fwmc="fichiers"></label>'+
+    '<button type="button" class="fw-btn pri" data-act="fwm:choisir" data-i="fwmIn1">'+h(T(ctx, "choisirFichiers"))+'</button><input id="fwmIn1" type="file" multiple hidden data-fwmc="fichiers" accept="*/*"> '+
+    '<button type="button" class="fw-btn" data-act="fwm:choisir" data-i="fwmIn2">'+h(T(ctx, "choisirDossier"))+'</button><input id="fwmIn2" type="file" hidden webkitdirectory data-fwmc="fichiers">'+
+    ' <label>'+h(T(ctx, "encodage"))+' <select id="fwmEnc" data-fwmc="enc">'+[["", "enc_auto"], ["utf-8", "UTF-8"], ["windows-1256", "enc_1256"], ["windows-1252", "enc_1252"]].map(([v, l])=>'<option value="'+v+'"'+((E.enc||"") === v ? ' selected' : '')+'>'+h(T(ctx, l))+'</option>').join("")+'</select></label>'+
     (E.charge ? '<p class="fw-hint" aria-busy="true">'+h(T(ctx, "lecture"))+'</p>' : '')+
     (E.erreurs.length ? '<div class="fw-note warn">'+E.erreurs.map(h).join("<br>")+'</div>' : '')+'</div>';
   const b = E.base, champ = (k, lab, type) => '<label>'+h(T(ctx, lab))+' <input id="fwmB-'+k+'" type="'+(type||"text")+'" value="'+h(b[k]||"")+'" autocomplete="off"></label>';
   return tabs+'<div class="fw-card fw-u-p"><div class="fwm-ligne"><label>'+h(T(ctx, "type"))+' <select id="fwmB-type" data-fwmc="btype">'+[["postgres", "PostgreSQL"], ["mysql", "MySQL / MariaDB"], ["mssql", "SQL Server"], ["sqlite", "SQLite"]]
       .map(([v, l])=>'<option value="'+v+'"'+(b.type === v ? ' selected' : '')+'>'+l+'</option>').join("")+'</select></label>'+
-    (b.type === "sqlite" ? '<span class="fw-hint">'+h(b.fichier ? b.fichier.split(/[\\/]/).pop() : T(ctx, "formats"))+'</span>' : champ("hote", "hote")+champ("port", "port")+champ("base", "nomBase")+champ("utilisateur", "utilisateur")+champ("mdp", "mdp", "password")+
+    (b.type === "sqlite" ? '<span class="fw-hint">'+h(b.nomOrigine || (b.fichier ? b.fichier.split(/[\\/]/).pop() : T(ctx, "formats")))+'</span>' : champ("hote", "hote")+champ("port", "port")+champ("base", "nomBase")+champ("utilisateur", "utilisateur")+champ("mdp", "mdp", "password")+
       '<label class="fwm-chk"><input type="checkbox" id="fwmB-ssl"'+(b.ssl ? ' checked' : '')+'> '+h(T(ctx, "ssl"))+'</label>')+'</div>'+
     (b.type === "mssql" && P.sqlserver === false ? '<div class="fw-note warn">'+h(T(ctx, "sqlAbsent"))+'</div>' : '')+
     '<p class="fw-hint">'+h(T(ctx, "mdpNonGarde"))+'</p><button class="fw-btn" data-act="fwm:tables">'+h(T(ctx, "tester"))+'</button>'+
@@ -1504,11 +1519,12 @@ function vueMapping(ctx){
   const E = S(ctx), h = s => ctx.esc(s), champs = (E.par.cibles||{})[E.cible] || [];
   return (E.profilNom ? '<div class="fw-note ok">'+h(T(ctx, "profilTrouve").replace("{n}", E.profilNom))+'</div>' : '')+
     '<div class="fw-tablewrap"><table class="fw-tbl"><thead><tr><th>'+h(T(ctx, "champ"))+'</th><th>'+h(T(ctx, "colonneSource"))+'</th><th>'+h(T(ctx, "apercu"))+'</th></tr></thead><tbody>'+
-    champs.map(c=>{ const col = E.mapping[c.champ] || ""; return '<tr><td><strong>'+h(c.champ)+'</strong>'+(c.obligatoire ? ' <span class="fw-tag">'+h(T(ctx, "obligatoire"))+'</span>' : '')+'</td>'+
-      '<td><select data-fwmc="map" data-c="'+h(c.champ)+'"><option value="">'+h(T(ctx, "aucune"))+'</option>'+E.jeu.colonnes.map(x=>'<option'+(x === col ? ' selected' : '')+'>'+h(x)+'</option>').join("")+'</select></td>'+
+    champs.map(c=>{ const col = E.mapping[c.champ] || "", lib = T(ctx, "champ_"+c.champ); return '<tr><td><strong>'+h(lib)+'</strong>'+(c.obligatoire ? ' <span class="fw-tag">'+h(T(ctx, "obligatoire"))+'</span>' : '')+'</td>'+
+      '<td><select data-fwmc="map" data-c="'+h(c.champ)+'" aria-label="'+h(T(ctx, "colonneSource")+" — "+lib)+'"><option value="">'+h(T(ctx, "aucune"))+'</option>'+E.jeu.colonnes.map(x=>'<option'+(x === col ? ' selected' : '')+'>'+h(x)+'</option>').join("")+'</select></td>'+
       '<td class="fw-sm">'+h(col ? E.jeu.apercu.slice(0, 3).map(r=>r[col]).filter(Boolean).join(" · ") : "")+'</td></tr>'; }).join("")+'</tbody></table></div>'+
     '<div class="fwm-ligne"><label>'+h(T(ctx, "fmtDate"))+' <select id="fwmDate">'+[["", "auto"], ["dmy", "dmy"], ["mdy", "mdy"], ["excel", "excel"]].map(([v, l])=>'<option value="'+v+'"'+(E.tr.date === v ? ' selected' : '')+'>'+h(T(ctx, l))+'</option>').join("")+'</select></label>'+
-    '<label>'+h(T(ctx, "zeros"))+' <input id="fwmZeros" type="number" min="0" max="12" value="'+h(E.tr.zeros||"")+'"></label></div>'+
+    '<label>'+h(T(ctx, "zeros"))+' <input id="fwmZeros" type="number" min="0" max="20" value="'+h(E.tr.zeros||"")+'"></label>'+
+    (E.cible === "salaries" ? '<label class="fwm-chk"><input type="checkbox" id="fwmVider"'+(E.tr.vider ? ' checked' : '')+'> '+h(T(ctx, "vider"))+'</label>' : '')+'</div>'+
     '<div class="fw-toolbar"><button class="fw-btn" data-act="fwm:etape" data-e="2">'+h(T(ctx, "retour"))+'</button><button class="fw-btn pri" data-act="fwm:analyser">'+h(T(ctx, "analyser"))+'</button></div>';
 }
 function vueAnalyse(ctx){
@@ -1546,25 +1562,28 @@ function vueAnalyse(ctx){
   if (E.cible === "formules") o += '<div class="fwm-ligne"><label class="fwm-chk"><input type="checkbox" id="fwmRemplacer"'+(E.remplacer ? ' checked' : '')+' data-fwmc="remplacer"> '+h(T(ctx, "remplacer"))+'</label></div>';
   return o+'<div class="fwm-ligne"><label class="fwm-chk"><input type="checkbox" id="fwmAccepter"'+(E.accepter ? ' checked' : '')+'> '+h(T(ctx, "accepter"))+'</label><label>'+h(T(ctx, "profil"))+' <input id="fwmProfil" value="'+h(E.profil||"")+'"></label></div>'+
     '<div class="fw-toolbar"><button class="fw-btn" data-act="fwm:etape" data-e="3">'+h(T(ctx, "retour"))+'</button><button class="fw-btn" data-act="fwm:analyser">'+h(T(ctx, "relancer"))+'</button>'+
-    '<button class="fw-btn pri" data-act="fwm:importer"'+(n ? '' : ' disabled')+'>'+h(T(ctx, "importer"))+' ('+n+')</button></div>';
+    '<button class="fw-btn pri" data-act="fwm:importer"'+(n && !E.charge ? '' : ' disabled')+(E.charge ? ' aria-busy="true"' : '')+'>'+h(E.charge ? T(ctx, "importEnCours") : T(ctx, "importer")+' ('+n+')')+'</button></div>';
 }
 function vueRapport(ctx){ const E = S(ctx), R = E.rapport, h = s => ctx.esc(s);
+  if (R.annule) return '<div class="fw-note" role="status"><strong>'+h(T(ctx, "annuleTitre"))+'</strong> — '+h(T(ctx, "annuleMsg").replace("{n}", R.annule.retablis).replace("{c}", R.annule.conserves))+
+    ((R.annule.motifs||[]).length ? '<ul>'+R.annule.motifs.slice(0, 10).map(x=>'<li>'+h(x)+'</li>').join("")+'</ul>' : '')+'</div><div class="fw-toolbar"><button class="fw-btn pri" data-act="fwm:nouveau">'+h(T(ctx, "nouveau"))+'</button></div>';
   /* 1.1.6 : rien n'avait été importé (aucun lot) → message clair au lieu d'un rapport « terminé » trompeur */
   if (!R.lot) return '<div class="fw-note warn" role="status"><strong>'+h(T(ctx, "rienImporte"))+'</strong> — '+h(T(ctx, "a_err"))+' : '+(R.erreurs||0)+
     ((R.exemplesErreurs||[]).length ? '<ul>'+R.exemplesErreurs.slice(0, 5).map(x=>'<li>'+h(T(ctx, "ligne"))+' '+x.ligne+' : '+h(x.cause)+'</li>').join("")+'</ul>' : '')+'</div>'+
     '<div class="fw-toolbar"><button class="fw-btn" data-act="fwm:etape" data-e="3">'+h(T(ctx, "revoirCorresp"))+'</button><button class="fw-btn pri" data-act="fwm:nouveau">'+h(T(ctx, "nouveau"))+'</button></div>';
-  return '<div class="fw-note ok" role="status"><strong>'+h(T(ctx, "termine"))+'</strong> — '+h(T(ctx, "a_creer"))+' : '+R.creer+' · '+h(T(ctx, "a_maj"))+' : '+R.maj+' · '+h(T(ctx, "a_err"))+' : '+R.erreurs+(R.lot ? ' · '+h(T(ctx, "lot"))+' '+h(R.lot) : '')+'</div>'+
-    '<div class="fw-toolbar">'+(R.lot ? '<button class="fw-btn" data-act="fwm:annuler" data-id="'+h(R.lot)+'">'+h(T(ctx, "annulerLot"))+'</button>' : '')+'<button class="fw-btn" data-act="fwm:nouveau">'+h(T(ctx, "nouveau"))+'</button>'+
+  return '<div class="fw-note '+(R.refusImport ? 'warn' : 'ok')+'" role="status"><strong>'+h(T(ctx, "termine"))+'</strong> — '+h(T(ctx, "ecrits"))+' : '+(R.ecrits != null ? R.ecrits : R.creer + R.maj)+' · '+h(T(ctx, "refusImport"))+' : '+(R.refusImport||0)+' · '+h(T(ctx, "a_err"))+' : '+R.erreurs+(R.lot ? ' · '+h(T(ctx, "lot"))+' '+h(R.lot) : '')+'</div>'+
+    ((R.exemplesErreurs||[]).length ? '<details class="fwm-err"><summary>'+h(T(ctx, "erreurs"))+' ('+R.exemplesErreurs.length+')</summary><table class="fw-tbl"><thead><tr><th>'+h(T(ctx, "ligne"))+'</th><th>'+h(T(ctx, "cause"))+'</th></tr></thead><tbody>'+R.exemplesErreurs.slice(0, 200).map(x=>'<tr><td class="fw-mono">'+(x.ligne||"")+'</td><td>'+h(x.cause)+'</td></tr>').join("")+'</tbody></table></details>' : '')+
+    '<div class="fw-toolbar">'+(R.lot ? '<a class="fw-btn" href="api/v1/migration/lots/'+encodeURIComponent(R.lot)+'/rapport" download>'+h(T(ctx, "rapportCsv"))+'</a><button class="fw-btn" data-act="fwm:annuler" data-id="'+h(R.lot)+'" data-s="'+h((E.jeu||{}).nom||"")+'" data-t="'+h(T(ctx, "c_"+E.cible))+'">'+h(T(ctx, "annulerLot"))+'</button>' : '')+'<button class="fw-btn" data-act="fwm:nouveau">'+h(T(ctx, "nouveau"))+'</button>'+
     /* 1.1.6 : les données importées n'apparaissaient dans les écrans qu'après un rechargement que rien n'indiquait */
     '<button class="fw-btn pri" data-act="fwm:recharger">'+h(T(ctx, "voirDonnees"))+'</button></div><p class="fw-hint">'+h(T(ctx, "rechargerH"))+'</p>'; }
 function vueHisto(ctx){ const E = S(ctx), h = s => ctx.esc(s);
   if (!E.lots){ ctx.api("api/v1/migration/lots").then(j=>{ E.lots = j.lignes; ctx.rendre(); }).catch(e=>ctx.flash(e.message, "err")); return '<p class="fw-hint">…</p>'; }
   if (!E.lots.length) return '<div class="fw-empty">'+h(T(ctx, "rien"))+'</div>';
   return '<div class="fw-tablewrap"><table class="fw-tbl"><thead><tr><th>'+h(T(ctx, "date"))+'</th><th>'+h(T(ctx, "source"))+'</th><th>'+h(T(ctx, "cible"))+'</th><th>'+h(T(ctx, "a_creer"))+' / '+h(T(ctx, "a_maj"))+'</th><th>'+h(T(ctx, "statut"))+'</th><th>'+h(T(ctx, "par"))+'</th><th></th></tr></thead><tbody>'+
-    E.lots.map(l=>'<tr><td>'+h(ctx.dateAff(l.cree.slice(0, 10))+" "+l.cree.slice(11, 16))+'</td><td>'+h(l.source||"")+'</td><td>'+h(T(ctx, "c_"+l.cible))+'</td><td class="fw-mono">'+h(l.stats ? l.stats.creer+" / "+l.stats.maj : "")+'</td><td>'+h(T(ctx, "s_"+l.statut))+'</td><td>'+h(l.par||"")+'</td>'+
-      '<td>'+(l.statut === "termine" ? '<button class="fw-btn sm" data-act="fwm:annuler" data-id="'+h(l.id)+'">'+h(T(ctx, "annulerLot"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table></div>'; }
+    E.lots.map(l=>'<tr><td>'+h(dateHeure(ctx, l.cree))+'</td><td>'+h(l.source||"")+'</td><td>'+h(T(ctx, "c_"+l.cible))+'</td><td class="fw-mono">'+h(l.stats ? l.stats.creer+" / "+l.stats.maj : "")+'</td><td>'+h(T(ctx, "s_"+l.statut))+'</td><td>'+h(l.par||"")+'</td>'+
+      '<td style="white-space:nowrap">'+(l.statut !== "echec" ? '<a class="fw-btn sm" href="api/v1/migration/lots/'+encodeURIComponent(l.id)+'/rapport" download aria-label="'+h(T(ctx, "rapportCsv")+" — "+(l.source||""))+'">CSV</a> ' : '')+(l.statut === "termine" || l.statut === "interrompu" ? '<button class="fw-btn sm" data-act="fwm:annuler" data-id="'+h(l.id)+'" data-s="'+h(l.source||"")+'" data-d="'+h(dateHeure(ctx, l.cree))+'" data-t="'+h(T(ctx, "c_"+l.cible))+'" aria-label="'+h(T(ctx, "annulerLot")+" — "+(l.source||""))+'">'+h(T(ctx, "annulerLot"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table></div>'; }
 function lireMapping(ctx){ const E = S(ctx); document.querySelectorAll('[data-fwmc="map"]').forEach(el=>{ if (el.value) E.mapping[el.dataset.c] = el.value; else delete E.mapping[el.dataset.c]; });
-  if (document.getElementById("fwmDate")) E.tr.date = val("fwmDate"); if (document.getElementById("fwmZeros")) E.tr.zeros = val("fwmZeros"); }
+  if (document.getElementById("fwmDate")) E.tr.date = val("fwmDate"); if (document.getElementById("fwmZeros")) E.tr.zeros = val("fwmZeros"); if (document.getElementById("fwmVider")) E.tr.vider = !!document.getElementById("fwmVider").checked; }
 function corpsAnalyse(ctx){ const E = S(ctx); return {jeu:E.jeu.id, cible:E.cible, mapping:E.mapping, transformations:E.tr, correspondances:E.corr, creerRefs:E.creer, remplacer:!!E.remplacer, defauts:E.defauts || {}, cleSalarie:E.cible === "badgeages" ? (E.cleSalarie || "matricule") : undefined}; }
 FIWAKTI_MODULES.enregistrer({
   id:"FW-Migration",
@@ -1572,20 +1591,21 @@ FIWAKTI_MODULES.enregistrer({
     ctx.api("api/v1/donnees").then(d=>{ E.par = Object.assign({}, E.par, {ref:{sites:(d.ref||{}).sites||[], depts:(d.ref||{}).depts||[], cals:(d.ref||{}).cals||[], jours:(d.ref||{}).jours||[]}}); }).catch(()=>{}); },
   unmount(){},
   render(vue, ctx){
-    const E = S(ctx), h = s => ctx.esc(s);
+    const E = S(ctx), h = s => ctx.esc(s); garderEtat(E);
     const etapes = [1, 2, 3, 4, 5].map(n=>'<li class="'+(E.etape === n ? 'on' : E.etape > n ? 'fait' : '')+'"'+(E.etape === n ? ' aria-current="step"' : '')+'><span>'+n+'</span>'+h(T(ctx, "e"+n))+'</li>').join("");
     const corps = !E.par ? '<p class="fw-hint">…</p>' : E.etape === 1 ? vueSource(ctx) : E.etape === 2 ? vueJeux(ctx) : E.etape === 3 ? (apercu(ctx, E.jeu)+vueMapping(ctx)) : E.etape === 4 ? vueAnalyse(ctx) : vueRapport(ctx);
     return '<div class="fw-module fwm"><div class="fw-hero fw-hero-mod"><div class="fw-hero-main"><div class="fw-hero-kicker">'+ctx.esc(window.HERO_KICKER || "FIWAKTI")+'</div><h1>'+h(T(ctx, "titre"))+'</h1><p class="fw-hero-lede">'+h(T(ctx, "lede"))+'</p></div></div>'+
       '<ol class="fwm-etapes">'+etapes+'</ol><div class="fwm-corps">'+corps+'</div></div>';
   },
   async action(a, el, ctx){
+    if (a === "choisir"){ const i = document.getElementById(el.dataset.i); if (i) i.click(); return; }
     if (a === "recharger"){ try { sessionStorage.setItem("fwk-vue-apres", S(ctx).cible === "badgeages" ? "ptg" : "emp"); } catch(e){} location.reload(); return; }
-    if (a === "toutCreer" || a === "toutIgnorer"){ const E = S(ctx), k = el.dataset.k, l = ((E.analyse||{}).refsInconnues||{})[k] || []; E.creer[k] = E.creer[k] || []; E.corr[k] = E.corr[k] || {};
+    if (a === "toutCreer" || a === "toutIgnorer"){ const E = S(ctx), k = el.dataset.k; if (document.getElementById("fwmAccepter")){ E.accepter = !!document.getElementById("fwmAccepter").checked; E.profil = val("fwmProfil"); } const l = ((E.analyse||{}).refsInconnues||{})[k] || []; E.creer[k] = E.creer[k] || []; E.corr[k] = E.corr[k] || {};
       l.forEach(r=>{ if (a === "toutCreer"){ E.corr[k][r.valeur] = "__creer"; if (E.creer[k].indexOf(r.valeur) < 0) E.creer[k].push(r.valeur); } else { E.corr[k][r.valeur] = "__ignorer"; E.creer[k] = E.creer[k].filter(x=>x !== r.valeur); } });
       ctx.flash(T(ctx, a === "toutCreer" ? "toutCreerOk" : "toutIgnorerOk").replace("{n}", l.length), "ok");
       /* nouvelle analyse aussitôt : le bouton « Importer » reflète les décisions prises */
       try { E.analyse = await ctx.api("api/v1/migration/analyser", {corps:corpsAnalyse(ctx)}); } catch(e){ ctx.flash(e.message, "err"); } return ctx.rendre(); }
-    const E = S(ctx), ko = e => { E.charge = false; ctx.flash(e.message, "err"); ctx.rendre(); };
+    const E = S(ctx), ko = e => { E.charge = false; if (/expir/i.test(e.message)){ Object.assign(E, {etape:1, jeu:null, jeux:[], analyse:null}); try { sessionStorage.removeItem(CLE_ETAT); } catch(x){} ctx.flash(T(ctx, "expire"), "err"); return ctx.rendre(); } ctx.flash(e.message, "err"); ctx.rendre(); };
     if (a === "onglet"){ E.onglet = el.dataset.o; E.lots = null; return ctx.rendre(); }
     if (a === "etape"){ if (E.etape === 3) lireMapping(ctx); E.etape = Number(el.dataset.e); return ctx.rendre(); }
     if (a === "jeu"){ E.jeu = E.jeux.find(j=>j.id === el.dataset.id); return ctx.rendre(); }
@@ -1607,17 +1627,18 @@ FIWAKTI_MODULES.enregistrer({
       try { E.analyse = await ctx.api("api/v1/migration/analyser", {corps:corpsAnalyse(ctx)}); ctx.rendre(); } catch(e){ E.etape = 3; ko(e); }
       return;
     }
-    if (a === "importer"){ E.accepter = !!(document.getElementById("fwmAccepter")||{}).checked; E.profil = val("fwmProfil"); const n = E.analyse.creer + E.analyse.maj;
+    if (a === "importer"){ if (E.charge) return; E.accepter = !!(document.getElementById("fwmAccepter")||{}).checked; E.profil = val("fwmProfil"); const n = E.analyse.creer + E.analyse.maj;
       const r = await ctx.confirmer({titre:T(ctx, "importer"), message:T(ctx, "confirmer").replace("{n}", n)}); if (!r.ok) return;
       E.charge = true; ctx.rendre();
       try { E.rapport = await ctx.api("api/v1/migration/importer", {corps:Object.assign(corpsAnalyse(ctx), {accepterErreurs:E.accepter, profil:E.profil || undefined})}); E.charge = false; E.etape = 5; E.lots = null; ctx.rendre(); } catch(e){ ko(e); }
       return;
     }
-    if (a === "annuler"){ const r = await ctx.confirmer({titre:T(ctx, "annulerLot"), message:""}); if (!r.ok) return;
-      try { const j = await ctx.api("api/v1/migration/lots/"+encodeURIComponent(el.dataset.id)+"/annuler", {corps:{}}); ctx.flash(T(ctx, "annule").replace("{n}", j.retablis), "ok"); E.lots = null; if (E.rapport) E.rapport.lot = null; ctx.rendre(); } catch(e){ ko(e); }
+    if (a === "annuler"){ if (E.charge) return; const r = await ctx.confirmer({titre:T(ctx, "annulerLot"), message:T(ctx, "annulerConf").replace("{s}", el.dataset.s || el.dataset.id).replace("{d}", el.dataset.d || dateHeure(ctx, new Date().toISOString())).replace("{t}", el.dataset.t || ""), okLabel:T(ctx, "annulerOk"), danger:true}); if (!r.ok) return;
+      E.charge = true; ctx.rendre();
+      try { const j = await ctx.api("api/v1/migration/lots/"+encodeURIComponent(el.dataset.id)+"/annuler", {corps:{}}); E.charge = false; ctx.flash(T(ctx, "annuleMsg").replace("{n}", j.retablis).replace("{c}", j.conserves || 0), j.conserves ? "warn" : "ok"); E.lots = null; if (E.rapport && E.rapport.lot === el.dataset.id) E.rapport.annule = j; ctx.rendre(); } catch(e){ ko(e); }
       return;
     }
-    if (a === "nouveau"){ const par = E.par; Object.keys(E).forEach(k=>delete E[k]); S(ctx); E.par = par; return ctx.rendre(); }
+    if (a === "nouveau"){ const par = E.par; try { sessionStorage.removeItem(CLE_ETAT); } catch(e){} Object.keys(E).forEach(k=>delete E[k]); S(ctx); E.par = par; return ctx.rendre(); }
   },
   async change(k, el, ctx){
     if (k === "cleSalarie"){ const E = S(ctx); E.cleSalarie = el.value; E.analyse = null; ctx.rendre(); try { E.analyse = await ctx.api("api/v1/migration/analyser", {corps:corpsAnalyse(ctx)}); } catch(e){ ctx.flash(e.message, "err"); } return ctx.rendre(); }
@@ -1626,7 +1647,8 @@ FIWAKTI_MODULES.enregistrer({
     if (k === "table"){ S(ctx).base.table = el.value; return; }
     if (k === "req"){ S(ctx).base.req = el.value; return; }
     const E = S(ctx);
-    if (k === "fichiers") return envoyerFichiers(ctx, el.files);
+    if (k === "fichiers"){ const l = Array.from(el.files || []); el.value = ""; return envoyerFichiers(ctx, l); }
+    if (k === "enc"){ E.enc = el.value; return; }
     if (k === "btype"){ E.base.type = el.value; E.tables = null; return ctx.rendre(); }
     if (k === "map"){ lireMapping(ctx); return ctx.rendre(); }
     if (k === "corr"){ const kk = el.dataset.k, v = el.dataset.v; E.creer[kk] = (E.creer[kk]||[]).filter(x=>x !== v); delete E.corr[kk][v];

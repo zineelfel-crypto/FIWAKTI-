@@ -216,7 +216,7 @@ function initPointeuses(){
       /* v56.21 : service d'un autre module (s'il est actif) — ex. le pilotage lit les indicateurs agrégés du suivi médical */
       service:(id)=>{ const y = MODS_SERVEUR.find(z=>z.id === id); return y && y.inst && (!MOD || MOD.estActif(id)) ? y.inst : null; },
       /* v56.31 : recalcul des journées touchées (ex. badgeages repris par l'assistant de migration) ; dossier racine */
-      invalider:(t, r)=>K.invalider(t, r), racine:path.join(ICI, "..", ".."), dossierDonnees:DONNEES,
+      invalider:(t, r)=>K.invalider(t, r), racine:path.join(ICI, "..", ".."), dossierDonnees:DONNEES, capacite:puts=>capaciteRefus(puts),
       /* correctif 17 : calcul des journées manquantes avant lecture, et génération des données (cache des modules) */
       assurer:(m, du, au)=>K.assurer(m, du, au), generation:()=>K.generation(),
       publier:(nom, d)=>{ CACHE_AT.clear(); MODS_SERVEUR.forEach(y=>{ try { if (y.inst && y.inst.surEvenement) y.inst.surEvenement(nom, d); } catch(e){ journal("événement "+nom+" → "+y.id+" : "+e.message); } }); },
@@ -796,6 +796,13 @@ async function reauthentifier(C, b, ip, action){
     if (okC < 0){ await audit(C.login, action, "code de vérification incorrect", ip); return "Code de vérification incorrect."; }
     await B.run("UPDATE comptes SET a2f_pas=? WHERE login=?", okC, c.login); }
   return "";
+}
+/* correctif 29 / 33 : capacité de la licence (salariés actifs) — commune à l'enregistrement et à l'assistant de migration */
+async function capaciteRefus(puts){
+  const licC = await licenceActive(), capa = licC ? LICENCE.normaliser(licC).capacite : null; if (!capa) return "";
+  const tous = await D.employes(), parId = new Map(tous.map(e=>[String(e.id), e])), j0 = aujourdhui(), compte = e => !!e && !(e.sortie && e.sortie < j0) && e.recette !== true && !/^rec_/.test(String(e.id));
+  const actifs = tous.filter(compte).length, plus = (puts || []).filter(x=>x && compte(x) && !compte(parId.get(String(x.id)))).length;
+  return plus && actifs + plus > capa ? "Capacité de la licence atteinte : "+actifs+" salarié(s) actif(s), "+plus+" à ajouter ou réactiver, "+capa+" autorisé(s). Demandez une extension à votre fournisseur." : "";
 }
 async function sessionDe(req){
   const id = cookies(req)[COOKIE]; if (!id) return null;
@@ -1998,11 +2005,8 @@ async function traiter(req, res){
     const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
     const affAvant = paquet.ref && paquet.ref.affichages !== undefined ? ((((await D.referentielLecture()) || {}).affichages) || []) : null;
     /* correctif 29 : capacité de la licence (nombre de salariés actifs) appliquée — elle n'était contrôlée nulle part */
-    if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length){ const licC = await licenceActive(), capa = licC ? LICENCE.normaliser(licC).capacite : null;
-      if (capa){ const tous = await D.employes(), parId = new Map(tous.map(e=>[String(e.id), e])), j0 = aujourdhui(), compte = e => !!e && !(e.sortie && e.sortie < j0) && e.recette !== true && !/^rec_/.test(String(e.id));
-        const actifs = tous.filter(compte).length, plus = paquet.colls.emps.put.filter(x=>x && compte(x) && !compte(parId.get(String(x.id)))).length;
-        if (plus && actifs + plus > capa){ const m = "Capacité de la licence atteinte : "+actifs+" salarié(s) actif(s), "+plus+" à ajouter ou réactiver, "+capa+" autorisé(s). Demandez une extension à votre fournisseur.";
-          await audit(C.login, "licence.capacite", m, ip); return erreur(res, 403, m, {capacite:true}); } } }
+    if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length){ const m = await capaciteRefus(paquet.colls.emps.put);
+      if (m){ await audit(C.login, "licence.capacite", m, ip); return erreur(res, 403, m, {capacite:true}); } }
     const empsAvantIds = paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length ? new Set((await D.employes()).map(e=>String(e.id))) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});

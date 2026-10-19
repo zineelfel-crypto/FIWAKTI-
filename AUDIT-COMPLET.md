@@ -2036,3 +2036,42 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-32.zip (cumulatif : correctifs 2 à 31 inclus).
+
+## Correctif 33 — Administration › Migration des données (FW-Migration, analyse approfondie)
+
+Deux analyses (serveur et API : contrôles, lecteurs, bases sources, annulation, 20 000 lignes ; écran : parcours, rapport, accessibilité, langues) sur le serveur réel avec le module activé, Chromium et de vrais fichiers CSV, XLSX, SQLite, cp1256 et UTF-16.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| M1 | Import écrit directement en base : CIN et badge déjà attribués, doublons du fichier, dates impossibles (31/02), sortie avant entrée, adresse invalide, matricule HTML ; badgeages au 30/02, à 25:70, futurs, hors présence, non tracés | **critique** | import par l'enregistrement normal (unicité, dates, clôture, périmètre, matrice, traçabilité, invalidation des calculs), par lots de 500 ; chaque refus devient une erreur de ligne ; contrôles repris dès l'analyse |
+| M2 | Dates Excel jour / mois inversés ; « 0 » ou « 2024 » lus comme une date ; dates impossibles acceptées | **critique** | cellule date lue en AAAA-MM-JJ ; date réelle exigée ; plus de lecture « au hasard » ; heures bornées |
+| M3 | Cellule vide effaçant CIN, badge, adresse… d'un salarié existant | **haute** | valeur vide ignorée en mise à jour (option explicite « vider ») |
+| M4 | Capacité de la licence contournée | **haute** | contrôle commun avec l'enregistrement (403) |
+| M5 | Période clôturée contournée ; historique de calendrier réécrit depuis l'origine | **haute** | contrôle de clôture ; nouveau calendrier daté du jour (ou du lendemain de la clôture) |
+| M6 | Refus de l'enregistrement annoncé comme un succès ; site « créé » refusé et salarié rattaché à un site inexistant ; calendrier rattaché au premier site ; journée remplacée par homonymie ; durée théorique négative | **haute** | résultat vérifié (lot « refusé ») ; site créé avec code et fuseau ; site du calendrier exigé ; rapprochement par code ; durée > 0 exigée |
+| M7 | Annulation écrasant les modifications faites depuis l'import, détruisant des badgeages rattachés, sans corbeille ni invalidation, sans verrou ; référentiels créés jamais retirés | **haute** | fiche modifiée depuis l'import conservée et signalée ; suppression par l'enregistrement normal (corbeille, clôture, données rattachées) ; référentiels créés retirés s'ils ne servent plus ; calculs invalidés ; une opération à la fois ; statut « annulé en partie » |
+| M8 | Droits sans matrice de l'écran (import et annulation en consultation) | **haute** | masqué : refus ; consultation : lecture et analyse ; importer = créer ; annuler = supprimer ; rapport = exporter |
+| M9 | Formules circulaires et codes réservés (« PRESENCE ») acceptés : un cycle arrêtait tous les compteurs | **haute** | cycles détectés (formules existantes comprises), codes réservés et auto-références refusés |
+| M10 | Requête sur une base SQLite déposée figeant tout le serveur | **haute** | requête exécutée dans un fil séparé, arrêtée après 2 min (5,3 s de requête : latence du serveur 5 ms) |
+| M11 | Encodages : arabe Windows et UTF-16 illisibles, « œ » perdu ; guillemet en milieu de cellule avalant des lignes ; en-têtes en double écrasés ; en-têtes arabes sans correspondance et signature de profil vide | moyenne | UTF-16 reconnu, arabe 1256 / occidental 1252 détectés ou choisis ; guillemet seulement en début de cellule (avertissement s'il n'est pas refermé) ; « Nom (2) » ; lettres de toutes les écritures et alias arabes ; pas de profil sans signature ; colonne inconnue refusée |
+| M12 | Base SQLite dans une archive faisant échouer tout l'envoi ; fichier partiel laissé après un envoi interrompu ; chemin du serveur renvoyé au navigateur ; zéros de tête sans borne ; lignes en attente sans limite | moyenne | base de l'archive reprise ; fichier partiel effacé ; nom seul renvoyé ; 0 à 20 zéros ; 3 millions de lignes en attente par compte |
+| M13 | Import interrompu jamais annulable ; double clic sur Importer ; message faux après annulation ; confirmation vide ; numéros de ligne faux ; progression perdue ; aucun rapport téléchargeable ; badgeages clos comptés deux fois | moyenne | lots « interrompus » annulables ; bouton occupé ; « Import annulé » avec rétablis / conservés ; confirmation détaillée ; numéro de ligne d'origine ; reprise à l'étape en cours ; rapport CSV par lot ; comptage unique |
+| M14 | Champs affichés par leur code (`mat`, `dept`), listes sans nom accessible, boutons de fichiers inaccessibles au clavier, heures UTC, nom interne de la base, démo sans message | basse | libellés trilingues, `aria-label`, vrais boutons, heure locale, nom d'origine, message en démonstration |
+
+Non traité : décompression des archives sur le fil principal (bornée à 2 000 fichiers et 600 Mo) ; liste d'hôtes autorisés pour les connecteurs PostgreSQL / MySQL / SQL Server ; messages du serveur rédigés en français ; exécution sous PostgreSQL non testée.
+
+Vérifié :
+- **Copie neuve du serveur, module activé.**
+  - Salariés : CIN déjà attribué, badge en double, 31/02, sortie avant entrée, adresse invalide, matricule HTML refusés à l'analyse avec le bon numéro de ligne ; cellules vides sans effacement.
+  - Badgeages : 30/02, 25:70, futur, hors présence refusés ; événements tracés.
+  - Annulation : salarié avec badgeages conservé ; fiche modifiée depuis l'import conservée ; badgeages en corbeille ; site créé retiré.
+  - Formules circulaires et code réservé refusés ; capacité 16 → 403 ; import en consultation → 403.
+  - Requête de 5,3 s sur base SQLite sans blocage ; fichier hors du dossier de dépôt refusé.
+  - Arabe 1256, UTF-16, « Cœur » ; guillemet, en-têtes doublés ; date Excel 01/03/2024 correcte ; rapport CSV.
+- **Chromium.**
+  - Boutons de fichiers au clavier, encodage, libellés traduits ; reprise à l'étape 3 après changement d'écran.
+  - Import puis rapport ; confirmation détaillée ; « Import annulé » ; historique en heure locale.
+  - Arabe ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-33.zip (cumulatif : correctifs 2 à 32 inclus).

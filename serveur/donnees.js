@@ -1493,4 +1493,4 @@ function controleReglesV(avant, apres, ref){
   return "";
 }
 function pick(o, ks){ const r = {}; ks.forEach(k=>{ if (k in o) r[k] = o[k]; }); return r; }
-module.exports = {creer, dateDe, COLLS, CLE_APP};
+module.exports = {creer, dateDe, COLLS, CLE_APP, controleEmpClos, jourReel};

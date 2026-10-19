@@ -2,7 +2,7 @@
   "id": "FW-Migration",
   "nom": "Assistant de migration",
   "categorie": "socle",
-  "version": "1.1.11",
+  "version": "1.1.12",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -36,14 +36,14 @@
     "unmount": "unmount(ctx)"
   },
   "budget": {
-    "js_ko": 46,
+    "js_ko": 54,
     "css_ko": 4
   },
   "annexes": {
     "FW-Migration.formules.js": "formules.js"
   },
   "integrite": {
-    "js": "sha384-tVZ9+0uYEEQe/8lpOquJOEB8XZLCen5/6WG78uBSZMxCmIHwHTdN9ymstbKbpuDp",
+    "js": "sha384-ppeidmaa9Lx+Yr+rE603ZrQmdkZkEyBA01BzTV0mq/xCEKAw/oYt1/INxp3Ugz4n",
     "css": "sha384-c816Ii4IPSrZYCHc3lmVLFC+Yup7dkCwicpAqhVnbxuJff0ozH3voOEzLZZthPb/"
   }
 }
