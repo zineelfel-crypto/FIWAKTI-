@@ -1802,3 +1802,37 @@ Vérifié :
   - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-26.zip (cumulatif : correctifs 2 à 25 inclus).
+
+## Correctif 27 — Administration › Recette des calculs (analyse approfondie)
+
+Deux analyses (serveur, justesse du contrôle et pollution de la production ; écran et usages) sur le serveur réel en production et en installation de recette, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| RC1 | « Créer le jeu d'essai » supprimait tout élément marqué « recette » ; or le serveur acceptait ce marquage sur un élément existant (même par un compte RH, même en production) : un vrai salarié a été supprimé | **critique** | un élément existant ne devient jamais « de recette » ; jeu d'essai créé par un administrateur, identifiants « rec_ » ; l'écran ne supprime que ses propres éléments |
+| RC2 | Grand effectif : jeu d'essai invisible après rechargement puis recréé (300 badgeages) ; badgeages d'essai écrits sur un vrai salarié au matricule 99001 | **critique** | matricule libre attribué par le serveur, jeu existant détecté et chargé, badgeages d'essai acceptés sur le seul salarié d'essai |
+| RC3 | Suppression incomplète annoncée réussie (site d'essai, 65 anomalies, états de journée, notification, 151 entrées de corbeille) ; impossible en production | **haute** | suppression complète par le serveur (`/api/v1/recette/supprimer`), sans corbeille, tracée, permise aussi en production |
+| RC4 | Contrôle non indépendant : valeurs attendues recopiant la convention et les formules du moteur (convention modifiée toujours « conforme ») ; calcul comparé = moteur du navigateur | **haute** | valeurs de référence fixes (40 h, 8 h par jour, 8 h à 25 % puis 50 %) ; en mode serveur, comparaison aux états calculés par le serveur ; convention d'essai modifiée signalée |
+| RC5 | Jour férié dans une période : faux écart (recette d'été toujours en échec) ; somme des semaines comptant une semaine incomplète comme 0 | moyenne | semaine fériée signalée « non contrôlée » ; somme vide et « jour(s) incomplet(s) » affichés |
+| RC6 | Période clôturée : 102 badgeages sur 150 refusés, « 150 injectés » annoncé et faux écart | moyenne | création refusée si la période d'essai chevauche une clôture ; nombre réellement enregistré affiché |
+| RC7 | Pollution pendant l'essai : règle « Nouvel employé », salarié actif au-delà des périodes | moyenne | salarié d'essai exclu des règles métier, sorti à la fin de la 3e période |
+| RC8 | Écran proposé en production avec refus au clic ; « Paie » en anglais et en arabe ; en-têtes HS non traduits ; plage de dates inversée en arabe ; saisie 0 corrigée sans message | basse / moyenne | note « recette non disponible » ; termes « éléments variables » ; en-têtes traduits ; plage isolée en lecture gauche-droite ; saisie bornée avec message ; bilan annoncé aux lecteurs d'écran |
+
+Non traité : scénarios supplémentaires (convention 48 h, nuit, jour férié travaillé) et paramètre « semaine coupée » sans effet sur le calcul (à décider avec le métier) ; conformité de la base de 40 h pour une convention 48 h sur 5 jours à confirmer.
+
+Vérifié :
+- **Copie neuve du serveur (installation de recette).**
+  - Création, contrôle et suppression : 150 badgeages, puis 0 trace (salarié, badgeages, anomalies, états de journée, paramétrage, corbeille).
+  - Aucune règle métier déclenchée.
+  - Marquage d'un salarié existant refusé (RH et administrateur), badgeage d'essai sur un vrai salarié refusé, site existant marqué refusé.
+  - Route de suppression refusée à un non-administrateur.
+- **Comparaison au serveur.** Les trois périodes sont conformes, rapprochement mensuel compris.
+- **Production.**
+  - Un jeu existant reste affiché et supprimable.
+  - Sans jeu, une note explique l'indisponibilité.
+- **20 000 salariés.** Même parcours conforme.
+- **Démonstration et non-régression.**
+  - Recette locale conforme.
+  - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-27.zip (cumulatif : correctifs 2 à 26 inclus).

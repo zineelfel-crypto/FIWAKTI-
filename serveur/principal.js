@@ -3008,7 +3008,8 @@ async function traiter(req, res){
   if (p === "/api/v1/recette/matricule" && req.method === "GET"){
     const mats = new Set((await D.employes()).map(e=>String(e.mat))); let m = 99001; while (mats.has(String(m)) && m < 9999999) m++;
     const clot = ((await D.referentielLecture()) || {}).clotures || [];
-    return json(res, 200, {mat:String(m), recette:!!CONFIG.recette, cloture:clot.reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "")});
+    const ex = (await D.employes()).find(e=>e && (e.id === "rec_emp" || e.recette === true)), nbP = ex ? Number(((await B.get("SELECT COUNT(*) n FROM enreg WHERE coll='ptg' AND mat=?", String(ex.mat))) || {}).n || 0) : 0;
+    return json(res, 200, {mat:String(m), recette:!!CONFIG.recette, cloture:clot.reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, ""), existe:!!ex, matExistant:ex ? String(ex.mat) : null, badgeages:nbP});
   }
   if (p === "/api/v1/recette/supprimer" && req.method === "POST"){
     const ref = await D.referentiel() || {}, marque = z => !!z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || "")));
