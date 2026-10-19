@@ -1875,3 +1875,38 @@ Vérifié :
   - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-28.zip (cumulatif : correctifs 2 à 27 inclus).
+
+## Correctif 29 — Administration › Licences et modules (analyse approfondie)
+
+Deux analyses (serveur, signature et droits ; écran et usages) sur le serveur réel et Chromium.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| L1 | Capacité de la licence (nombre de salariés) contrôlée nulle part : création et réactivation de salariés illimitées | **haute** | contrôle dans l'enregistrement des données (403 au-delà, tracé `licence.capacite`) ; capacité utilisée / autorisée affichée |
+| L2 | Restauration d'une sauvegarde ancienne : licence, licence programmée, modules, horloge et révocations ramenés à l'état de la sauvegarde (licence expirée ou révoquée revenue) | **haute** | ces éléments survivent à la restauration (écran et installation), révocations réunies |
+| L3 | Jeton d'intervention du fournisseur réutilisable pendant une heure, émis « dans le futur » accepté, sans identifiant accepté | **haute** | usage unique (conservé même après restauration), dates contrôlées par rapport à l'heure du serveur, identifiant exigé |
+| L4 | Licence valable remplaçable par une licence déjà échue (installation passée en consultation seule ou bloquée par erreur) | **haute** | refus explicite ; l'aperçu l'annonce en rouge avant l'import |
+| L5 | Dates impossibles (31/02), début après la fin, capacité nulle ou négative : erreur 500 ou licence acceptée | moyenne | refus clair (400) à la lecture de la licence |
+| L6 | Restriction de licence : les tâches doublons d'absences, relances de circuits et règles métier continuaient ; travaux et clôtures accessibles sans FW-Time | moyenne | tâches suspendues en restriction ou sans FW-Time ; `/travaux` et `/clotures` rattachés à FW-Time |
+| L7 | Paquet de module : noms `.` / `..` et retour à une version plus ancienne acceptés | moyenne | refusés, chemins vérifiés |
+| L8 | Paramétrage des modules désactivés toujours renvoyé au navigateur | moyenne | rubriques vidées en lecture tant que le module est inactif |
+| L9 | `/api/v1/modules` : licence, état et versions précédentes envoyés à tout compte connecté | moyenne | réservés à l'administrateur (et au fournisseur pour la licence) ; empreinte et capacité ajoutées |
+| L10 | Écran : erreur d'import invisible (bloc replié), modules de la licence mal libellés (lettres P/A), état affiché non réel, activation possible malgré une dépendance inactive, désactivation d'un module requis, paquet de module mal reconnu, rappel affiché à des comptes sans droit, fenêtre de confirmation sans Échap ni maintien du focus | basse | bloc ouvert et `role="alert"` ; modules détaillés ; état réel ; boutons grisés avec explication ; détection par le format ; rappel selon les droits ; Échap, Tab et retour du focus |
+
+Non traité : messages d'erreur de licence rédigés en français par le serveur (affichés tels quels en anglais et en arabe) ; activation d'un module possible pour un compte en consultation seule (décision à prendre).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Date absurde, capacité 0, début après la fin, licence échue : refus 400 avec motif.
+  - Capacité 3 pour 14 salariés : ajout refusé (403), modification d'un salarié existant acceptée ; capacité affichée par `/modules`.
+  - Jeton : premier usage accepté, rejeu refusé (y compris après restauration), jeton futur et jeton sans identifiant refusés.
+  - Sauvegarde, nouvelle licence, restauration : la nouvelle licence reste en place.
+  - Fournisseur : empreinte visible, versions précédentes masquées.
+- **Chromium.**
+  - Capacité, empreinte, erreur d'import visible ; boutons de modules libellés.
+  - Anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration et non-régression.**
+  - Démonstration reconstruite.
+  - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-29.zip (cumulatif : correctifs 2 à 28 inclus).

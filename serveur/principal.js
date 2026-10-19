@@ -2645,7 +2645,9 @@ async function traiter(req, res){
   if (p === "/api/v1/modules" && req.method === "GET"){ const lic = await licenceActive();
     await licenceEtat(); const dPrec = path.join(RACINE, "versions", VERSION, "modules-precedents");
     const precedents = fs.existsSync(dPrec) ? fs.readdirSync(dPrec).filter(d=>fs.existsSync(path.join(dPrec, d, "precedent.json"))) : [];
-    return json(res, 200, {modules:MOD.liste(), lettres:MOD.lettres(), precedents, etatLicence:licencePublique(LIC_CACHE.v), licence:lic ? {client:lic.client, expire:LICENCE.normaliser(lic).fin, fw:Array.isArray(lic.fw) ? lic.fw : null, modules:lic.modules||null} : null}); }
+    /* correctif 29 : capacité utilisée / autorisée (administrateur) ; client et licence réservés à l'administrateur */
+    let capacite = null; if (admin && lic){ const cp = LICENCE.normaliser(lic).capacite, j0 = aujourdhui(); capacite = {max:cp, utilise:(await D.employes()).filter(e=>e && !(e.sortie && e.sortie < j0) && e.recette !== true && !/^rec_/.test(String(e.id))).length}; }
+    return json(res, 200, {modules:MOD.liste(), lettres:MOD.lettres(), precedents:admin ? precedents : [], etatLicence:admin || C.role === "fournisseur" ? licencePublique(LIC_CACHE.v) : null, capacite, empreinte:admin || C.role === "fournisseur" ? empreinteMachine() : undefined, licence:lic && (admin || C.role === "fournisseur") ? {client:lic.client, expire:LICENCE.normaliser(lic).fin, fw:Array.isArray(lic.fw) ? lic.fw : null, modules:lic.modules||null} : null}); }
   if ((p === "/api/v1/modules/activer" || p === "/api/v1/modules/desactiver") && req.method === "POST"){
     if (!admin) return erreur(res, 403, "Réservé aux administrateurs.");
     const b = await corpsJson(req);

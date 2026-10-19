@@ -54,7 +54,8 @@ function rappelDu(e, frequence){
 /* comparaison avant / après pour l'audit et l'écran des changements */
 function differences(avant, apres){
   const A = avant ? normaliser(avant) : null, N = normaliser(apres);
-  const mods = c => !c ? [] : (Array.isArray(c.fw) ? c.fw.slice() : String(c.modules||"").split("").map(x=>x === "P" ? "FW-Time" : x === "A" ? "FW-Acces" : x));
+  /* correctif 29 : les lettres historiques ouvrent aussi les indicateurs (FW-BI) — « FW-BI ajouté » était annoncé à tort */
+  const mods = c => !c ? [] : (Array.isArray(c.fw) ? c.fw.slice() : Array.from(new Set([].concat(...String(c.modules||"").split("").map(x=>x === "P" ? ["FW-Time", "FW-BI"] : x === "A" ? ["FW-Acces", "FW-BI"] : [x])))));
   const ma = mods(avant), mn = mods(apres);
   return {client:N.client, licence:N.id, serie:N.serie, ancienneFin:A ? A.fin : null, nouvelleFin:N.fin, debut:N.debut,
     ajoutes:mn.filter(x=>ma.indexOf(x) < 0), retires:ma.filter(x=>mn.indexOf(x) < 0), politique:N.politique, grace:N.grace, apres:N.apres};
