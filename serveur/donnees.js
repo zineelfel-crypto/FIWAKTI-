@@ -36,7 +36,18 @@ function circuitPourSrv(ref, emp, tt){
   const arbre = id => { const a = new Set([id]); let aj = true; while (aj){ aj = false; (ref.depts || []).forEach(d=>{ if (d && a.has(d.parent) && !a.has(d.id)){ a.add(d.id); aj = true; } }); } return a; };
   return (ref.circuits || []).find(c=>c && !((c.types || []).length && c.types.indexOf(tt) < 0) && !((c.sites || []).length && c.sites.indexOf(emp.siteId) < 0) && !((c.depts || []).length && !c.depts.some(id=>arbre(id).has(emp.deptId)))) || null;
 }
-function valideurNiveau(ref, emps, niv, emp){
+/* correctif 26 : durée d'une demande calculée par le serveur pour le seuil « min » d'un niveau (jours ouvrés du lundi au
+   vendredi, demi-journée, ou heures / 8 pour un type saisi en heures) — le seuil rendait le niveau toujours facultatif */
+function dureeDmdSrv(ref, x){
+  const tt = (ref.tt || []).find(t=>t && t.id === x.tt) || {};
+  if (tt.saisie === "heure"){ const m = s=>{ const r = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return r ? +r[1]*60 + +r[2] : null; }, a = m(x.hDeb || "08:00"), b = m(x.hFin || "17:00"); return a != null && b != null && b > a ? (b - a) / 60 / 8 : 0; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(x.du || "")) return 0;
+  const fin = /^\d{4}-\d{2}-\d{2}$/.test(x.au || "") ? x.au : x.du; let n = 0, k = x.du, g = 0;
+  while (k <= fin && g++ < 800){ const w = new Date(k+"T00:00:00Z").getUTCDay(); if (w !== 0 && w !== 6) n++; k = plus1(k); }
+  return x.demi ? Math.max(0.5, n - 0.5) : n;
+}
+const DMD_CONTENU = ["mat", "tt", "du", "au", "demi", "hDeb", "hFin"], HIST_ACTIONS = ["cree", "valide", "accepte", "refuse", "annule", "saute", "niveau", "rectif", "rectif_demandee", "rectifie", "modifie", "commentaire", "relance"];
+function valideurNiveau(ref, emps, niv, emp, titulaire){
   if (!niv || !emp) return null;
   const parMat = m => emps.find(e=>String(e.mat) === String(m)), present = e => !!e && !(e.sortie && e.sortie < jourLocal());
   const q = niv.qui || "hier";
@@ -44,7 +55,10 @@ function valideurNiveau(ref, emps, niv, emp){
   if (q === "hier2"){ const c = emp.chefMat ? parMat(emp.chefMat) : null, c2 = c && c.chefMat ? parMat(c.chefMat) : null; return present(c2) ? {mat:String(c2.mat)} : null; }
   if (q === "resp" || q === "respParent"){ let d = (ref.depts || []).find(x=>x.id === emp.deptId), n = 0; if (q === "respParent" && d) d = (ref.depts || []).find(x=>x.id === d.parent);
     while (d && n++ < 12){ if (d.resp){ const e = parMat(d.resp); if (present(e)) return {mat:String(e.mat)}; } d = (ref.depts || []).find(x=>x.id === d.parent); } return null; }
-  if (q.indexOf("profil:") === 0) return (ref.profils || []).some(p=>p.id === q.slice(7)) ? {profilId:q.slice(7)} : null;
+  /* correctif 26 : profil valideur — droit Absences ≥ validation et au moins un compte actif de ce profil couvrant le
+     salarié (comme l'écran, qui saute alors le niveau) ; auparavant un profil en lecture bloquait toute la demande */
+  if (q.indexOf("profil:") === 0){ const pr = (ref.profils || []).find(p=>p && p.id === q.slice(7)); if (!pr || (RANG[(pr.droits || {}).ABS] || 0) < 3) return null;
+    if (titulaire && !titulaire(pr.id, emp)) return null; return {profilId:pr.id}; }
   if (q.indexOf("user:") === 0){ const u = (ref.users || []).find(x=>x.id === q.slice(5) && x.actif !== false); return u ? {userId:u.id} : null; }
   return null;
 }
@@ -61,10 +75,17 @@ function decisionDmd(avant, x, P, login, admin, ctx){
   if (ETATS_DMD.indexOf(en) < 0) return {refus:"état inconnu"};
   const decision = en === "acceptee" || en === "refusee";
   if (!admin && ctx){
-    const {ref, emps} = ctx, emp = emps.find(e=>String(e.mat) === String(x.mat)), u = P.u || {};
+    const {ref, emps, titulaire} = ctx, emp = emps.find(e=>String(e.mat) === String(x.mat)), u = P.u || {};
     const soi = !!(emp && u.empId && emp.id === u.empId), rangAbs = RANG[((P.profil || {}).droits || {}).ABS] || 0;
-    /* niveau qui ne peut pas être sauté : un valideur existe, autre que le demandeur, sans seuil de durée */
-    const bloquant = n => { if (Number(n && n.min) > 0) return false; const v = valideurNiveau(ref, emps, n, emp); return !!v && !(v.mat && emp && v.mat === String(emp.mat)); };
+    /* niveau qui ne peut pas être sauté : un valideur existe, autre que le demandeur, et la durée atteint le seuil ; sans
+       valideur, le niveau ne se saute pas si le circuit est réglé sur « bloquer » */
+    const bloquant = (n, circ) => { if (Number(n && n.min) > 0 && dureeDmdSrv(ref, x) < Number(n.min)) return false; const v = valideurNiveau(ref, emps, n, emp, titulaire);
+      if (!v) return !!circ && circ.siAbsent === "bloquer"; return !(v.mat && emp && v.mat === String(emp.mat)); };
+    const contenuChange = avant && DMD_CONTENU.some(k=>JSON.stringify(avant[k] === undefined ? null : avant[k]) !== JSON.stringify(x[k] === undefined ? null : x[k]));
+    /* correctif 26 : une demande décidée ne se modifie plus (un congé accepté était prolongé ou changé de type par le
+       demandeur, la décision restant affichée) : une correction passe par une demande de rectification */
+    if (avant && ea === en && (en === "acceptee" || en === "refusee") && (contenuChange || String(x.circuitId || "") !== String(avant.circuitId || "") || Number(x.niveau || 0) !== Number(avant.niveau || 0)))
+      return {refus:"une demande décidée ne se modifie pas : demandez une rectification"};
     if (!avant){
       /* création : circuit et niveau fixés par le serveur ; demande déjà décidée seulement par la RH, pour un tiers */
       if (decision && (soi || rangAbs < 3)) return {refus:"une demande ne peut être créée déjà décidée que par la validation RH, pour un autre salarié"};
@@ -73,26 +94,45 @@ function decisionDmd(avant, x, P, login, admin, ctx){
         if (String(x.circuitId || "") !== String(id || "")) x = Object.assign({}, x, {circuitId:id});
         /* niveaux sautés seulement s'ils n'ont aucun valideur (ou un seuil de durée) */
         const niv = Math.max(0, Math.min(Number(x.niveau) || 0, c ? (c.niveaux || []).length : 0));
-        for (let i = 0; i < niv; i++){ const n = c.niveaux[i]; if (bloquant(n)) return {refus:"niveau de validation sauté"}; }
-        x = Object.assign({}, x, {niveau:niv});
+        for (let i = 0; i < niv; i++){ const n = c.niveaux[i]; if (bloquant(n, c)) return {refus:"niveau de validation sauté"}; }
+        /* correctif 26 : niveaux figés à la création (modifier le circuit ne change plus les demandes en cours) */
+        delete x.relanceNiv; x = Object.assign({}, x, {niveau:niv, circuitNiv:c ? JSON.parse(JSON.stringify(c.niveaux || [])) : [], circuitSiAbsent:c ? (c.siAbsent || "suivant") : "suivant", niveauLe:jourLocal()});
       }
     } else if (ea === "attente"){
-      if (String(x.circuitId || "") !== String(avant.circuitId || "")) return {refus:"le circuit d'une demande ne se change pas"};
-      const c = (ref.circuits || []).find(z=>z && z.id === avant.circuitId), nAv = Number(avant.niveau) || 0, nAp = Number(x.niveau) || 0;
-      const avance = (decision || (en === "attente" && nAp !== nAv));
+      const nAv = Number(avant.niveau) || 0, nAp = Number(x.niveau) || 0, avance = (decision || (en === "attente" && nAp !== nAv));
+      /* correctif 26 : en attente, le contenu ne change que par le demandeur, avant toute validation (une visite médicale
+         devenait un congé de 30 jours validé par le seul responsable) ; le circuit suit alors le nouveau type */
+      if (contenuChange){
+        if (!soi || nAv > 0 || avance || String(x.mat) !== String(avant.mat)) return {refus:"le contenu d'une demande ne change que par son demandeur, avant toute validation"};
+        const c2 = circuitPourSrv(ref, emp, x.tt);
+        x = Object.assign({}, x, {circuitId:c2 ? c2.id : null, niveau:0, circuitNiv:c2 ? JSON.parse(JSON.stringify(c2.niveaux || [])) : [], circuitSiAbsent:c2 ? (c2.siAbsent || "suivant") : "suivant", niveauLe:jourLocal()});
+      } else {
+        if (String(x.circuitId || "") !== String(avant.circuitId || "")) return {refus:"le circuit d'une demande ne se change pas"};
+        x = Object.assign({}, x, {circuitNiv:avant.circuitNiv, circuitSiAbsent:avant.circuitSiAbsent, niveauLe:nAp !== nAv ? jourLocal() : avant.niveauLe, relanceNiv:avant.relanceNiv});
+      }
+      const c0 = (ref.circuits || []).find(z=>z && z.id === avant.circuitId);
+      const c = Array.isArray(avant.circuitNiv) ? {niveaux:avant.circuitNiv, siAbsent:avant.circuitSiAbsent || "suivant"} : c0;
       if (en === "attente" && nAp < nAv) return {refus:"niveau de validation incohérent"};
       if (avance){
         if (soi) return {refus:"le demandeur ne peut pas valider sa propre demande"};
-        const v = c ? valideurNiveau(ref, emps, (c.niveaux || [])[nAv], emp) : null;
+        const v = c ? valideurNiveau(ref, emps, (c.niveaux || [])[nAv], emp, titulaire) : null;
+        if (!v && c && c.siAbsent === "bloquer" && (c.niveaux || [])[nAv]) return {refus:"aucun valideur pour ce niveau et le circuit est réglé sur « bloquer » : un administrateur doit décider"};
         const ok = v ? estValideur(ref, emps, P, v, emp) : (rangAbs >= 3 && (P.set === null || P.set.has(String(x.mat))));
         if (!ok) return {refus:"vous n'êtes pas le valideur de ce niveau du circuit"};
         /* niveaux franchis d'un coup : seulement ceux sans valideur (ou à seuil de durée), comme le fait l'écran */
         const L = c ? (c.niveaux || []) : [], jusqu = en === "acceptee" ? L.length : en === "attente" ? nAp : nAv + 1;
-        for (let i = nAv + 1; i < Math.min(jusqu, L.length); i++){ const n = L[i]; if (bloquant(n)) return {refus:"des niveaux de validation restent à franchir"}; }
+        for (let i = nAv + 1; i < Math.min(jusqu, L.length); i++){ const n = L[i]; if (bloquant(n, c)) return {refus:"des niveaux de validation restent à franchir"}; }
       }
       if (en === "annulee" && !soi && rangAbs < 3) return {refus:"seul le demandeur ou la RH annule une demande"};
     }
   }
+  /* correctif 26 : historique de la demande en ajout seul — entrées passées conservées, date, heure et auteur imposés par
+     le serveur (une fausse ligne « validé — Directeur général » était acceptée) */
+  if (!admin){ const h0 = avant && Array.isArray(avant.hist) ? avant.hist : [], recu = Array.isArray(x.hist) ? x.hist : [], nouv = recu.slice(h0.length, h0.length + 20), n0 = new Date(), z = v => String(v).padStart(2, "0");
+    const nom = String((P.u || {}).nom || login || "").slice(0, 80);
+    /* actions permises selon ce qui se passe réellement (création, passage de niveau, décision, annulation) */
+    const chN = avant && Number(avant.niveau || 0) !== Number(x.niveau || 0), ok = !avant ? ["cree", "saute", "commentaire"] : ea !== en ? (en === "annulee" ? ["annule", "rectifie", "commentaire"] : en === "acceptee" ? ["valide", "accepte", "saute", "niveau", "commentaire"] : en === "refusee" ? ["refuse", "commentaire"] : ["commentaire"]) : chN ? ["valide", "saute", "niveau", "commentaire"] : ["commentaire", "rectif", "rectif_demandee", "modifie"];
+    x = Object.assign({}, x, {hist:h0.concat(nouv.filter(h=>h && HIST_ACTIONS.indexOf(h.action) >= 0 && ok.indexOf(h.action) >= 0).map(h=>({d:jourLocal(), h:z(n0.getHours())+":"+z(n0.getMinutes()), action:h.action, qui:h.action === "saute" ? "FIWAKTI" : nom, niveau:Number(h.niveau) || 0, c:String(h.c == null ? "" : h.c).slice(0, 300)})))}); }
   if (ea && ea !== en){
     /* transitions permises : en attente → acceptée / refusée / annulée ; acceptée → annulée (rectification) */
     const ok = (ea === "attente" && en !== "attente") || (ea === "acceptee" && en === "annulee");
@@ -330,6 +370,13 @@ function creer(B, PERIM){
     if (["import","home"].indexOf(String(x.type)) < 0) return {refus:"type d'événement inconnu"};
     return {x:{id:x.id, type:String(x.type), msg:coupe(x.msg, 300), mat:x.mat ? String(x.mat) : undefined}};
   }
+  /* correctif 26 : un profil valideur n'a de titulaire pour un salarié que si un compte actif de ce profil le couvre */
+  function titulaireDe(ref, emps){ const cache = new Map(), doc = Object.assign({}, ref, {emps});
+    return (pid, emp) => { if (!emp) return false;
+      for (const u of (ref.users || [])){ if (!u || u.actif === false || u.profilId !== pid) continue; let s = cache.get(u.login);
+        if (s === undefined){ try { s = PERIM.perimetre(doc, u.login).set; } catch(e){ s = new Set(); } cache.set(u.login, s); }
+        if (s === null || s.has(String(emp.mat))) return true; }
+      return false; }; }
   async function synchroniser(login, paquet, opts){
     /* 56.33.11 : envoi sans paramétrage (salariés, badgeages…) → paramétrage partagé en lecture (copie de surface ; le
        document n'est pas réécrit) au lieu d'une relecture complète (~8 Mo avec 50 000 comptes) */
@@ -356,7 +403,8 @@ function creer(B, PERIM){
     /* correctif 19 : un envoi de l'écran Import (marqueur paquet.import) respecte AUSSI la matrice de l'écran Import */
     const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false;
       return acteEcran(v, acte) || (!!paquet.import && (c === "emps" || c === "ptg") && acteEcran("import", acte)); };
-    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [];
+    const ignores = [], touches = new Set(), refCles = [], conflits = [], nouvellesVersions = {ref:{}, colls:{}}, refusEmps = [], nouvellesNotifs = [], decisionsDmd = [];
+    let TITULAIRE = null;
     let nbEcrits = 0; const parColl = {}, refusPar = {};
     await B.transaction(async ()=>{
       const r = paquet.ref || {};
@@ -494,6 +542,9 @@ function creer(B, PERIM){
         /* correctif 18 : copie d'annulation d'import (toutes les fiches chargées) jamais stockée dans le paramétrage
            partagé (elle était renvoyée à tous les comptes) */
         if (k === "impLast") continue;
+        /* correctif 26 : les circuits valent pour toute l'entreprise — un compte limité à un site les réécrivait tous (et se
+           désignait seul valideur) */
+        if (k === "circuits" && !admin && P.set !== null){ ignores.push("circuits (réservé à un compte couvrant tout le personnel)"); continue; }
         if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
         if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles, await sitesRetenus()); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
         if (k === "sites"){ const motif = await motifSites(); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
@@ -574,7 +625,7 @@ function creer(B, PERIM){
           if (c === "ptg" && x.src === "badge" && (!avant || avant.src !== "badge") && !(opts || {}).recette){ refus++; ignores.push("ptg (origine « badge » réservée aux pointeuses)"); continue; }
           /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
           if (c === "abs" && !admin && !avant){ let okA = false;
-            if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat); }
+            if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat) && String(dd.tt) === String(x.tt) && (!x.d || (x.d >= dd.du && x.d <= (dd.au || dd.du)));   /* correctif 26 : dates et type de la demande */ }
             if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
             if (!okA){ refus++; ignores.push("abs (absence sans demande acceptée)"); continue; } }
           /* correctif 18 : fiche salarié — dates, adresse électronique et rattachements contrôlés */
@@ -596,7 +647,9 @@ function creer(B, PERIM){
           /* correctif 15 : décisions sur les demandes — transitions d'état contrôlées, date et auteur de la décision imposés
              par le serveur (auparavant ceux du navigateur : « acceptée le 01/01/2019 par Directeur général » acceptés) */
           if (c === "dmd" && !admin && avant && avant.etat !== x.etat && /^(acceptee|refusee)$/.test(String(x.etat || "")) && acteRefuse(c, "valider")){ refus++; ignores.push("dmd (validation non permise par la matrice de l'écran)"); continue; }
-          if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin, {ref, emps:await employes()}); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
+          if (c === "dmd"){ const emD = await employes(); if (!TITULAIRE) TITULAIRE = titulaireDe(ref, emD); const d = decisionDmd(avant, x, P, login, admin, {ref, emps:emD, titulaire:TITULAIRE}); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x;
+            /* correctif 26 : décisions et passages de niveau tracés par le serveur */
+            if (!avant || (avant.etat || "attente") !== (x.etat || "attente") || Number(avant.niveau || 0) !== Number(x.niveau || 0)) decisionsDmd.push({id:String(x.id), mat:String(x.mat || ""), tt:x.tt, du:x.du, au:x.au, de:avant ? (avant.etat || "attente") : "", vers:x.etat || "attente", nivAv:avant ? Number(avant.niveau || 0) : null, nivAp:Number(x.niveau || 0)}); }
           /* correctif 16 : journal des événements — contenu reconstruit par le serveur (règle existante et active, codes
              d'action connus, salarié du périmètre, nom et libellés repris du paramétrage) ; une même règle n'est
              journalisée qu'une fois par salarié, déclencheur et jour ; imports et accueil réservés au droit Système */
@@ -626,6 +679,10 @@ function creer(B, PERIM){
           const av = await B.get("SELECT data FROM enreg WHERE coll=? AND id=?", c, String(id)); if (!av) continue;
           const avant = JSON.parse(av.data);
           if (!admin && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
+          /* correctif 26 : une demande décidée ne se supprime pas (le demandeur effaçait son congé accepté) ; en attente, seul
+             son demandeur la supprime — les autres l'annulent ou la refusent */
+          if (c === "dmd" && !admin){ const ue = (P.u || {}).empId ? (await employes()).find(e=>e.id === P.u.empId) : null;
+            if ((avant.etat || "attente") !== "attente" || !ue || String(ue.mat) !== String(avant.mat)){ refus++; ignores.push("dmd (une demande décidée ne se supprime pas ; en attente, seul son demandeur la retire)"); continue; } }
           if (fermee(avant)){ refus++; clotRefus = true; continue; }
           /* correctif 20 : un salarié présent dans une période clôturée ne se supprime plus (ses journées closes
              disparaissaient des états) : saisir une date de sortie */
@@ -652,7 +709,7 @@ function creer(B, PERIM){
       rf.__versions = rf.__versions || {}; rf.__versions.corbeille = Number(rf.__versions.corbeille || 0) + 1; nouvellesVersions.ref.corbeille = rf.__versions.corbeille;
       await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(rf), new Date().toISOString(), CLE_APP);
     } catch(e){}
-    return {ok:true, ignores, ecrits:nbEcrits, parColl, refusPar, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs};
+    return {ok:true, ignores, ecrits:nbEcrits, parColl, refusPar, ref, touches:Array.from(touches), refCles, conflits, versions:nouvellesVersions, refusEmps, nouvellesNotifs, decisionsDmd};
   }
   /* 56.33.11 : index d'unicité des salariés (matricule, badge, CIN), recalculé seulement quand la liste change */
   const UNI_CHAMPS = ["mat", "badge", "cin"], UNI_LIB = {mat:"matricule", badge:"badge", cin:"CIN"};
@@ -734,11 +791,23 @@ async function controleCircuitsBase(B, ref, apres, profils, users){
     if (avant.get(String(c.id)) === JSON.stringify(c)) continue;
     const l = "circuit « "+(c.nom || c.id)+" » : ";
     if (!String(c.nom || "").trim() || String(c.nom).length > 120) return l+"nom obligatoire (120 caractères au plus)";
+    /* correctif 26 : clés connues, réglage « valideur absent », nom unique, même type sur la même population refusé (le
+       premier circuit captait silencieusement les demandes) */
+    const kc = Object.keys(c).find(k=>["id", "nom", "types", "sites", "depts", "niveaux", "siAbsent"].indexOf(k) < 0); if (kc) return l+"champ inconnu « "+String(kc).slice(0, 30)+" »";
+    if (c.siAbsent !== undefined && ["suivant", "bloquer"].indexOf(c.siAbsent) < 0) return l+"réglage « valideur absent » invalide";
+    if (JSON.stringify(c).length > 8192) return l+"trop volumineux";
+    const nomM = String(c.nom).trim().toLowerCase(); if (apres.some(o=>o && o !== c && String(o.nom || "").trim().toLowerCase() === nomM)) return l+"nom déjà utilisé";
+    const cle = o => JSON.stringify([(o.sites || []).slice().sort(), (o.depts || []).slice().sort()]);
+    const autre = apres.find(o=>o && o !== c && cle(o) === cle(c) && ((o.types || []).length === 0 || (c.types || []).length === 0 || (c.types || []).some(t=>(o.types || []).indexOf(t) >= 0)));
+    if (autre) return l+"même type d'absence et même population que le circuit « "+String(autre.nom || autre.id).slice(0, 60)+" »";
     if (!Array.isArray(c.niveaux) || !c.niveaux.length || c.niveaux.length > 10) return l+"de 1 à 10 niveaux de validation";
     for (const n of c.niveaux){
       if (!n || typeof n !== "object") return l+"niveau invalide";
       const q = String(n.qui || "hier");
       if (QUI.indexOf(q) < 0 && !(q.indexOf("profil:") === 0 && (profils || []).some(p=>p && p.id === q.slice(7))) && !(q.indexOf("user:") === 0 && (users || []).some(u=>u && u.id === q.slice(5) && u.actif !== false))) return l+"valideur inconnu ("+q+")";
+      /* correctif 26 : un profil valideur doit pouvoir valider (droit Absences ≥ validation) */
+      if (q.indexOf("profil:") === 0){ const pr = (profils || []).find(p=>p && p.id === q.slice(7)); if (!pr || ({validation:1, config:1}[(pr.droits || {}).ABS] !== 1)) return l+"le profil « "+String((pr || {}).nom || q.slice(7)).slice(0, 60)+" » n'a pas le droit de valider les absences"; }
+      if (Object.keys(n).some(k=>["qui", "delai", "min"].indexOf(k) < 0)) return l+"niveau : champ inconnu";
       for (const k of ["delai", "min"]) if (n[k] !== undefined && n[k] !== null && n[k] !== "" && !(Number(n[k]) >= 0 && Number(n[k]) <= 365)) return l+k+" invalide";
     }
     if ((c.types || []).some(x=>!tts.has(x))) return l+"type d'absence inconnu";
@@ -746,7 +815,8 @@ async function controleCircuitsBase(B, ref, apres, profils, users){
     if ((c.depts || []).some(x=>!depts.has(x))) return l+"service inconnu";
   }
   for (const id of avant.keys()) if (!ids.has(id)){
-    const n = await B.get("SELECT COUNT(*) n FROM enreg WHERE coll='dmd' AND data LIKE ? AND (data LIKE ? OR data NOT LIKE ?)", '%"circuitId":"'+id.replace(/[%_"]/g, "")+'"%', '%"etat":"attente"%', '%"etat":%');
+    /* correctif 26 : motif LIKE échappé (le « _ » d'un identifiant était retiré : un circuit utilisé se supprimait) */
+    const n = await B.get("SELECT COUNT(*) n FROM enreg WHERE coll='dmd' AND data LIKE ? ESCAPE '\\' AND (data LIKE ? OR data NOT LIKE ?)", '%"circuitId":"'+JSON.stringify(id).slice(1, -1).replace(/[\\%_]/g, c=>"\\"+c)+'"%', '%"etat":"attente"%', '%"etat":%');
     if (Number(n && n.n) > 0) return "le circuit « "+id+" » est utilisé par "+n.n+" demande(s) en attente : traitez-les ou modifiez le circuit au lieu de le supprimer";
   }
   return "";

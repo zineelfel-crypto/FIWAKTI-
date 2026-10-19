@@ -1850,6 +1850,7 @@ async function traiter(req, res){
     const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
     const secuAvant = paquet.ref && paquet.ref.secu !== undefined ? secuDe(await D.referentielLecture()) : null;
     const deptsAvant = paquet.ref && Array.isArray(paquet.ref.depts) ? (((await D.referentielLecture()) || {}).depts || []) : null;
+    const circuitsAvant = paquet.ref && Array.isArray(paquet.ref.circuits) ? (((await D.referentielLecture()) || {}).circuits || []) : null;
     const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
     const empsAvantIds = paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length ? new Set((await D.employes()).map(e=>String(e.id))) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
@@ -1930,6 +1931,12 @@ async function traiter(req, res){
           if (ch.length) l.push("« "+String(x.login).slice(0, 40)+" » — "+ch.join(" ; ")); av.delete(x.id); });
         av.forEach(a=>l.push("supprimé « "+String(a.login).slice(0, 40)+" »"));
         if (l.length) await audit(C.login, "comptes.modifies", l.join(" | ").slice(0, 2000), ip); }
+      /* correctif 26 : circuits — détail tracé (types, sites, services, niveaux) ; décisions et passages de niveau des demandes */
+      if (circuitsAvant && (r.refCles || []).indexOf("circuits") >= 0){ const av = new Map(circuitsAvant.filter(x=>x && x.id).map(x=>[x.id, x])), l = [], d = x=>"types "+(x.types || []).join("+")+(x.sites && x.sites.length ? ", sites "+x.sites.join("+") : "")+(x.depts && x.depts.length ? ", services "+x.depts.join("+") : "")+", niveaux "+(x.niveaux || []).map(n=>(n.qui || "hier")+(n.min ? "≥"+n.min+"j" : "")+(n.delai ? "/"+n.delai+"j" : "")).join(" → ")+(x.siAbsent === "bloquer" ? ", bloquer si absent" : "");
+        (((r.ref || {}).circuits) || []).forEach(x=>{ if (!x || !x.id) return; const a = av.get(x.id); av.delete(x.id); if (!a) l.push("créé « "+String(x.nom || x.id).slice(0, 60)+" » ("+d(x)+")"); else if (JSON.stringify(a) !== JSON.stringify(x)) l.push("modifié « "+String(x.nom || x.id).slice(0, 60)+" » : "+d(a)+" ⇒ "+d(x)); });
+        av.forEach(a=>l.push("supprimé « "+String(a.nom || a.id).slice(0, 60)+" »"));
+        if (l.length) await audit(C.login, "circuits.modifies", l.join(" | ").slice(0, 2000), ip); }
+      for (const x of (r.decisionsDmd || []).slice(0, 500)) await audit(C.login, x.de ? "demande."+(x.vers !== x.de ? x.vers : "niveau") : "demande.creee", "demande "+x.id+" — "+x.mat+" ("+x.tt+", "+String(x.du || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1")+(x.au && x.au !== x.du ? " → "+String(x.au).replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1") : "")+")"+(x.de ? " : "+x.de+" niveau "+(x.nivAv + 1)+" → "+x.vers+" niveau "+(x.nivAp + 1) : " : niveau "+(x.nivAp + 1)), ip);
       /* correctif 25 : règles métier — détail tracé (activation, déclencheur, actions, sites) */
       if (reglesAvant && (r.refCles || []).indexOf("regles") >= 0){ const av = new Map(reglesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), l = [], d = x=>(x.actif ? "active" : "inactive")+", "+x.declencheur+" → "+(x.actions || []).join("+")+((x.siteIds || []).length ? ", sites "+x.siteIds.join("+") : "");
         (((r.ref || {}).regles) || []).forEach(x=>{ if (!x || !x.id) return; const a = av.get(x.id); av.delete(x.id); if (!a) l.push("créée « "+String(x.nom || x.id).slice(0, 60)+" » ("+d(x)+")"); else if (JSON.stringify(a) !== JSON.stringify(x)) l.push("modifiée « "+String(x.nom || x.id).slice(0, 60)+" » : "+d(a)+" ⇒ "+d(x)); });
@@ -3331,6 +3338,21 @@ async function demarrer(){
   /* correctif 16 : sorties échues — les règles « sortie d'un salarié » s'exécutent dans le navigateur d'un compte RH (et
      jamais en grand effectif, où le navigateur ne reçoit pas les fiches). Le serveur signale dans le journal chaque sortie
      passée depuis plus d'un jour sans traitement, une seule fois par salarié et date de sortie. */
+  /* correctif 26 : délai d'un niveau de circuit — une demande restée en attente au-delà du délai est relancée (notification
+     et trace dans l'historique et l'audit), une fois par niveau ; auparavant le délai saisi à l'écran n'avait aucun effet */
+  PLAN.planifier("circuits-relances", {intervalle:3600000, premier:240000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+    const ref = await D.referentielLecture() || {}, j = aujourdhui(), z = v => String(v).padStart(2, "0"), n0 = new Date(); let n = 0;
+    for (const row of await B.all("SELECT id, data FROM enreg WHERE coll='dmd' AND (data LIKE ? OR data NOT LIKE ?)", '%"etat":"attente"%', '%"etat":%')){
+      let x; try { x = JSON.parse(row.data); } catch(e){ continue; } if ((x.etat || "attente") !== "attente") continue;
+      const L = Array.isArray(x.circuitNiv) ? x.circuitNiv : ((((ref.circuits || []).find(c=>c && c.id === x.circuitId)) || {}).niveaux || []), niv = Number(x.niveau || 0), nv = L[niv];
+      const dl = Number(nv && nv.delai) || 0, depuis = x.niveauLe || x.creeLe || (x.hist && x.hist[0] && x.hist[0].d) || "";
+      if (!dl || !/^\d{4}-\d{2}-\d{2}$/.test(depuis) || ajoutJours(depuis, dl) >= j || x.relanceNiv === niv) continue;
+      x.relanceNiv = niv; x.__v = Number(x.__v || 0) + 1; x.hist = (Array.isArray(x.hist) ? x.hist : []).concat([{d:j, h:z(n0.getHours())+":"+z(n0.getMinutes()), action:"relance", qui:"FIWAKTI", niveau:niv, c:"délai de "+dl+" jour(s) dépassé au niveau "+(niv + 1)}]);
+      await D.ecrire("dmd", x);
+      await D.ecrireLot("notifs", [{id:"nf_rel_"+String(x.id).replace(/[^A-Za-z0-9_.:-]/g, "_")+"_"+niv, d:j, mat:String(x.mat || ""), txt:"Demande en attente depuis plus de "+dl+" jour(s) au niveau "+(niv + 1)+" : relance du valideur"}]);
+      n++; }
+    if (n) await audit("systeme", "demandes.relancees", n+" demande(s) en attente au-delà du délai de leur niveau", "");
+    return n+" demande(s) relancée(s)"; }});
   /* correctif 25 : règles métier — sorties arrivées à échéance, services passés « hors effectif » : exécutées par le serveur
      (auparavant seulement signalées : « sortie non traitée ») */
   PLAN.planifier("regles-metier", {intervalle:3600000, premier:180000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
