@@ -1910,3 +1910,46 @@ Vérifié :
   - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-29.zip (cumulatif : correctifs 2 à 28 inclus).
+
+## Correctif 30 — Administration › Sauvegarde (analyse approfondie)
+
+Deux analyses (serveur : cohérence, restauration, reprise, 20 000 salariés ; écran : mode serveur et mode poste) sur le serveur réel, Chromium et la démonstration.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| S1 | Restauration : des écritures acquittées (200) entre la sauvegarde de sécurité et l'échange des bases disparaissaient (127 sur 171 dans l'essai) ; deux restaurations simultanées « réussies » | **critique** | une seule restauration à la fois ; écritures en cours terminées avant la sauvegarde de sécurité ; écritures et envois des pointeuses refusés (503, nouvel essai) pendant l'opération ; file d'ingestion et tâches de fond suspendues |
+| S2 | Une session fermée (déconnexion, compte compromis) redevenait valide après restauration ; toutes les sessions en cours étaient coupées | **haute** | sessions en place conservées telles quelles (les comptes restent contrôlés à chaque requête) |
+| S3 | La sauvegarde de sécurité supprimait par la rétention la sauvegarde qu'on restaurait (restauration en échec, sauvegarde perdue, échec non tracé) | **haute** | fichier restauré protégé de la purge ; échecs tracés (`restauration.echec`, `sauvegarde.echec`) et signalés |
+| S4 | Avec 20 000 salariés, chaque sauvegarde figeait tout le serveur (7,5 s pour 463 Mo) : export, copie, contrôle d'intégrité et copie hors serveur synchrones | **haute** | export et contrôle dans un fil séparé, copies asynchrones : latence maximale 163 ms pendant une sauvegarde de 264 Mo |
+| S5 | Sauvegarde planifiée à 0 h répétée toutes les 10 minutes jusqu'à 1 h (date UTC comparée à la date locale) ; heure 0 transformée en 2 à l'installation | **haute** | comparaison en date locale ; heure 0 acceptée |
+| S6 | Reprise après sinistre : réglages perdus (conservation remise à 5 ans → purge des badgeages et de l'audit, syslog et copie hors serveur effacés), aucune trace du fichier repris, version non contrôlée | **haute** | réglages inscrits dans chaque sauvegarde et repris ; manifeste créé ; sauvegarde d'une version plus récente refusée |
+| S7 | Restauration sans nouvelle authentification ; confirmation muette sur ce qui est perdu, heure UTC | moyenne | mot de passe et code de double authentification redemandés (refus tracés) ; fenêtre dédiée : date locale, données perdues, clôtures rouvertes, case « j'ai compris » ; même fenêtre depuis État du système |
+| S8 | Heure et rétention non modifiables, et réglage `heure / retention / chiffrer` ignoré avec une réponse « ok » | moyenne | planification modifiable dans l'écran Sauvegarde (heure 0–23, 3 à 365 sauvegardes, tracée) ; clés inconnues refusées ; chiffrement non désactivable |
+| S9 | Écran Sauvegarde en mode serveur : simple renvoi, « 0 au total », bouton qui téléchargeait le cache du navigateur (non restaurable) | moyenne | vrai écran : planification, dernière sauvegarde vérifiée, sauvegarde immédiate, liste (date locale, auteur, motif traduits, taille, chiffrement, vérification), téléchargement et restauration |
+| S10 | Sauvegarde d'ancien format restaurée : aucun salarié jusqu'au redémarrage | moyenne | migration exécutée aussitôt après la restauration et la reprise |
+| S11 | Copie hors serveur : rétention qui supprimait les dernières copies vérifiées, autres fichiers du dossier exposés | moyenne | 3 dernières copies vérifiées gardées, seuls les fichiers FIWAKTI traités ; écriture par fichier temporaire |
+| S12 | Téléchargement de la base entière permis à un profil en consultation | moyenne | refusé si les écrans Sauvegarde et État du système sont tous deux en lecture ou masqués |
+| S13 | PostgreSQL : tables lues sans photographie commune pendant les écritures | moyenne (à vérifier) | export dans une transaction REPEATABLE READ en lecture seule, comptes relevés dans la même photographie |
+| S14 | Mode poste : fichier vide ou étranger accepté (toutes les données remplacées), restauration malgré l'échec de l'instantané de sécurité, fichier de 29 Mo dans la page (91 s de blocage), historique des mots de passe exporté | moyenne | format, version, empreinte et contenu contrôlés ; résumé avant / après ; annulation si l'instantané échoue ; 50 Mo au plus, fichier gardé hors de la page ; export sans historique des mots de passe ni codes de réinitialisation |
+| S15 | Mode poste : heure UTC, jour de semaine / de mois ignorés, instantanés supprimés encore listés, aide de la planification empruntée aux plannings, promesse d'un service serveur inexistant | basse | heure locale, jour respecté, liste alignée sur la rétention, textes justes |
+| S16 | Erreurs réseau brutes (« Unexpected token », « Failed to fetch »), taille « 1.2 Mo » non localisée, motifs en français, boutons répétés sans nom distinct | basse | messages traduits, tailles localisées, motifs et auteurs traduits, libellés accessibles avec la date |
+
+Non traité : exécution réelle sous PostgreSQL (indisponible dans le banc) ; contenu des dossiers pilotes/ et modules/ non inclus dans la sauvegarde (réinstallés avec le logiciel).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Planification : 0/20 accepté ; 24, "5" et rétention 2 refusés ; `chiffrer:false` refusé.
+  - Restauration : refusée sans mot de passe ou avec un mauvais ; seconde restauration simultanée refusée (503) ; session fermée toujours refusée, sessions ouvertes conservées.
+  - Écritures pendant une restauration : 31 acquittées, toutes retrouvées (aucune perdue), 3 refusées (503).
+  - Rétention 5 : restauration de la plus ancienne réussie, fichier conservé.
+  - Reprise après sinistre sur un serveur vierge : conservation 7/10 ans, syslog, copie hors serveur, heure et rétention repris ; manifeste créé.
+  - 20 000 salariés : sauvegarde de 264 Mo en 8,8 s, vérifiée, latence maximale 163 ms.
+- **Chromium.**
+  - Écran Sauvegarde : planification enregistrée, bouton occupé, liste traduite.
+  - Fenêtre de restauration : case obligatoire, erreur de mot de passe affichée, Échap.
+  - Restauration réelle avec rechargement sans déconnexion ; même fenêtre depuis État du système.
+  - Anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration (mode poste).** Fichiers vide et étranger refusés ; export sans historique des mots de passe ; résumé avant / après ; restauration effective.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-30.zip (cumulatif : correctifs 2 à 29 inclus).

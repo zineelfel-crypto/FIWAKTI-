@@ -109,6 +109,18 @@ async function ouvrir(cfg, dossier){
 }
 
 /* ---------------- SQLite (poste unique, petits effectifs) ---------------- */
+/* correctif 30 : exécution d'une fonction autonome (node:sqlite) dans un fil séparé, sans bloquer les requêtes */
+function enFil(fn, donnees){
+  return new Promise((ok, ko)=>{
+    const { Worker } = require("worker_threads");
+    const w = new Worker("const {parentPort, workerData} = require('worker_threads'); const {DatabaseSync} = require('node:sqlite');\n"+
+      "Promise.resolve().then(()=>("+fn.toString()+")(workerData)).then(r=>parentPort.postMessage({r}), e=>parentPort.postMessage({e:String(e && e.message || e)}));", {eval:true, workerData:donnees, stderr:true});
+    let fini = false;
+    w.once("message", m=>{ fini = true; m.e !== undefined ? ko(new Error(m.e)) : ok(m.r); });
+    w.once("error", e=>{ if (!fini){ fini = true; ko(e); } });
+    w.once("exit", c=>{ if (!fini){ fini = true; ko(new Error("tâche interrompue (code "+c+")")); } });
+  });
+}
 function ouvrirSqlite(fichier, dossier){
   const { DatabaseSync } = require("node:sqlite");
   const d = new DatabaseSync(fichier);
@@ -159,18 +171,23 @@ function ouvrirSqlite(fichier, dossier){
     async fermer(){ try { d.close(); } catch(e){} },
     async taille(){ return ["", "-wal"].reduce((s, x)=>{ try { return s + fs.statSync(fichier+x).size; } catch(e){ return s; } }, 0); },
     /* sauvegarde : copie cohérente de la base */
-    async exporter(dest){ d.exec("VACUUM INTO '"+dest.replace(/'/g,"''")+"'"); return dest; },
+    /* correctif 30 : export et contrôle exécutés dans un fil séparé (seconde connexion en lecture, base en WAL) : avec
+       20 000 salariés, VACUUM INTO, la copie et le contrôle d'intégrité figeaient tout le serveur (7,5 s pour 463 Mo).
+       Le nombre de lignes est relevé dans la copie elle-même (photographie cohérente), et non plus avant l'export. */
+    async exporter(dest){ return enFil(async a=>{ const s = new DatabaseSync(a.src); try { s.exec("PRAGMA busy_timeout=60000"); s.exec("VACUUM INTO '"+a.dest.replace(/'/g,"''")+"'"); } finally { s.close(); }
+      const x = new DatabaseSync(a.dest, {readOnly:true}), lignes = {}; try { for (const t of a.tables){ try { lignes[t] = Number(x.prepare("SELECT COUNT(*) n FROM "+t).get().n); } catch(e){} } } finally { x.close(); }
+      return {fichier:a.dest, lignes}; }, {src:fichier, dest, tables:TABLES}); },
     async verifierExport(f, attendus){
       const tmp = path.join(os.tmpdir(), "fiwakti-essai-"+crypto.randomBytes(4).toString("hex")+".db");
       try {
-        fs.copyFileSync(f, tmp);
-        const x = new DatabaseSync(tmp, {readOnly:true});
-        const integ = Object.values(x.prepare("PRAGMA integrity_check").get())[0];
-        const n = {}; for (const t of TABLES){ try { n[t] = x.prepare("SELECT COUNT(*) n FROM "+t).get().n; } catch(e){ n[t] = 0; } }
-        let illisibles = 0; x.prepare("SELECT valeur FROM kv").all().forEach(r=>{ try { JSON.parse(r.valeur); } catch(e){ illisibles++; } });
-        x.close();
+        await fs.promises.copyFile(f, tmp);
+        const {integ, n, illisibles} = await enFil(async a=>{ const x = new DatabaseSync(a.f, {readOnly:true});
+          try { const integ = Object.values(x.prepare("PRAGMA integrity_check").get())[0];
+            const n = {}; for (const t of a.tables){ try { n[t] = Number(x.prepare("SELECT COUNT(*) n FROM "+t).get().n); } catch(e){ n[t] = 0; } }
+            let illisibles = 0; for (const r of x.prepare("SELECT valeur FROM kv").iterate()){ try { JSON.parse(r.valeur); } catch(e){ illisibles++; } }
+            return {integ, n, illisibles}; } finally { x.close(); } }, {f:tmp, tables:TABLES});
         if (integ !== "ok") return {ok:false, motif:"intégrité : "+integ};
-        for (const t of ["kv","enreg","comptes"]) if (attendus && attendus[t] !== undefined && n[t] !== attendus[t]) return {ok:false, motif:t+" : "+n[t]+" lignes au lieu de "+attendus[t]};
+        for (const t of Object.keys(attendus || {})) if (attendus && attendus[t] !== undefined && n[t] !== attendus[t]) return {ok:false, motif:t+" : "+n[t]+" lignes au lieu de "+attendus[t]};
         if (illisibles) return {ok:false, motif:illisibles+" document(s) illisible(s)"};
         return {ok:true, lignes:n};
       } catch(e){ return {ok:false, motif:e.message}; }
@@ -185,7 +202,7 @@ function ouvrirSqlite(fichier, dossier){
       const nettoyer = x => ["", "-wal", "-shm", "-journal"].forEach(s=>{ try { fs.unlinkSync(x+s); } catch(e){} });
       nettoyer(neuf);
       try {
-        fs.copyFileSync(f, neuf);
+        await fs.promises.copyFile(f, neuf);
         const fd = fs.openSync(neuf, "r+"); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
         const x = new DatabaseSync(neuf); try { x.prepare("SELECT COUNT(*) n FROM kv").get(); } finally { x.close(); }
       } catch(e){ nettoyer(neuf); throw e; }
@@ -326,14 +343,18 @@ async function ouvrirPg(cfg, dossier){
       });
       /* 56.33.11 : nombre de lignes écrites par table, inscrit en fin de fichier et contrôlé à la relecture */
       const lignes = {};
+      /* correctif 30 : une seule transaction REPEATABLE READ en lecture seule : toutes les tables lues dans la même
+         photographie (auparavant, lots sur des connexions différentes pendant que les écritures continuaient) */
+      const db = await poolTravaux.connect(); let txOk = false;
       try {
+        await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"); txOk = true;
         await ecrire(JSON.stringify({format:"fiwakti-pg-1", tables:TABLES, fin:true})+"\n");
         for (const t of TABLES){
           await ecrire(JSON.stringify({table:t})+"\n");
           /* 56.33.9 : lecture par lots en avançant sur la clé (et non plus par OFFSET, de plus en plus lent), sur la réserve
              à délai long : la sauvegarde d'une base de plusieurs centaines de milliers de badgeages était annulée au bout
              de 30 s (« annulation de la requête à cause du délai écoulé »), ce qui bloquait aussi les mises à jour */
-          const cols = await clePagination(poolTravaux, t), lot = 20000, db = poolTravaux;
+          const cols = await clePagination(db, t), lot = 20000;
           let dernier = null; lignes[t] = 0;
           for (;;){
             const cond = dernier ? " WHERE ("+cols.join(", ")+") > ("+cols.map((c, i)=>"$"+(i+1)).join(", ")+")" : "";
@@ -350,9 +371,10 @@ async function ouvrirPg(cfg, dossier){
         /* fin de fichier : une ligne « table » à un seul champ, que les versions antérieures lisent comme une table vide */
         await ecrire(JSON.stringify({table:FIN+JSON.stringify(lignes)})+"\n");
         gz.end(); await fini;
-      } catch(e){ gz.destroy(); const cause = await fini.then(()=>null, x=>x); try { if (fs.lstatSync(dest).isFile()) fs.unlinkSync(dest); } catch(x){}
+      } catch(e){ if (txOk) try { await db.query("ROLLBACK"); } catch(x){} txOk = false; db.release(); gz.destroy(); const cause = await fini.then(()=>null, x=>x); try { if (fs.lstatSync(dest).isFile()) fs.unlinkSync(dest); } catch(x){}
         throw /interrompue/.test(e.message) && cause ? cause : e; }
-      return dest;
+      try { await db.query("COMMIT"); } catch(e){} db.release();
+      return {fichier:dest, lignes};
     },
     /* restauration d'essai dans un schéma temporaire, puis suppression */
     async verifierExport(f, attendus){

@@ -19,7 +19,7 @@ const LICENCE = require("./licence.js");
 const ANNUAIRE = require("./annuaire.js");
 const VISAGES = require("./visages.js");
 const PLANIFICATEUR = require("./planificateur.js");
-const PLAN = PLANIFICATEUR.creer({journal:m=>journal(m), enveloppe:fn=>(B && B.enTravail) ? B.enTravail(fn) : fn()});
+const PLAN = PLANIFICATEUR.creer({journal:m=>journal(m), enveloppe:fn=>RESTAURATION ? Promise.resolve("suspendue (restauration en cours)") : (B && B.enTravail) ? B.enTravail(fn) : fn()});
 BD.ajouterModule(VISAGES);
 const BIOSYNC = require("./biosync.js");
 const ACCES = require("./acces.js");
@@ -787,6 +787,15 @@ const COOKIE = "fwk_s", ESSAIS_IP = new Map();
 const ECHECS_INCONNUS = new Map();
 function cookies(req){ const o = {}; String(req.headers.cookie||"").split(";").forEach(p=>{ const i = p.indexOf("="); if (i > 0) o[p.slice(0,i).trim()] = decodeURIComponent(p.slice(i+1).trim()); }); return o; }
 const hid = id => crypto.createHash("sha256").update(id).digest("hex");
+/* correctif 30 : nouvelle authentification pour les opérations sensibles (trousseau, restauration) ; renvoie le motif du refus */
+async function reauthentifier(C, b, ip, action){
+  const c = await compteDe(C.login);
+  if (!c || !c.hash || !(await verifier(String((b || {}).mdp || ""), c.hash))){ await audit(C.login, action, "mot de passe incorrect", ip); return "Mot de passe incorrect."; }
+  if (Number(c.a2f_actif) && c.a2f_secret){ let okC = -1; try { okC = TOTP.verifier(CF.dechiffrerTexte(c.a2f_secret, "secrets"), (b || {}).code, c.a2f_pas); } catch(e){}
+    if (okC < 0){ await audit(C.login, action, "code de vérification incorrect", ip); return "Code de vérification incorrect."; }
+    await B.run("UPDATE comptes SET a2f_pas=? WHERE login=?", okC, c.login); }
+  return "";
+}
 async function sessionDe(req){
   const id = cookies(req)[COOKIE]; if (!id) return null;
   const s = await B.get("SELECT * FROM sessions WHERE id=?", hid(id));
@@ -851,9 +860,23 @@ async function alerte(action, detail){
 function horodatage(){ return maintenant().replace(/[-:]/g,"").replace("T","-").slice(0,15); }
 function sha256Fichier(f){ return new Promise((ok, ko)=>{ const h = crypto.createHash("sha256"); fs.createReadStream(f).on("data", d=>h.update(d)).on("end", ()=>ok(h.digest("hex"))).on("error", ko); }); }
 let SAUVEGARDE_EN_COURS = null;
+/* correctif 30 : restauration en cours (une seule à la fois) ; écritures en vol suivies pour les laisser finir avant la
+   sauvegarde de sécurité (avant : des écritures acquittées entre la sauvegarde de sécurité et l'échange des bases
+   disparaissaient — 127 sur 171 dans l'essai) */
+let RESTAURATION = null, ECR_EN_VOL = 0;
+/* correctif 30 : réglages du serveur inscrits dans chaque sauvegarde (la reprise après sinistre les perdait : durées de
+   conservation remises à 5 ans — purge des badgeages et de l'audit —, copie hors serveur et syslog effacés) */
+const CONFIG_SAUVEE = ["conservation", "syslog", "pushReseaux", "proxyConfiance", "auditExterne", "pushActif", "envoiMaxMinutes"];
+function configSauvee(){ const o = {}; CONFIG_SAUVEE.forEach(k=>{ if (CONFIG[k] !== undefined) o[k] = CONFIG[k]; });
+  const sv = CONFIG.sauvegarde || {}; o.sauvegarde = {heure:sv.heure, retention:sv.retention, copie:sv.copie || ""}; return o; }
 /* v56.23 : exécuté dans la réserve à délai long (opération de fond) */
-function sauvegarder(par, motif){ return (B && B.enTravail) ? B.enTravail(()=>sauvegarderInterne(par,motif)) : sauvegarderInterne(par,motif); }
-async function sauvegarderInterne(par, motif){
+function sauvegarder(par, motif, opts){ return (B && B.enTravail) ? B.enTravail(()=>sauvegarderInterne(par,motif,opts)) : sauvegarderInterne(par,motif,opts); }
+async function sauvegarderInterne(par, motif, opts){
+  /* correctif 30 : tout échec est tracé et signalé (avant : exception sans audit ni alerte) */
+  try { return await sauvegarderInterne2(par, motif, opts); }
+  catch(e){ try { await audit(par || "automatique", "sauvegarde.echec", String(e.message).slice(0, 300)); await alerte("sauvegarde", "échec de la sauvegarde ("+(motif || "manuelle")+") : "+String(e.message).slice(0, 300)); } catch(x){} throw e; }
+}
+async function sauvegarderInterne2(par, motif, opts){
   /* correctif 28 : attente en boucle — deux sauvegardes en attente repartaient ensemble et s'écrasaient */
   while (SAUVEGARDE_EN_COURS) await SAUVEGARDE_EN_COURS;
   let fin; SAUVEGARDE_EN_COURS = new Promise(r=>fin = r);
@@ -875,10 +898,12 @@ async function sauvegarderInterne(par, motif){
         await alerte("sauvegarde", m); throw new Error(m); } } catch(e){ if (/espace disque/.test(e.message)) throw e; }
     /* v56.23 : empreintes des clés inscrites dans la sauvegarde elle-même (reprise sur un serveur vierge) */
     await meta("cles_empreintes", CF.inventaire());
+    await meta("version_logiciel", VERSION); await meta("config_sauvegardee", configSauvee());
     const attendus = {};
     for (const t of ["kv","enreg","comptes"]) attendus[t] = Number((await B.get("SELECT COUNT(*) n FROM "+t)).n);
     await AUDIT_FILE; let auditMaxSv = null; try { const am = await B.get("SELECT id, empreinte FROM audit ORDER BY id DESC LIMIT 1"); if (am) auditMaxSv = {id:Number(am.id), empreinte:am.empreinte || null}; } catch(e){}
-    try { await B.exporter(brut);
+    /* correctif 30 : nombre de lignes relevé dans la photographie exportée elle-même (et non avant l'export) */
+    try { const ex = await B.exporter(brut); if (ex && ex.lignes) Object.assign(attendus, ex.lignes);
       if (chiffrer) await CF.chiffrerFichier(brut, f, "sauvegarde"); }
     catch(e){ try { fs.unlinkSync(f); } catch(x){} throw e; }
     finally { if (chiffrer) try { fs.unlinkSync(brut); } catch(e){} }
@@ -892,10 +917,12 @@ async function sauvegarderInterne(par, motif){
     man.verification = await verifierFichier(f, man);
     man.verification.le = maintenant();
     fs.writeFileSync(f+".json", JSON.stringify(man, null, 2));
-    man.copie = copierHorsServeur(f, man);
+    man.copie = await copierHorsServeur(f, man);
     if (man.copie) fs.writeFileSync(f+".json", JSON.stringify(man, null, 2));
-    purgerSauvegardes();
+    purgerSauvegardes((opts || {}).proteger);
     await audit(par, "sauvegarde", nom+" — "+(man.verification.ok ? "vérifiée" : "ÉCHEC de vérification : "+man.verification.motif));
+    if (!man.verification.ok) await alerte("sauvegarde", "sauvegarde "+nom+" non vérifiée : "+man.verification.motif);
+    if (man.copie && !man.copie.ok) await alerte("sauvegarde", "copie hors serveur impossible ("+man.copie.vers+") : "+man.copie.motif);
     return man;
   } finally { SAUVEGARDE_EN_COURS = null; fin(); }
 }
@@ -908,16 +935,22 @@ async function verifierFichier(f, man){
   finally { try { fs.unlinkSync(tmp); } catch(e){} }
 }
 /* copie vers un second emplacement (disque réseau, autre disque) : une sauvegarde qui ne quitte pas la machine ne protège pas d'une panne de celle-ci */
-function copierHorsServeur(f, man){
+/* correctif 30 : copie asynchrone (le serveur restait figé pendant la copie d'une grosse base) ; rétention de la copie
+   alignée sur celle du serveur : les 3 dernières copies vérifiées sont toujours gardées, seuls les fichiers FIWAKTI sont
+   touchés */
+async function copierHorsServeur(f, man){
   const dest = String((CONFIG.sauvegarde||{}).copie||"").trim();
   if (!dest) return null;
   try {
     fs.mkdirSync(dest, {recursive:true});
-    fs.copyFileSync(f, path.join(dest, path.basename(f)));
+    const cible = path.join(dest, path.basename(f)), tmpC = cible+".partiel";
+    await fs.promises.copyFile(f, tmpC); fs.renameSync(tmpC, cible);
     fs.writeFileSync(path.join(dest, path.basename(f)+".json"), JSON.stringify(man, null, 2));
     const garder = Math.max(3, Number((CONFIG.sauvegarde||{}).retention) || 14);
-    const l = fs.readdirSync(dest).filter(x=>/^fiwakti-.*\.json$/.test(x)).sort().reverse();
-    l.slice(garder).forEach(x=>{ [x, x.replace(/\.json$/, "")].forEach(y=>{ try { fs.unlinkSync(path.join(dest, y)); } catch(e){} }); });
+    const l = fs.readdirSync(dest).filter(x=>/^fiwakti-\d{8}-\d{6}(-\d+)?\.(db|pgjson\.gz)(\.chiffre)?\.json$/.test(x)).map(x=>{ try { return JSON.parse(fs.readFileSync(path.join(dest, x), "utf8")); } catch(e){ return {fichier:x.replace(/\.json$/, ""), cree:""}; } })
+      .filter(m=>m && m.fichier).sort((a, b)=>String(a.cree) < String(b.cree) ? 1 : -1);
+    const sures = new Set(l.filter(m=>m.verification && m.verification.ok).slice(0, 3).map(m=>m.fichier));
+    l.slice(garder).filter(m=>!sures.has(m.fichier) && m.fichier !== path.basename(f)).forEach(m=>{ [m.fichier, m.fichier+".json"].forEach(y=>{ try { fs.unlinkSync(path.join(dest, path.basename(y))); } catch(e){} }); });
     return {ok:true, vers:dest, le:maintenant()};
   } catch(e){ journal("copie hors serveur : "+e.message); return {ok:false, vers:dest, motif:e.message, le:maintenant()}; }
 }
@@ -925,15 +958,31 @@ function listeSauvegardes(){
   return fs.readdirSync(D_SAUV).filter(f=>/^fiwakti-.*\.json$/.test(f)).map(f=>{ try { return JSON.parse(fs.readFileSync(path.join(D_SAUV, f), "utf8")); } catch(e){ return null; } })
     .filter(Boolean).sort((a,b)=>a.cree < b.cree ? 1 : -1);
 }
-function purgerSauvegardes(){
+function purgerSauvegardes(proteger){
   const garder = Math.max(3, Number((CONFIG.sauvegarde||{}).retention) || 14);
   /* 56.33.11 : les 3 dernières sauvegardes vérifiées sont toujours gardées, même au-delà de la rétention (avant : une
      suite de sauvegardes en échec pouvait faire supprimer la dernière sauvegarde restaurable) */
   const l = listeSauvegardes(), sures = new Set(l.filter(m=>m.verification && m.verification.ok).slice(0, 3).map(m=>m.fichier));
-  l.slice(garder).filter(m=>!sures.has(m.fichier)).forEach(m=>{ ["", ".json"].forEach(x=>{ try { fs.unlinkSync(path.join(D_SAUV, m.fichier+x)); } catch(e){} }); });
+  /* correctif 30 : fichiers protégés (la sauvegarde en cours de restauration était supprimée par la sauvegarde de sécurité) */
+  const prot = new Set((proteger || []).map(x=>path.basename(String(x))));
+  l.slice(garder).filter(m=>!sures.has(m.fichier) && !prot.has(m.fichier)).forEach(m=>{ ["", ".json"].forEach(x=>{ try { fs.unlinkSync(path.join(D_SAUV, m.fichier+x)); } catch(e){} }); });
 }
 /* v56.23 : exécuté dans la réserve à délai long (opération de fond) */
-function restaurer(fichier, par){ return (B && B.enTravail) ? B.enTravail(()=>restaurerInterne(fichier,par)) : restaurerInterne(fichier,par); }
+/* correctif 30 : une seule restauration à la fois (deux restaurations simultanées répondaient « réussi » toutes les deux) ;
+   pendant la restauration, écritures refusées (503) et file des pointeuses en pause ; échec tracé */
+async function restaurer(fichier, par){
+  if (RESTAURATION) throw Object.assign(new Error("Une restauration est déjà en cours : patientez."), {code:409});
+  RESTAURATION = {fichier:path.basename(String(fichier)), par, debut:maintenant()};
+  const pauseAvant = !!(CONFIG.ingestion || {}).pause; CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:true});
+  try {
+    /* écritures déjà commencées (hors la demande de restauration elle-même) et tâches de fond : on les laisse finir */
+    const t0 = Date.now();
+    while ((ECR_EN_VOL > 1 || PLAN.etat().some(x=>x.enCours)) && Date.now() - t0 < 120000) await new Promise(r=>setTimeout(r, 200));
+    if (ECR_EN_VOL > 1 || PLAN.etat().some(x=>x.enCours)) throw new Error("Des enregistrements ou des tâches de fond sont encore en cours : réessayez dans quelques minutes.");
+    return await ((B && B.enTravail) ? B.enTravail(()=>restaurerInterne(fichier,par)) : restaurerInterne(fichier,par));
+  } catch(e){ try { await audit(par, "restauration.echec", path.basename(String(fichier))+" — "+String(e.message).slice(0, 300)); } catch(x){} throw e; }
+  finally { CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:pauseAvant}); RESTAURATION = null; }
+}
 async function restaurerInterne(fichier, par){
   const f = path.join(D_SAUV, path.basename(fichier));
   if (!fs.existsSync(f) || !fs.existsSync(f+".json")) throw new Error("Sauvegarde introuvable.");
@@ -950,7 +999,8 @@ async function restaurerInterne(fichier, par){
   if (man.version && vNum(man.version) > vNum(VERSION)) throw new Error("Cette sauvegarde provient d'une version plus récente ("+man.version+") : mettez d'abord FIWAKTI à jour.");
   const v = await verifierFichier(f, man);
   if (!v.ok) throw new Error("Cette sauvegarde ne se relit pas correctement ("+v.motif+") : restauration refusée.");
-  const securite = await sauvegarder(par, "avant restauration de "+man.fichier);
+  const securite = await sauvegarder(par, "avant restauration de "+man.fichier, {proteger:[man.fichier]});
+  if (!fs.existsSync(f)) throw new Error("Sauvegarde introuvable.");
   /* correctif 20 : clôtures présentes avant la restauration, pour signaler celles que la sauvegarde ne contient pas */
   const clotAvant = ((await D.referentielLecture() || {}).clotures || []).filter(Boolean).map(c=>({id:c.id, du:c.du, jusqu:c.jusqu}));
   /* correctif 13 : les entrées d'audit postérieures à la sauvegarde restaurée ne sont plus effacées en silence. Elles sont
@@ -968,17 +1018,27 @@ async function restaurerInterne(fichier, par){
   /* correctif 29 : la licence en place, ses révocations, l'horloge protégée et les jetons utilisés survivent à la
      restauration (restaurer une ancienne sauvegarde remettait une licence révoquée et reculait l'échéance) */
   const metaLic = {}; for (const k of ["licence", "licence_suivante", "modules_licencies", "revocations", "horloge", "jetons_utilises"]) try { metaLic[k] = await meta(k); } catch(e){}
+  /* correctif 30 : sessions en place conservées telles quelles — les sessions fermées depuis la sauvegarde (déconnexion,
+     compte compromis, sessions fermées par l'administrateur) redevenaient valides */
+  let sessAv = []; try { sessAv = await B.all("SELECT * FROM sessions"); } catch(e){}
   try { B = await B.restaurer(source); } finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
   await conserverLicence(metaLic);
+  try { await B.transaction(async ()=>{ await B.run("DELETE FROM sessions");
+    for (const r of sessAv){ const ks = Object.keys(r); await B.run("INSERT INTO sessions("+ks.join(",")+") VALUES("+ks.map(()=>"?").join(",")+")", ...ks.map(k=>r[k])); } }); }
+  catch(e){ try { await B.run("DELETE FROM sessions"); } catch(x){} journal("restauration : sessions remises à zéro ("+e.message+")"); }
   D = DONNEES_MOD.creer(B, PERIM);
+  /* correctif 30 : sauvegarde d'un ancien format (salariés dans le document) : migration immédiate, et non au prochain
+     redémarrage (aucun salarié affiché d'ici là) */
+  try { const nm = await D.migrer(null); if (nm) await audit(par, "migration", "après restauration : "+Object.keys(nm).map(k=>k+" "+nm[k]).join(", ")); } catch(e){ journal("migration après restauration : "+e.message); }
   K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
-  const reprise = await reprendreAudit(fAud);
+  const reprise = await reprendreAudit(fAud); let cloturesRouvertes = [];
   await audit(par, "restauration", man.fichier+" (sauvegarde de sécurité : "+securite.fichier+") — "+reprise.texte);
   { const ids = new Set(((await D.referentielLecture() || {}).clotures || []).filter(Boolean).map(c=>c.id)), perdues = clotAvant.filter(c=>!ids.has(c.id));
+    cloturesRouvertes = perdues.map(c=>({du:c.du || c.jusqu, jusqu:c.jusqu}));
     if (perdues.length) await audit(par, "cloture.annulee_par_restauration", perdues.map(c=>"du "+jjmmaaaa(c.du || c.jusqu)+" au "+jjmmaaaa(c.jusqu)).join(" ; ")+" — période(s) de nouveau ouverte(s) par la restauration de "+man.fichier); }
   try { const v = await verifierAudit(); fs.appendFileSync(path.join(D_JOURN, "ancrages-audit.log"), maintenant()+" "+(v.ok ? v.dernier+" "+v.n : "RESTAURATION "+JSON.stringify(v.rupture)+" REPRISE")+"\n"); } catch(e){}
-  return {restauree:man.fichier, securite:securite.fichier, audit:reprise};
+  return {restauree:man.fichier, securite:securite.fichier, audit:reprise, cloturesRouvertes};
 }
 
 async function reprendreAudit(fAud){
@@ -1566,7 +1626,7 @@ async function traiter(req, res){
       else await B.run("INSERT INTO comptes(login,uid,nom,role,actif,hash,etat,changer,maj,mdp_le) VALUES(?,?,?,?,1,?,'actif',"+(rapide ? 1 : 0)+",?,?)", login, "u1", String(b.nom||"Administrateur").slice(0,80), "admin", hash, maintenant(), maintenant());
       await meta("licence", {cle:String(b.licence).replace(/\s+/g,""), activee:maintenant()}); await chargerModules();
       CONFIG = Object.assign(CONFIG, {installe:true, entreprise:String(b.entreprise||lic.charge.client).slice(0,120), adminInitial:login, installeLe:maintenant(), adminProvisoire:rapide,
-        adresse: b.mode === "local" ? "127.0.0.1" : "0.0.0.0", sauvegarde:Object.assign({}, CONFIG.sauvegarde, {heure:Math.min(23, Math.max(0, Number(b.heureSauvegarde)||2)), retention:14, chiffrer:true})});
+        adresse: b.mode === "local" ? "127.0.0.1" : "0.0.0.0", sauvegarde:Object.assign({}, CONFIG.sauvegarde, {heure:Number.isInteger(Number(b.heureSauvegarde)) && b.heureSauvegarde !== "" && b.heureSauvegarde != null && +b.heureSauvegarde >= 0 && +b.heureSauvegarde <= 23 ? +b.heureSauvegarde : 2, retention:14, chiffrer:true})});
       ecrireConfig(CONFIG);
       try { fs.unlinkSync(path.join(DONNEES, "jeton-installation.txt")); } catch(e){} JETON_INSTALL = "";
       await audit(login, "installation", "FIWAKTI "+VERSION+" — "+CONFIG.entreprise+" — base "+B.type, ip);
@@ -1596,8 +1656,13 @@ async function traiter(req, res){
         if (/\.chiffre$/.test(nom)){ tmp = path.join(os.tmpdir(), "fiwakti-reprise-"+crypto.randomBytes(6).toString("hex")); await CF.dechiffrerFichier(dest, tmp, "sauvegarde"); source = tmp; }
         const v = await B.verifierExport(source, null);
         if (!v.ok) throw new Error("Sauvegarde illisible : "+v.motif);
-        const metaLicI = {}; for (const k of ["licence", "licence_suivante", "modules_licencies", "revocations", "horloge"]) try { metaLicI[k] = await meta(k); } catch(e){}
-        B = await B.restaurer(source); await conserverLicence(metaLicI); D = DONNEES_MOD.creer(B, PERIM); K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
+        const metaLicI = {}; for (const k of ["licence", "licence_suivante", "modules_licencies", "revocations", "horloge", "jetons_utilises"]) try { metaLicI[k] = await meta(k); } catch(e){}
+        B = await B.restaurer(source); await conserverLicence(metaLicI); D = DONNEES_MOD.creer(B, PERIM);
+        /* correctif 30 : version du logiciel inscrite dans la sauvegarde — une sauvegarde d'une version plus récente est refusée */
+        { let vs = null; try { const r = await B.get("SELECT v FROM meta WHERE k='version_logiciel'"); vs = r && r.v ? JSON.parse(r.v) : null; } catch(e){}
+          const vN = v => String(v||"0").split(".").map(Number).reduce((s, x, i)=>s + (x||0) * Math.pow(1000, 2 - i), 0);
+          if (vs && vN(vs) > vN(VERSION)) throw new Error("Cette sauvegarde provient d'une version plus récente ("+vs+") : installez d'abord FIWAKTI "+vs+", puis relancez la reprise."); }
+        try { await D.migrer(null); } catch(e){ journal("migration après reprise : "+e.message); } K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
         /* v56.23 : clés des données chiffrées présentes et identiques, sinon reprise refusée (importer le trousseau
            complet, puis relancer la restauration) */
         { let attendu = {}; try { const r = await B.get("SELECT v FROM meta WHERE k='cles_empreintes'"); attendu = r && r.v ? JSON.parse(r.v) : {}; if (typeof attendu === "string") attendu = JSON.parse(attendu); if (!attendu || typeof attendu !== "object") attendu = {}; } catch(e){}
@@ -1610,13 +1675,19 @@ async function traiter(req, res){
         const adm = await B.get("SELECT login FROM comptes WHERE role='admin' AND actif=1 ORDER BY login LIMIT 1");
         const lic = await licenceActive();
         await B.run("DELETE FROM sessions");
+        /* correctif 30 : réglages de l'installation d'origine (conservation, syslog, copie hors serveur, heure et rétention) */
+        let cfgS = null, cfgRep = []; try { const r = await B.get("SELECT v FROM meta WHERE k='config_sauvegardee'"); cfgS = r && r.v ? JSON.parse(r.v) : null; if (typeof cfgS === "string") cfgS = JSON.parse(cfgS); } catch(e){}
+        if (cfgS && typeof cfgS === "object"){ CONFIG_SAUVEE.forEach(k=>{ if (cfgS[k] !== undefined && cfgS[k] !== null && typeof cfgS[k] !== "function"){ CONFIG[k] = cfgS[k]; cfgRep.push(k); } });
+          const ss = cfgS.sauvegarde || {}; CONFIG.sauvegarde = Object.assign({}, CONFIG.sauvegarde, Number.isInteger(ss.heure) && ss.heure >= 0 && ss.heure <= 23 ? {heure:ss.heure} : {}, Number.isInteger(ss.retention) && ss.retention >= 3 ? {retention:ss.retention} : {}, typeof ss.copie === "string" ? {copie:ss.copie} : {}); cfgRep.push("sauvegarde"); }
         CONFIG = Object.assign(CONFIG, {installe:true, entreprise:(lic && lic.client) || CONFIG.entreprise || "", adminInitial:adm ? adm.login : "", installeLe:maintenant(), repriseLe:maintenant(),
           sauvegarde:Object.assign({}, CONFIG.sauvegarde, {chiffrer:true})});
         ecrireConfig(CONFIG);
         try { fs.unlinkSync(path.join(DONNEES, "jeton-installation.txt")); } catch(e){} JETON_INSTALL = "";
         const verifAudit = await verifierAudit();
-        await audit(adm ? adm.login : "systeme", "reprise.apres.sinistre", nom+" — "+JSON.stringify(bilan)+" — "+(Date.now()-t0)+" ms", ip);
-        return json(res, 200, {ok:true, bilan, dureeMs:Date.now()-t0, licence:lic ? lic.client : null, licenceValide:!!lic, audit:verifAudit.ok, administrateur:adm ? adm.login : null});
+        await audit(adm ? adm.login : "systeme", "reprise.apres.sinistre", nom+" — "+JSON.stringify(bilan)+" — réglages repris : "+(cfgRep.join(", ") || "aucun (sauvegarde antérieure au correctif 30 : vérifiez la conservation, la copie hors serveur et syslog)")+" — "+(Date.now()-t0)+" ms", ip);
+        /* correctif 30 : manifeste du fichier importé (il n'apparaissait pas dans la liste des sauvegardes) */
+        try { const st = fs.statSync(dest); fs.writeFileSync(dest+".json", JSON.stringify({fichier:nom, cree:maintenant(), par:adm ? adm.login : "systeme", motif:"reprise après sinistre (fichier importé)", version:VERSION, base:B.type, taille:st.size, sha256:await sha256Fichier(dest), chiffre:/\.chiffre$/.test(nom), verification:Object.assign({}, v, {le:maintenant()})}, null, 2)); } catch(e){}
+        return json(res, 200, {ok:true, bilan, reglagesRepris:cfgRep, dureeMs:Date.now()-t0, licence:lic ? lic.client : null, licenceValide:!!lic, audit:verifAudit.ok, administrateur:adm ? adm.login : null});
       } catch(e){ try { fs.unlinkSync(dest); } catch(x){} return erreur(res, 400, e.message); }
       finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
     }
@@ -2854,7 +2925,12 @@ async function traiter(req, res){
 
   /* ---- administration ---- */
   /* correctif 28 : profil administrateur avec l'écran État du système en lecture → aucune action d'écriture */
-  if (admin && req.method !== "GET" && /^\/api\/v1\/(systeme|sauvegardes|sessions)(\/|$)/.test(p) && !/^\/api\/v1\/systeme\/(audit|controles)$/.test(p)){ try { const refM = await D.referentielLecture() || {}, uM = (refM.users || []).find(x=>x && String(x.login).trim().toLowerCase() === String(C.login).toLowerCase()), prM = uM && (refM.profils || []).find(x=>x && x.id === uM.profilId);
+  /* correctif 30 : sauvegardes (y compris le téléchargement de la base entière) — refusées si les DEUX écrans qui les
+     proposent (Sauvegarde et État du système) sont en lecture ou masqués pour le profil */
+  if (admin && /^\/api\/v1\/sauvegardes(\/|$)/.test(p)){ try { const refM = await D.referentielLecture() || {}, uM = (refM.users || []).find(x=>x && String(x.login).trim().toLowerCase() === String(C.login).toLowerCase()), prM = uM && (refM.profils || []).find(x=>x && x.id === uM.profilId);
+    const ro = v => ["lecture", "masque"].includes(((prM || {}).menus || {})[v]);
+    if (prM && ro("svg") && ro("systeme")) return erreur(res, 403, "Écran Sauvegarde en lecture seule pour votre profil."); } catch(e){} }
+  if (admin && req.method !== "GET" && /^\/api\/v1\/(systeme|sessions)(\/|$)/.test(p) && !/^\/api\/v1\/systeme\/(audit|controles)$/.test(p)){ try { const refM = await D.referentielLecture() || {}, uM = (refM.users || []).find(x=>x && String(x.login).trim().toLowerCase() === String(C.login).toLowerCase()), prM = uM && (refM.profils || []).find(x=>x && x.id === uM.profilId);
     if (prM && ((prM.menus || {}).systeme === "lecture" || (prM.menus || {}).systeme === "masque")) return erreur(res, 403, "Écran État du système en lecture seule pour votre profil."); } catch(e){} }
   if (/^\/api\/v1\/(systeme|sauvegardes|mise-a-jour|licence|comptes|audit-serveur|sessions|alertes)/.test(p) && !admin && !(C.role === "fournisseur" && /^\/api\/v1\/licence(\/|$)/.test(p))) return erreur(res, 403, "Réservé aux administrateurs.");
   if (p === "/api/v1/systeme") return json(res, 200, await etatSysteme());
@@ -2880,7 +2956,7 @@ async function traiter(req, res){
   if (p === "/api/v1/systeme/audit"){ if (u.searchParams.get("forcer") === "1") AUDIT_CACHE = null; return json(res, 200, await auditEtat()); }
   if (p === "/api/v1/systeme/conservation") return json(res, 200, Object.assign({politique:CONFIG.conservation}, await conservation(true)));
   if (p === "/api/v1/systeme/reglages"){
-    if (req.method === "GET") return json(res, 200, {copie:(CONFIG.sauvegarde||{}).copie||"", chiffrer:!!(CONFIG.sauvegarde||{}).chiffrer, pushReseaux:CONFIG.pushReseaux||[], conservation:CONFIG.conservation, cle:CF.empreinte("sauvegarde"),
+    if (req.method === "GET") return json(res, 200, {copie:(CONFIG.sauvegarde||{}).copie||"", chiffrer:!!(CONFIG.sauvegarde||{}).chiffrer, heure:Number.isInteger(+(CONFIG.sauvegarde||{}).heure) ? +(CONFIG.sauvegarde||{}).heure : 2, retention:Number((CONFIG.sauvegarde||{}).retention) || 14, pushReseaux:CONFIG.pushReseaux||[], conservation:CONFIG.conservation, cle:CF.empreinte("sauvegarde"),
       syslog:CONFIG.syslog||{hote:"", port:514, protocole:"udp"}, auditExterne:CONFIG.auditExterne||"", proxyConfiance:CONFIG.proxyConfiance||[]});
     /* correctif 28 : POST seulement ; tout le corps est validé sur une COPIE de la configuration, enregistrée en une fois
        (une requête refusée modifiait déjà une partie des réglages, écrits au prochain enregistrement) ; chemins réels
@@ -2895,6 +2971,14 @@ async function traiter(req, res){
       if (rd === rD || rd.startsWith(rD+path.sep) || rD.startsWith(rd+path.sep)) return quoi+" : doit être hors du dossier des données ("+DONNEES+").";
       return ""; };
     const avert = [];
+    /* correctif 30 : clés inconnues refusées (heure, rétention et chiffrement étaient ignorés avec une réponse « ok ») ;
+       heure et rétention des sauvegardes enregistrables ; le chiffrement ne se désactive pas */
+    { const conn = ["copie","pushReseaux","syslog","auditExterne","proxyConfiance","conservation","heure","retention"], inc = Object.keys(b || {}).filter(k=>!conn.includes(k));
+      if (inc.length) return refus("Réglage non modifiable ici : "+inc.join(", ")+"."); }
+    if (b.heure !== undefined || b.retention !== undefined){ const sv = Object.assign({}, N.sauvegarde);
+      if (b.heure !== undefined){ if (!(typeof b.heure === "number" && Number.isInteger(b.heure) && b.heure >= 0 && b.heure <= 23)) return refus("Heure de la sauvegarde : entier de 0 à 23."); sv.heure = b.heure; }
+      if (b.retention !== undefined){ if (!(typeof b.retention === "number" && Number.isInteger(b.retention) && b.retention >= 3 && b.retention <= 365)) return refus("Nombre de sauvegardes gardées : entier de 3 à 365."); sv.retention = b.retention; }
+      N.sauvegarde = sv; }
     if (b.copie !== undefined){ const d = String(b.copie||"").trim();
       if (d){ const m = horsDonnees(d, "Copie hors serveur"); if (m) return refus(m); try { if (fs.statSync(fs.realpathSync(d)).dev === fs.statSync(DONNEES).dev) avert.push("la copie est sur le même disque que les données : une panne du disque emporterait les deux"); } catch(e){} }
       N.sauvegarde = Object.assign({}, N.sauvegarde, {copie:d}); }
@@ -2923,9 +3007,9 @@ async function traiter(req, res){
       if (!ent(v("badgeagesAns"), 1, 50) || !ent(v("auditAns"), 1, 50) || (v("journalAns") != null && v("journalAns") !== "" && !ent(v("journalAns"), 1, 50)) || (v("calculsJours") != null && v("calculsJours") !== "" && !ent(v("calculsJours"), 60, 3650)))
         return refus("Durées de conservation : nombres entiers de 1 à 50 ans (calculs : 60 à 3650 jours).");
       N.conservation = {badgeagesAns:v("badgeagesAns"), auditAns:v("auditAns"), journalAns:v("journalAns") || undefined, calculsJours:v("calculsJours") || 400}; }
-    const avant = {copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
+    const avant = {heure:(CONFIG.sauvegarde||{}).heure, retention:(CONFIG.sauvegarde||{}).retention, copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
     Object.keys(CONFIG).forEach(k=>{ if (!(k in N)) delete CONFIG[k]; }); Object.assign(CONFIG, N); ecrireConfig(CONFIG);   /* même objet (référencé par les autres services) */
-    const apres = {copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
+    const apres = {heure:(CONFIG.sauvegarde||{}).heure, retention:(CONFIG.sauvegarde||{}).retention, copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
     const ch = Object.keys(apres).filter(k=>JSON.stringify(avant[k]) !== JSON.stringify(apres[k])).map(k=>k+" : "+JSON.stringify(avant[k] === undefined ? null : avant[k]).slice(0, 200)+" → "+JSON.stringify(apres[k] === undefined ? null : apres[k]).slice(0, 200));
     await audit(C.login, "systeme.reglages", ch.join(" ; ").slice(0, 1800) || "aucun changement", ip);
     if (b.auditExterne && CONFIG.auditExterne){ try { await exporterAudit(); } catch(e){ avert.push("export de l'audit impossible : "+e.message); } }
@@ -2934,11 +3018,8 @@ async function traiter(req, res){
   if (p === "/api/v1/systeme/cle-sauvegarde" && req.method === "POST"){
     /* correctif 28 : mot de passe (et code de double authentification s'il est actif) redemandés ; la clé qui scelle
        l'audit n'est jointe que sur demande expresse (avec elle, l'audit peut être réécrit sans être détecté) */
-    const b = await corpsJson(req), c = await compteDe(C.login);
-    if (!c || !c.hash || !(await verifier(String(b.mdp || ""), c.hash))){ await audit(C.login, "sauvegarde.cle.refusee", "mot de passe incorrect", ip); return erreur(res, 403, "Mot de passe incorrect."); }
-    if (Number(c.a2f_actif) && c.a2f_secret){ let okC = -1; try { okC = TOTP.verifier(CF.dechiffrerTexte(c.a2f_secret, "secrets"), b.code, c.a2f_pas); } catch(e){}
-      if (okC < 0){ await audit(C.login, "sauvegarde.cle.refusee", "code de vérification incorrect", ip); return erreur(res, 403, "Code de vérification incorrect."); }
-      await B.run("UPDATE comptes SET a2f_pas=? WHERE login=?", okC, c.login); }
+    const b = await corpsJson(req), idt = await reauthentifier(C, b, ip, "sauvegarde.cle.refusee");
+    if (idt) return erreur(res, 403, idt);
     const avecAudit = b.audit === true;
     await audit(C.login, "sauvegarde.cle.telechargee", "trousseau "+CF.empreinte("sauvegarde")+(avecAudit ? " AVEC la clé de scellement de l'audit" : " (sans la clé de l'audit)"), ip);
     entetes(res, true); res.writeHead(200, {"Content-Type":"application/json; charset=utf-8", "Content-Disposition":"attachment; filename=\"fiwakti-trousseau-"+CF.empreinte("sauvegarde")+".key\""});
@@ -2979,6 +3060,18 @@ async function traiter(req, res){
     setTimeout(()=>process.exit(75), 800); return;
   }
   if (p === "/api/v1/sauvegardes" && req.method === "POST"){ try { return json(res, 200, await sauvegarder(C.login, "manuelle")); } catch(e){ return erreur(res, 500, e.message); } }
+  /* correctif 30 : planification enregistrée depuis l'écran Sauvegarde (heure 0 à 23, 3 à 365 sauvegardes gardées) */
+  if (p === "/api/v1/sauvegardes/planification" && req.method === "POST"){
+    const b = await corpsJson(req), sv = Object.assign({}, CONFIG.sauvegarde), av = {heure:sv.heure, retention:sv.retention};
+    if (Object.keys(b || {}).some(k=>k !== "heure" && k !== "retention")) return erreur(res, 400, "Seules l'heure et la rétention se règlent ici.");
+    if (!(typeof b.heure === "number" && Number.isInteger(b.heure) && b.heure >= 0 && b.heure <= 23)) return erreur(res, 400, "Heure de la sauvegarde : entier de 0 à 23.");
+    if (!(typeof b.retention === "number" && Number.isInteger(b.retention) && b.retention >= 3 && b.retention <= 365)) return erreur(res, 400, "Nombre de sauvegardes gardées : entier de 3 à 365.");
+    CONFIG.sauvegarde = Object.assign(sv, {heure:b.heure, retention:b.retention}); ecrireConfig(CONFIG);
+    await audit(C.login, "sauvegarde.planification", "heure "+av.heure+" → "+b.heure+" ; rétention "+av.retention+" → "+b.retention, ip);
+    return json(res, 200, {ok:true, heure:b.heure, retention:b.retention}); }
+  /* correctif 30 : planification (heure, rétention) lisible par l'écran Sauvegarde */
+  if (p === "/api/v1/sauvegardes" && req.method === "GET"){ const sv = CONFIG.sauvegarde || {};
+    return json(res, 200, {sauvegardes:listeSauvegardes().slice(0, 60), heure:Number.isInteger(+sv.heure) ? +sv.heure : 2, retention:Number(sv.retention) || 14, chiffrer:!!sv.chiffrer, copie:sv.copie || "", cle:CF.empreinte("sauvegarde"), enCours:!!SAUVEGARDE_EN_COURS, restauration:RESTAURATION ? {fichier:RESTAURATION.fichier, debut:RESTAURATION.debut} : null}); }
   if ((m = /^\/api\/v1\/sauvegardes\/([^/]+)$/.exec(p)) && req.method === "GET"){
     const f = path.join(D_SAUV, path.basename(decodeURIComponent(m[1])));
     if (!/\.(db|pgjson\.gz)(\.chiffre)?$/.test(f) || !fs.existsSync(f)) return erreur(res, 404, "Introuvable");
@@ -2987,7 +3080,10 @@ async function traiter(req, res){
     return fs.createReadStream(f).pipe(res);
   }
   if ((m = /^\/api\/v1\/sauvegardes\/([^/]+)\/restaurer$/.exec(p)) && req.method === "POST"){
-    try { return json(res, 200, await restaurer(decodeURIComponent(m[1]), C.login)); } catch(e){ return erreur(res, 400, e.message); }
+    /* correctif 30 : mot de passe (et code de double authentification) redemandés, comme pour le trousseau */
+    const b = await corpsJson(req), idt = await reauthentifier(C, b, ip, "restauration.refusee");
+    if (idt) return erreur(res, 403, idt);
+    try { return json(res, 200, await restaurer(decodeURIComponent(m[1]), C.login)); } catch(e){ return erreur(res, e.code === 409 ? 409 : 400, e.message); }
   }
   if (p === "/api/v1/mise-a-jour" && req.method === "POST"){
     try { const r = await appliquerMiseAJour(await corps(req, 80e6), C.login); json(res, 200, Object.assign({ok:true, redemarrage:true}, r)); setTimeout(()=>process.exit(75), 800); return; }
@@ -3367,6 +3463,10 @@ async function demarrer(){
   const port = Number(process.env.FIWAKTI_PORT) || Number(CONFIG.port) || (SECURISE ? 8443 : 8080);
   const gestion = (req, res) => {
     const t0 = process.hrtime.bigint(), chemin = String(req.url||"").split("?")[0], fam = familleRoute(req.method, chemin);
+    /* correctif 30 : pendant une restauration, toute écriture (et les envois des pointeuses, qui réessaient) est refusée */
+    const ecr = req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS";
+    if (RESTAURATION && (ecr || /^\/iclock\//i.test(chemin)) && !/^\/api\/v1\/(deconnexion|session)$/.test(chemin)){ res.setHeader("Retry-After", "60"); return erreur(res, 503, "Restauration d'une sauvegarde en cours : réessayez dans quelques minutes.", {maintenance:true}); }
+    if (ecr){ ECR_EN_VOL++; let fin = false; const moins = () => { if (!fin){ fin = true; ECR_EN_VOL--; } }; res.on("finish", moins); res.on("close", moins); }
     /* v56.15 : débit maximal par adresse et par session (429 au-delà), délai maximal par catégorie (503 au-delà) */
     const refuser = lim => { METRIQUES_ROBUSTESSE.refus429++; res.setHeader("Retry-After", String(lim)); return erreur(res, 429, "Trop de requêtes : réessayez dans "+lim+" s."); };
     /* v56.23 : plusieurs instances (PostgreSQL + FIWAKTI_MULTI_INSTANCE ou CONFIG.multiInstance) → compteur partagé dans la
@@ -3415,6 +3515,7 @@ async function demarrer(){
       SP = http.createServer((req, res)=>{
         const u = new URL(req.url, "http://x");
         if (!/^\/iclock\//i.test(u.pathname) || !CONFIG.installe){ res.writeHead(404); return res.end(); }
+        if (RESTAURATION){ res.writeHead(503, {"Retry-After":"60"}); return res.end(); }
         if (MOD && !MOD.estActif("FW-Time") && !MOD.estActif("FW-Acces")){ res.writeHead(403); return res.end(); }
         if (limiteDebit(req, "/api/iclock")){ res.writeHead(429); return res.end(); }
         (async ()=>PT.iclock(req, res, u, req.method === "POST" ? ()=>corps(req, 20e6) : ""))().catch(e=>{ journal("push : "+e.message); try { res.writeHead(500); res.end(); } catch(x){} });
@@ -3439,8 +3540,11 @@ async function demarrer(){
   /* v56.16 : tâches de fond déclarées au planificateur central (FW-Scheduler) — une seule minuterie, état visible */
   const installe = () => !!CONFIG.installe;
   PLAN.planifier("sauvegarde-quotidienne", {intervalle:10*60000, priorite:1, delai:30*60000, actif:installe, fn:async ()=>{
+    /* correctif 30 : date LOCALE de la dernière sauvegarde (la date UTC faisait tourner la sauvegarde de 0 h toutes les
+       10 minutes jusqu'à 1 h — 7 par nuit) */
+    const jl = x => { const d = new Date(x); return isNaN(d) ? "" : d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
     const h = new Date().getHours(), j = aujourdhui(), der = listeSauvegardes().find(m=>m.par === "automatique");
-    const hS = Number((CONFIG.sauvegarde||{}).heure); if (!(h >= (Number.isFinite(hS) && hS >= 0 && hS <= 23 ? hS : 2) && (!der || der.cree.slice(0,10) < j))) return "pas encore l'heure";
+    const hS = Number((CONFIG.sauvegarde||{}).heure); if (!(h >= (Number.isFinite(hS) && hS >= 0 && hS <= 23 ? hS : 2) && (!der || jl(der.cree) < j))) return "pas encore l'heure";
     await sauvegarder("automatique", "quotidienne");
     try { await conservation(false); } catch(e){ journal("conservation : "+e.message); }
     try { const v = await verifierAudit(); fs.appendFileSync(path.join(D_JOURN, "ancrages-audit.log"), maintenant()+" "+(v.ok ? v.dernier+" "+v.n : "RUPTURE "+JSON.stringify(v.rupture))+"\n"); } catch(e){}
