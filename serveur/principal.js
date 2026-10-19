@@ -517,7 +517,7 @@ async function synchroniserComptes(doc, par, empIds){
       await audit(par, "compte.renomme", rn.login+" → "+login); parUid.delete(String(u.id)); existants.delete(String(rn.login).toLowerCase()); rn.login = login; existants.set(login.toLowerCase(), rn); c = rn; }
     /* correctif 19/23 : jamais de mot de passe temporaire = matricule pour un compte administrateur ou ayant un droit
        d'écriture en Administration (un matricule se devine), ni à la création ni à la réinitialisation */
-    const matOk = !!mat && role !== "admin" && !({saisie:1, validation:1, config:1}[d.SYS]);
+    const matOk = !!mat && role !== "admin" && niveau === "simple" && !({saisie:1, validation:1, config:1}[d.SYS]);   /* portail salarié seulement */
     if (!c){
       /* correctif 19 : jamais de mot de passe temporaire = matricule pour un compte administrateur ou ayant un droit
          d'écriture en Administration (un matricule se devine) : ces comptes attendent un mot de passe (invitation) */
@@ -2809,7 +2809,7 @@ async function traiter(req, res){
        ne protégeait que la création) — un mot de passe temporaire aléatoire est remis à la place */
     let matInterdit = c.role === "admin";
     if (!matInterdit){ const refR = await D.referentielLecture() || {}, uR = (refR.users || []).find(x=>x && String(x.login || "").trim().toLowerCase() === String(c.login).toLowerCase());
-      const prR = uR && (refR.profils || []).find(x=>x && x.id === uR.profilId); matInterdit = !!(prR && ({saisie:1, validation:1, config:1}[(prR.droits || {}).SYS] || PERIM.niveauProfil(prR) === "admin")); }
+      const prR = uR && (refR.profils || []).find(x=>x && x.id === uR.profilId); matInterdit = !prR || !!({saisie:1, validation:1, config:1}[(prR.droits || {}).SYS]) || PERIM.niveauProfil(prR) !== "simple"; }
     if (c.matricule && b.mode !== "code" && !matInterdit){
       await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", aujourdhui(), c.login);
       await audit(C.login, "compte.reinitialise", c.login+" (matricule)", ip);
@@ -2822,6 +2822,17 @@ async function traiter(req, res){
   }
   /* correctif 23 : déverrouillage d'un compte par le serveur (le bouton de l'écran n'écrivait que dans le paramétrage :
      la connexion restait refusée) */
+  /* correctif 23 : changement de mot de passe imposé à la prochaine connexion (le bouton de l'écran ne changeait que le
+     paramétrage : la connexion répondait « changer: false ») */
+  if (p === "/api/v1/comptes/forcer" && req.method === "POST"){
+    const b = await corpsJson(req), c = await compteDe(b.login);
+    if (!c) return erreur(res, 404, "Compte inconnu du serveur.");
+    if (c.login.toLowerCase() === C.login.toLowerCase()) return erreur(res, 400, "Utilisez le changement de mot de passe pour votre propre compte.");
+    if (!c.hash) return erreur(res, 400, "Ce compte n'a pas encore de mot de passe : réinitialisez-le.");
+    await B.run("UPDATE comptes SET changer=1, raison='force' WHERE login=?", c.login);
+    await audit(C.login, "compte.changement_impose", c.login, ip);
+    return json(res, 200, {ok:true});
+  }
   if (p === "/api/v1/comptes/deverrouiller" && req.method === "POST"){
     const b = await corpsJson(req), c = await compteDe(b.login);
     if (!c) return erreur(res, 404, "Compte inconnu du serveur.");
@@ -2838,6 +2849,8 @@ async function traiter(req, res){
     if (q.actif === "1" || q.actif === "0"){ w.push("actif=?"); a.push(Number(q.actif)); }
     const lim = q.limite ? Math.min(2000, Math.max(1, Number(q.limite) || 200)) : 0, dec = Math.max(0, Number(q.decalage) || 0);
     const where = w.length ? " WHERE "+w.join(" AND ") : "";
+    if (q.resume === "1"){ const n = async sql=>Number(((await B.get(sql, maintenant())) || {}).n || 0);
+      return json(res, 200, {resume:{invite:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND etat='sans_mdp' AND ?<>''"), verrouille:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND verrou IS NOT NULL AND verrou>?")}}); }
     const comptes = await B.all("SELECT login,nom,role,actif,etat,changer,derniere,verrou,a2f_actif FROM comptes"+where+" ORDER BY login"+(lim ? " LIMIT "+lim+" OFFSET "+dec : ""), ...a);
     return json(res, 200, lim ? {comptes, total:Number(((await B.get("SELECT COUNT(*) AS n FROM comptes"+where, ...a)) || {}).n || 0)} : {comptes});
   }

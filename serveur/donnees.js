@@ -395,7 +395,27 @@ function creer(B, PERIM){
              délégations aux dates impossibles, périmètre sur des sites inexistants… étaient enregistrés) */
           const nouvE = ((((paquet.colls || {}).emps) || {}).put || []).filter(z=>z && z.id);
           const mU = controleUsers(ref.users || [], r.users, (await employes()).concat(nouvE), {sites:[].concat(ref.sites || [], Array.isArray(r.sites) ? r.sites : []), depts:[].concat(ref.depts || [], Array.isArray(r.depts) ? r.depts : []), terms:[].concat(ref.terms || [], Array.isArray(r.terms) ? r.terms : [])});
-          if (mU){ ignores.push("users ("+mU+")"); continue; } }
+          if (mU){ ignores.push("users ("+mU+")"); continue; }
+          /* correctif 23 : au moins un administrateur actif, jamais son propre compte retiré ou désactivé (l'installation se
+             retrouvait sans administrateur) ; aucune délégation d'un profil administrateur ; un compte valideur d'un circuit
+             ou destinataire d'une délégation de périmètre ne se supprime pas sans prévenir */
+          const prR = Array.isArray(r.profils) && peutK("profils") ? r.profils : (ref.profils || []), nivDe = id=>PERIM.niveauProfil(prR.find(p=>p && p.id === id));
+          const moiR = r.users.find(u=>u && u.id === (P.u || {}).id);
+          if (P.u && (!moiR || moiR.actif === false || nivDe(moiR.profilId) !== "admin")){ ignores.push("users (vous ne pouvez ni retirer, ni désactiver, ni rétrograder votre propre compte administrateur)"); continue; }
+          if ((ref.users || []).some(u=>u && u.actif !== false && nivDe(u.profilId) === "admin") && !r.users.some(u=>u && u.actif !== false && nivDe(u.profilId) === "admin")){ ignores.push("users (au moins un administrateur actif requis)"); continue; }
+          const avD = new Map((ref.users || []).filter(u=>u && u.id).map(u=>[u.id, JSON.stringify(u.deleg || [])]));
+          const dA = r.users.find(u=>u && avD.get(u.id) !== JSON.stringify(u.deleg || []) && (u.deleg || []).some(x=>x && nivDe(x.profilId) === "admin"));
+          if (dA){ ignores.push("users (compte « "+String(dA.login).slice(0, 40)+" » : un profil administrateur ne se délègue pas)"); continue; }
+          const actifsAp = new Set(r.users.filter(u=>u && u.actif !== false).map(u=>u.id)), partis = (ref.users || []).filter(u=>u && u.actif !== false && !actifsAp.has(u.id));
+          if (partis.length){ const pid = new Set(partis.map(u=>u.id)), circ = Array.isArray(r.circuits) && peutK("circuits") ? r.circuits : (ref.circuits || []);
+            const ci = circ.find(c=>c && (c.niveaux || []).some(n=>n && pid.has(String(n.qui || "").slice(5)) && String(n.qui).indexOf("user:") === 0));
+            if (ci){ const q = (ci.niveaux.find(n=>n && String(n.qui || "").indexOf("user:") === 0 && pid.has(String(n.qui).slice(5))) || {}).qui; const x = partis.find(u=>"user:"+u.id === q) || {};
+              ignores.push("users (compte « "+String(x.login).slice(0, 40)+" » valideur du circuit « "+String(ci.nom || ci.id).slice(0, 60)+" » : changez d'abord le circuit)"); continue; }
+            const dg = r.users.find(u=>u && (u.delegPerim || []).some(g=>g && pid.has(g.a)));
+            if (dg){ ignores.push("users (compte « "+String(dg.login).slice(0, 40)+" » : sa délégation de périmètre vise un compte retiré ou désactivé)"); continue; } } }
+        /* correctif 23 : comptes du portail salarié (mot de passe initial = matricule) : profil de niveau « simple » seulement */
+        if (k === "secu" && r.secu && r.secu.premiere && r.secu.premiere.profilId){ const pp = (Array.isArray(r.profils) && peutK("profils") ? r.profils : (ref.profils || [])).find(p=>p && p.id === r.secu.premiere.profilId);
+          if (!pp || PERIM.niveauProfil(pp) !== "simple"){ ignores.push("secu (profil des comptes du portail : niveau « simple » requis)"); continue; } }
         if (k === "users" && !admin){
           const moi = (r.users||[]).find(x=>x && x.id === P.u.id);
           /* correctif 23 : champs propres bornés (langue connue, préférences ≤ 32 Ko : 20 Mo étaient acceptés et alourdissaient

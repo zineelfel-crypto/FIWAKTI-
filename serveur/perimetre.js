@@ -48,7 +48,9 @@ function niveauProfil(p){
   return "simple";
 }
 function profilEff(C, u){
-  const d = C.jour, dl = (u.deleg||[]).find(x=>x.du <= d && d <= x.au && x.profilId);
+  /* correctif 23 : une délégation d'un profil de niveau administrateur est sans effet (elle donnait tous les pouvoirs
+     d'administration au délégataire, hors contrôle de l'écran Profils) */
+  const d = C.jour, dl = (u.deleg||[]).find(x=>x.du <= d && d <= x.au && x.profilId && niveauProfil((C.doc.profils||[]).find(p=>p && p.id === x.profilId)) !== "admin");
   const id = dl ? dl.profilId : u.profilId;
   return (C.doc.profils||[]).find(p=>p.id === id) || null;
 }

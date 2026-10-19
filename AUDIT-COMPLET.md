@@ -1654,3 +1654,33 @@ Vérifié :
   - Compteurs inchangés : seul le salarié 10188 diffère, ce qui était attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-22.zip (cumulatif : correctifs 2 à 21 inclus).
+
+## Correctif 23 — Administration › Utilisateurs (analyse approfondie)
+
+Deux analyses (serveur et sécurité des comptes ; écran et usages) sur le serveur réel, Chromium et 50 000 comptes du portail.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| U1 | Identifiant enregistré avec un espace (« ␣adm ») : connexion par « adm » sans la double authentification exigée, accès à `/comptes`, `/sessions`, `/systeme` | **critique** | identifiant nettoyé à l'enregistrement ; comparaisons sans espaces (double authentification, rôle revérifié, périmètre) |
+| U2 | Identifiant supprimé puis recréé (ou repris par une autre personne) : le nouveau titulaire ouvrait une session avec l'ancien mot de passe, la double authentification et l'historique de l'ancien | **critique** | compte remis à zéro (`compte.reactive`) ; compte retiré : mot de passe et secret effacés ; renommage = même compte (`compte.renomme`) |
+| U3 | Réinitialisation d'un administrateur (ou d'un profil en écriture en Administration) : mot de passe = matricule ; comptes du portail créés au matricule avec un profil RH | **haute** | matricule réservé aux comptes du portail (niveau « simple ») ; sinon mot de passe temporaire aléatoire ; profil du portail limité au niveau « simple » |
+| U4 | Délégation du profil Admin : le délégataire voyait et modifiait tout (sites, circuits, fiches hors périmètre) | **haute** | délégation d'un profil administrateur refusée et sans effet (serveur et écran) |
+| U5 | Un administrateur pouvait se désactiver (ou retirer le dernier administrateur) : installation bloquée | **haute** | refusé : son propre compte reste actif et administrateur ; au moins un administrateur actif |
+| U6 | Aucun contrôle des comptes : doublons (CHEF.S1 → rôle admin de chef.s1), même salarié sur deux comptes, salarié inexistant, HTML, formule, dates de délégation impossibles, délégation vers soi-même, périmètre sur des sites inexistants, langue « xx » | **haute** | `controleUsers` (comptes nouveaux ou modifiés) avec motif précis ; contrôles équivalents à l'écran |
+| U7 | Non-administrateur : préférences de 20 Mo (ouverture de chacun alourdie), langue HTML, date de dernière connexion falsifiée ; autres modifications ignorées sans le dire | **haute** | champs propres bornés (32 Ko, fr/en/ar), date jamais reprise du navigateur ; refus signalé « réservé à un administrateur » |
+| U8 | Boutons sans effet en mode serveur (code d'accès affiché mais refusé, invitation, « Déverrouiller », « Imposer un changement ») ; compte sans fiche salarié sans aucun moyen de recevoir un mot de passe ; « Réinitialiser la double authentification » de la fiche sans effet | **haute** | actions du serveur : réinitialisation (mot de passe temporaire affiché une fois), `POST /comptes/deverrouiller`, `POST /comptes/forcer`, double authentification ; boutons locaux masqués en mode serveur |
+| U9 | État et dernière connexion faux (tous « Invitation en attente », « Jamais connecté », verrouillage invisible) ; case « Double authentification » sans effet | **haute** | état, dernière connexion et compteurs lus sur le serveur ; case appliquée par le serveur |
+| U10 | 50 000 comptes : 161 s pour afficher la liste, 176 s pour une fiche ; `/comptes` de 7,6 Mo | **haute** | calcul inutile retiré, index des salariés et des comptes : 0,4 s et 1,1 s ; `/comptes` filtrable et paginable (`logins`, `q`, `limite`, `resume`), `/sessions` filtrable |
+| U11 | Énumération à la connexion : message et temps de réponse distincts pour un compte sans mot de passe, au matricule ou expiré | moyenne | réponse et coût identiques tant que le mot de passe n'est pas vérifié ; tentatives comptées |
+| U12 | Suppression d'un compte valideur d'un circuit ou destinataire d'une délégation de périmètre : acceptée, références orphelines | moyenne | refusée par le serveur ; impacts affichés avant suppression |
+| U13 | Audit : seules deux lignes « parametrage.modifie \| users » | moyenne | `comptes.modifies` (profil, activation, salarié, délégations, périmètre, double authentification), `compte.modifie`, `compte.deverrouille`, `compte.changement_impose` |
+| U14 | Écran : dates de délégation au format du navigateur, boutons et champs sans nom pour les lecteurs d'écran, export en français fixe avec 1/0 et tous les comptes du portail | basse | dates jj/mm/aaaa, étiquettes, export traduit (état, profil effectif, Oui/Non) des comptes de la liste |
+
+Non traité : la corbeille restaure un compte supprimé (le serveur le remet désormais à zéro s'il avait été retiré) ; envoi réel d'invitations par e-mail (non prévu par le serveur, boutons masqués) ; messages du serveur en français seulement.
+
+Vérifié :
+- **Copie neuve du serveur.** Scripts de preuve des deux analyses rejoués : contournement de la double authentification fermé, ancien mot de passe refusé après recréation, renommage conservant le mot de passe, réinitialisation d'un administrateur en mode code, 13 contenus piégés refusés, auto-désactivation et délégation Admin refusées, dépendances (circuit, délégation de périmètre) refusées, portail limité au niveau simple, préférences de 21 Mo refusées, déverrouillage et changement imposé effectifs, réponses de connexion identiques, audit détaillé.
+- **Chromium.** États lus sur le serveur, « Déverrouiller » et « Imposer un changement » effectifs, profils délégables sans Admin, validations, anglais et arabe, aucune erreur JavaScript ; 50 000 comptes : liste 0,4 s.
+- **Démonstration et non-régression.** Écran inchangé en démonstration ; 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-23.zip (cumulatif : correctifs 2 à 22 inclus).
