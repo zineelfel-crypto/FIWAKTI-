@@ -3338,6 +3338,15 @@ async function demarrer(){
   /* correctif 16 : sorties échues — les règles « sortie d'un salarié » s'exécutent dans le navigateur d'un compte RH (et
      jamais en grand effectif, où le navigateur ne reçoit pas les fiches). Le serveur signale dans le journal chaque sortie
      passée depuis plus d'un jour sans traitement, une seule fois par salarié et date de sortie. */
+  /* correctif 26 : absences en double d'une même demande et d'un même jour (régénérées par le navigateur avant ce correctif) :
+     la première est gardée, les autres supprimées et tracées */
+  PLAN.planifier("absences-doublons", {intervalle:24*3600000, premier:120000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+    const vus = new Set(), aSuppr = [];
+    for (const r of await B.all("SELECT id, mat, d, data FROM enreg WHERE coll='abs' AND data LIKE ? ORDER BY id", '%"dmdId"%')){
+      let x; try { x = JSON.parse(r.data); } catch(e){ continue; } if (!x.dmdId) continue; const k = x.dmdId+"|"+r.d+"|"+r.mat; if (vus.has(k)) aSuppr.push(r); else vus.add(k); }
+    for (const r of aSuppr) await B.run("DELETE FROM enreg WHERE coll='abs' AND id=?", r.id);
+    if (aSuppr.length){ try { await K.invalider(aSuppr.map(r=>r.mat+"|"+r.d), []); } catch(e){} await audit("systeme", "absences.doublons_supprimes", aSuppr.length+" absence(s) en double supprimée(s) ("+Array.from(new Set(aSuppr.map(r=>r.mat))).slice(0, 20).join(", ")+")", ""); }
+    return aSuppr.length+" doublon(s) supprimé(s)"; }});
   /* correctif 26 : délai d'un niveau de circuit — une demande restée en attente au-delà du délai est relancée (notification
      et trace dans l'historique et l'audit), une fois par niveau ; auparavant le délai saisi à l'écran n'avait aucun effet */
   PLAN.planifier("circuits-relances", {intervalle:3600000, premier:240000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{

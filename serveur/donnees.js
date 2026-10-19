@@ -26,6 +26,7 @@ function joursDe(coll, x){
 }
 const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
 const RANG = {lecture:1, saisie:2, validation:3, config:4};
+const PERIM_NIV = p => require("./perimetre.js").niveauProfil(p);
 /* correctif 18 : circuit de validation appliqué par le serveur (même logique que l'écran) — valideur du niveau en cours :
    responsable direct (hier), responsable du responsable (hier2), responsable du service ou du service parent
    (resp, respParent), profil désigné (profil:…, droit Absences ≥ validation, salarié du périmètre) ou compte désigné
@@ -545,6 +546,7 @@ function creer(B, PERIM){
         /* correctif 26 : les circuits valent pour toute l'entreprise — un compte limité à un site les réécrivait tous (et se
            désignait seul valideur) */
         if (k === "circuits" && !admin && P.set !== null){ ignores.push("circuits (réservé à un compte couvrant tout le personnel)"); continue; }
+        if (k === "circuits" && !admin && P.profil && acteEcran("circuits", "modifier")){ ignores.push("circuits (écran Circuits en lecture ou masqué pour ce profil)"); continue; }
         if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
         if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles, await sitesRetenus()); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
         if (k === "sites"){ const motif = await motifSites(); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
@@ -624,6 +626,10 @@ function creer(B, PERIM){
              pour un terminal */
           if (c === "ptg" && x.src === "badge" && (!avant || avant.src !== "badge") && !(opts || {}).recette){ refus++; ignores.push("ptg (origine « badge » réservée aux pointeuses)"); continue; }
           /* correctif 18 : absence saisie directement — liée à une demande acceptée, ou par la validation RH pour un tiers */
+          /* correctif 26 : une seule absence par demande et par jour (le navigateur régénérait les absences des demandes
+             acceptées avec de nouveaux identifiants à chaque ouverture : 2 à 3 lignes par jour, soldes faussés) */
+          if (c === "abs" && !avant && x.dmdId && x.d){ const dup = await B.get("SELECT id FROM enreg WHERE coll='abs' AND mat=? AND d=? AND id<>? AND data LIKE ? ESCAPE '\\' LIMIT 1", String(x.mat || ""), String(x.d), String(x.id), '%"dmdId":"'+JSON.stringify(String(x.dmdId)).slice(1, -1).replace(/[\\%_]/g, z=>"\\"+z)+'"%');
+            if (dup){ refus++; continue; } }
           if (c === "abs" && !admin && !avant){ let okA = false;
             if (x.dmdId){ const dm = await B.get("SELECT data FROM enreg WHERE coll='dmd' AND id=?", String(x.dmdId)); const dd = dm ? JSON.parse(dm.data) : null; okA = !!dd && dd.etat === "acceptee" && String(dd.mat) === String(x.mat) && String(dd.tt) === String(x.tt) && (!x.d || (x.d >= dd.du && x.d <= (dd.au || dd.du)));   /* correctif 26 : dates et type de la demande */ }
             if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
@@ -806,6 +812,10 @@ async function controleCircuitsBase(B, ref, apres, profils, users){
       const q = String(n.qui || "hier");
       if (QUI.indexOf(q) < 0 && !(q.indexOf("profil:") === 0 && (profils || []).some(p=>p && p.id === q.slice(7))) && !(q.indexOf("user:") === 0 && (users || []).some(u=>u && u.id === q.slice(5) && u.actif !== false))) return l+"valideur inconnu ("+q+")";
       /* correctif 26 : un profil valideur doit pouvoir valider (droit Absences ≥ validation) */
+      /* correctif 26 : un compte désigné doit pouvoir valider (profil avec droit Absences ≥ validation) — les comptes du portail
+         étaient acceptés */
+      if (q.indexOf("user:") === 0){ const uu = (users || []).find(u=>u && u.id === q.slice(5)), pu = uu && (profils || []).find(p=>p && p.id === uu.profilId);
+        if (!pu || !({validation:1, config:1}[(pu.droits || {}).ABS] === 1 || PERIM_NIV(pu) === "admin")) return l+"le compte « "+String((uu || {}).nom || q.slice(5)).slice(0, 60)+" » n'a pas le droit de valider les absences"; }
       if (q.indexOf("profil:") === 0){ const pr = (profils || []).find(p=>p && p.id === q.slice(7)); if (!pr || ({validation:1, config:1}[(pr.droits || {}).ABS] !== 1)) return l+"le profil « "+String((pr || {}).nom || q.slice(7)).slice(0, 60)+" » n'a pas le droit de valider les absences"; }
       if (Object.keys(n).some(k=>["qui", "delai", "min"].indexOf(k) < 0)) return l+"niveau : champ inconnu";
       for (const k of ["delai", "min"]) if (n[k] !== undefined && n[k] !== null && n[k] !== "" && !(Number(n[k]) >= 0 && Number(n[k]) <= 365)) return l+k+" invalide";

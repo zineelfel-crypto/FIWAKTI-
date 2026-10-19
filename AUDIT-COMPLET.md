@@ -1763,3 +1763,42 @@ Vérifié :
   - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-25.zip (cumulatif : correctifs 2 à 24 inclus).
+
+## Correctif 26 — Administration › Circuits (analyse approfondie)
+
+Deux analyses (serveur et application réelle des circuits ; écran et parcours des demandes) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| C1 | Demande acceptée modifiable par le demandeur (congé prolongé du 02/11 au 31/12, type changé), décision toujours affichée | **critique** | demande décidée figée (correction par demande de rectification) |
+| C2 | Absences d'une demande acceptée régénérées à chaque ouverture avec de nouveaux identifiants : 2 à 3 absences par jour en base (soldes faussés) | **haute** | identifiant fixe (demande + jour), plus de régénération en mode serveur, doublon refusé par le serveur, doublons existants supprimés par une tâche (tracée) |
+| C3 | En attente : contenu changé sans recalcul du circuit (visite médicale devenue congé de 30 jours validé par le seul responsable) ; valideur changeant dates et type | **haute** | contenu modifiable par le seul demandeur avant toute validation, circuit recalculé |
+| C4 | Seuil de durée (« min ») rendant le niveau toujours facultatif | **haute** | durée calculée par le serveur (jours ouvrés ou heures) |
+| C5 | Profil valideur sans droit de validation accepté (mission bloquée) ; profil sans titulaire bloquant au serveur mais sauté par l'écran ; comptes du portail proposés et acceptés comme valideurs | **haute** | droit Absences ≥ validation exigé (profils et comptes), titulaire couvrant le salarié exigé, liste des valideurs limitée |
+| C6 | « Bloquer si aucun valideur » ignoré par le serveur ; règle « sans valideur » différente entre écran et serveur | **haute** | appliqué (décision réservée à l'administrateur) ; écran aligné (RH du périmètre) |
+| C7 | Demande sans circuit ou pour soi annoncée « acceptée », refusée par le serveur puis disparue (notification « acceptée » envoyée) ; motif affiché trompeur | **haute** | en attente de la RH du périmètre ; motif de refus de la demande affiché en priorité |
+| C8 | Circuits réécrits par un compte limité à un site ou avec l'écran en lecture (désignation de soi comme seul valideur) | **haute** | réservés à un compte couvrant tout le personnel, écran non masqué ni en lecture |
+| C9 | Circuit utilisé supprimé si son identifiant contient « _ » ; suppression proposée à l'écran puis refusée | **haute** | motif échappé ; suppression bloquée dès la confirmation |
+| C10 | Modifier un circuit changeait les demandes en cours (niveau RH retiré après validation du responsable) | moyenne | niveaux figés dans la demande à sa création |
+| C11 | Demande supprimée au lieu d'être traitée (acceptée par le demandeur, en attente par la RH) ; absence rattachée à une demande aux dates ou au type différents | moyenne | demande décidée non supprimable, en attente supprimable par le seul demandeur ; dates et type contrôlés |
+| C12 | Délai d'un niveau sans aucun effet | moyenne | relance du valideur (notification, historique, audit) une fois par niveau |
+| C13 | Historique écrit par le navigateur (fausse ligne « validé — Directeur général ») ; audit sans décisions ni contenu des circuits | moyenne | historique en ajout seul, actions conformes à ce qui se passe, auteur et heure imposés ; `demande.*` et `circuits.modifies` |
+| C14 | Contenu peu contrôlé (clés inconnues, réglage HTML, nom en double, même type sur la même population) ; écran : services non éditables, ordre non modifiable, délai non borné, 20 036 valideurs proposés (3,1 s), export réduit à 3 colonnes | basse / moyenne | contrôles serveur ; section « Services concernés », boutons ↑ ↓, délai 0–365, export complet traduit |
+
+Non traité : passage automatique au niveau suivant après le délai (choix : relance seulement) ; aperçu « quel circuit pour quel salarié ».
+
+Vérifié :
+- **Copie neuve du serveur, scripts de preuve rejoués.**
+  - Falsifications refusées : circuit ou niveau, auto-validation, valideur RH à la place du responsable.
+  - Congé accepté non prolongeable ; contenu modifié par le valideur refusé ; changement de type par le demandeur avec recalcul.
+  - Seuil de 5 jours appliqué ; délégations ; suppression d'un circuit utilisé (« ci_x ») refusée ; niveaux figés ; suppressions encadrées.
+  - Profil en lecture, compte du portail, clé inconnue refusés ; circuits réécrits par chef.s1 refusés.
+  - Relance exécutée ; absence en double refusée et doublon existant supprimé ; audit détaillé.
+- **Chromium (20 000 salariés).**
+  - Demande sans circuit restée en attente puis acceptée par la validation.
+  - Services, ordre (↑ ↓) enregistré ; anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration et non-régression.**
+  - Démonstration inchangée (acceptation locale).
+  - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-26.zip (cumulatif : correctifs 2 à 25 inclus).
