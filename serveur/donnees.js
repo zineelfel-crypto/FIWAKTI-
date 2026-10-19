@@ -265,6 +265,8 @@ function creer(B, PERIM){
     const vue = PERIM.vue(Object.assign({}, ref, {emps}), login).doc;
     /* correctif 24 : réglages d'envoi d'e-mails (serveur, identifiant, expéditeur) réservés à l'administrateur */
     if (!opts.admin && !(P.profil && PERIM.niveauProfil(P.profil) === "admin") && vue.secu && vue.secu.smtp) vue.secu = Object.assign({}, vue.secu, {smtp:{}});
+    /* correctif 29 : paramétrage d'un module non activé (calendriers, compteurs, zones…) non servi */
+    if (API.moduleRefus) Object.keys(vue).forEach(k=>{ if (k.indexOf("__") !== 0 && COLLS.indexOf(k) < 0 && Array.isArray(vue[k]) && API.moduleRefus("ref", k)) vue[k] = []; });
     const nb = P.set === null ? emps.length : P.set.size;
     const grand = nb > (opts.seuil || 1000);
     /* grand effectif : le navigateur ne garde que les deux derniers jours ; le reste est calculé par le serveur */

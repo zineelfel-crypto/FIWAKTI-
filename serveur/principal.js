@@ -699,6 +699,10 @@ function lireLicence(cle){
   if (p.id && REVOQUES.has(String(p.id))) return {ok:false, motif:"Licence révoquée par le fournisseur.", charge:p};
   /* v55 : licence v2 — liste explicite de modules FW- (fw), ou lettres historiques P / A */
   if (!/^(P|A|PA)$/.test(p.modules||"") && !(Array.isArray(p.fw) && p.fw.length && p.fw.every(x=>MODULES.ID_OK.test(x)))) return {ok:false, motif:"Modules inconnus."};
+  /* correctif 29 : capacité et dates contrôlées (une capacité de 0 ou négative valait « illimitée ») */
+  if (p.capacite !== undefined && p.capacite !== null && !(Number.isInteger(Number(p.capacite)) && Number(p.capacite) > 0)) return {ok:false, motif:"Licence invalide : capacité (nombre de salariés) incorrecte.", charge:p};
+  for (const k of ["debut", "fin", "expire"]) if (p[k] !== undefined && p[k] !== null && p[k] !== "" && !LICENCE.dateOk(p[k])) return {ok:false, motif:"Licence invalide : date « "+k+" » incorrecte.", charge:p};
+  if (p.debut && (p.fin || p.expire) && p.debut > (p.fin || p.expire)) return {ok:false, motif:"Licence invalide : la date de début suit la date de fin.", charge:p};
   return {ok:true, charge:p};
 }
 async function licenceActive(){ const l = await meta("licence"); if (!l) return null; const r = lireLicence(l.cle); return r.ok ? Object.assign({cle:l.cle, activee:l.activee}, r.charge) : null; }
@@ -711,6 +715,13 @@ const REVOQUES = new Set(), JETONS_SESS = new Map(), LOGIN_FOURNISSEUR = "fourni
 async function revocationsCharger(){ try { ((await meta("revocations")) || []).forEach(x=>REVOQUES.add(String(x))); } catch(e){} }
 async function revocationsAjouter(l){ if (!Array.isArray(l) || !l.length) return 0; let n = 0; l.forEach(x=>{ if (!REVOQUES.has(String(x))){ REVOQUES.add(String(x)); n++; } });
   if (n) await meta("revocations", Array.from(REVOQUES)); return n; }
+/* correctif 29 : licence en consultation seule ou bloquée — les tâches qui écrivent ne tournent pas */
+const licenceRestreinte = () => !!(LIC_CACHE.v && LIC_CACHE.v.e && LIC_CACHE.v.e.restriction);
+async function conserverLicence(m){
+  for (const k of ["licence", "licence_suivante", "modules_licencies", "horloge", "jetons_utilises"]) if (m[k] != null) try { await meta(k, m[k]); } catch(e){}
+  try { const r0 = (await meta("revocations")) || []; const u = Array.from(new Set([].concat(r0, m.revocations || []).map(String))); await meta("revocations", u); u.forEach(x=>REVOQUES.add(x)); } catch(e){}
+  LIC_CACHE.t = 0;
+}
 function lireJeton(j){
   const m = /^FWJ1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(String(j||"").replace(/\s+/g,""));
   if (!m) return {ok:false, motif:"Jeton non reconnu."};
@@ -719,6 +730,9 @@ function lireJeton(j){
   if (!p.empreinte || p.empreinte !== empreinteMachine()) return {ok:false, motif:"Jeton émis pour une autre installation."};
   const exp = Date.parse(p.exp||""), em = Date.parse(p.emis||"");
   if (!exp || !em || exp - em > 3700000) return {ok:false, motif:"Jeton invalide (durée supérieure à une heure)."};
+  /* correctif 29 : émis dans le futur ou valable plus d'une heure à partir de maintenant → refusé ; identifiant exigé */
+  if (em > Date.now() + 5*60000 || exp - Date.now() > 3700000) return {ok:false, motif:"Jeton invalide (dates incohérentes)."};
+  if (!p.id || !/^[A-Za-z0-9_.:-]{4,80}$/.test(String(p.id))) return {ok:false, motif:"Jeton invalide (identifiant manquant)."};
   if (Date.now() > exp) return {ok:false, motif:"Jeton expiré : demandez-en un nouveau au fournisseur."};
   if (p.id && REVOQUES.has(String(p.id))) return {ok:false, motif:"Jeton révoqué."};
   return {ok:true, charge:p, exp};
@@ -951,7 +965,11 @@ async function restaurerInterne(fichier, par){
   { const out = fs.openSync(fAud, "w", 0o600); try { for (let dernier = depuisId === null ? 0 : depuisId; ; ){ const l = depuisId === null ? await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? AND ts >= ? ORDER BY id LIMIT 5000", dernier, depuisSauv) : await B.all("SELECT id, ts, login, action, detail, ip, empreinte FROM audit WHERE id > ? ORDER BY id LIMIT 5000", dernier); if (!l.length) break; fs.writeSync(out, l.map(r=>JSON.stringify(r)).join("\n")+"\n"); dernier = Number(l[l.length-1].id); } } finally { fs.closeSync(out); } }
   let source = f, tmp = null;
   if (man.chiffre){ tmp = path.join(os.tmpdir(), "fiwakti-rest-"+crypto.randomBytes(6).toString("hex")+B.extension); await CF.dechiffrerFichier(f, tmp, "sauvegarde"); source = tmp; }
+  /* correctif 29 : la licence en place, ses révocations, l'horloge protégée et les jetons utilisés survivent à la
+     restauration (restaurer une ancienne sauvegarde remettait une licence révoquée et reculait l'échéance) */
+  const metaLic = {}; for (const k of ["licence", "licence_suivante", "modules_licencies", "revocations", "horloge", "jetons_utilises"]) try { metaLic[k] = await meta(k); } catch(e){}
   try { B = await B.restaurer(source); } finally { if (tmp) try { fs.unlinkSync(tmp); } catch(e){} }
+  await conserverLicence(metaLic);
   D = DONNEES_MOD.creer(B, PERIM);
   K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
@@ -1060,7 +1078,7 @@ async function appliquerMajModule(paquet, par){
   if (contenu.socleMin && vNum(VERSION) < vNum(contenu.socleMin)) throw new Error("Ce module demande FIWAKTI "+contenu.socleMin+" ou plus (installé : "+VERSION+") : mettez d'abord à jour l'application.");
   if (contenu.socleMax && vNum(VERSION) > vNum(contenu.socleMax)) throw new Error("Ce module est prévu pour FIWAKTI "+contenu.socleMax+" au plus (installé : "+VERSION+").");
   const noms = Object.keys(contenu.fichiers||{}); if (!noms.length) throw new Error("Paquet vide.");
-  const ok = n => n === "serveur/modules/"+id+".json" || n === "serveur/modules/"+id+".serveur.js" || new RegExp("^serveur/modules/"+id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")+"\\.[A-Za-z0-9-]+\\.js$").test(n) || new RegExp("^app/modules/"+id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")+"/[A-Za-z0-9._-]+$").test(n);
+  const ok = n => n === "serveur/modules/"+id+".json" || n === "serveur/modules/"+id+".serveur.js" || new RegExp("^serveur/modules/"+id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")+"\\.[A-Za-z0-9-]+\\.js$").test(n) || (new RegExp("^app/modules/"+id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")+"/[A-Za-z0-9._-]+$").test(n) && !/\/\.{1,2}$/.test(n));   /* correctif 29 : « . » et « .. » refusés */
   const refuse = noms.filter(n=>!ok(n)); if (refuse.length) throw new Error("Fichier hors du module "+id+" refusé : "+refuse[0]);
   if (!contenu.fichiers["serveur/modules/"+id+".json"]) throw new Error("Manifeste du module absent.");
   const man = JSON.parse(Buffer.from(contenu.fichiers["serveur/modules/"+id+".json"].b64, "base64").toString("utf8"));
@@ -1068,6 +1086,9 @@ async function appliquerMajModule(paquet, par){
   const connus = new Set(MOD ? MOD.liste().filter(m=>m.implemente || m.socle).map(m=>m.id) : []); connus.add(id);
   const manquantes = (man.deps||[]).filter(d=>!connus.has(d)); if (manquantes.length) throw new Error("Dépendance absente : "+manquantes.join(", ")+" — installez-la d'abord.");
   const V = path.join(RACINE, "versions", VERSION), avant = (MOD ? MOD.liste().find(m=>m.id === id) : null), versionAvant = avant && avant.version || "";
+  /* correctif 29 : pas de retour à une version plus ancienne par un paquet (le retour arrière a son propre bouton) */
+  if (versionAvant && man.version && vNum(man.version) < vNum(versionAvant)) throw new Error("Ce paquet contient une version plus ancienne ("+man.version+") que celle en place ("+versionAvant+") : utilisez « revenir à la version précédente ».");
+  for (const rel of noms){ const abs = path.resolve(V, rel); if (!abs.startsWith(path.resolve(V)+path.sep)) throw new Error("Chemin refusé : "+rel); }
   journalMaj("module "+id+" "+(versionAvant||"—")+" → "+(man.version||"?")+" par "+par);
   /* sauvegarde des fichiers en place (retour arrière) */
   const dP = path.join(V, "modules-precedents", id); fs.rmSync(dP, {recursive:true, force:true}); fs.mkdirSync(dP, {recursive:true});
@@ -1575,7 +1596,8 @@ async function traiter(req, res){
         if (/\.chiffre$/.test(nom)){ tmp = path.join(os.tmpdir(), "fiwakti-reprise-"+crypto.randomBytes(6).toString("hex")); await CF.dechiffrerFichier(dest, tmp, "sauvegarde"); source = tmp; }
         const v = await B.verifierExport(source, null);
         if (!v.ok) throw new Error("Sauvegarde illisible : "+v.motif);
-        B = await B.restaurer(source); D = DONNEES_MOD.creer(B, PERIM); K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
+        const metaLicI = {}; for (const k of ["licence", "licence_suivante", "modules_licencies", "revocations", "horloge"]) try { metaLicI[k] = await meta(k); } catch(e){}
+        B = await B.restaurer(source); await conserverLicence(metaLicI); D = DONNEES_MOD.creer(B, PERIM); K.arreter(); K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG}); initPointeuses(); await chargerModules();
         /* v56.23 : clés des données chiffrées présentes et identiques, sinon reprise refusée (importer le trousseau
            complet, puis relancer la restauration) */
         { let attendu = {}; try { const r = await B.get("SELECT v FROM meta WHERE k='cles_empreintes'"); attendu = r && r.v ? JSON.parse(r.v) : {}; if (typeof attendu === "string") attendu = JSON.parse(attendu); if (!attendu || typeof attendu !== "object") attendu = {}; } catch(e){}
@@ -1676,6 +1698,9 @@ async function traiter(req, res){
   if (p === "/api/v1/licence/jeton" && req.method === "POST"){
     const e = ESSAIS_IP.get(ip) || {n:0, t:Date.now()}; if (e.n >= 20) return erreur(res, 429, "Trop de tentatives depuis ce poste.");
     const b = await corpsJson(req); const r = lireJeton(b.jeton);
+    /* correctif 29 : jeton à usage unique (le même jeton ouvrait plusieurs sessions) */
+    if (r.ok){ const util = (await meta("jetons_utilises")) || {}, n0 = Date.now(); Object.keys(util).forEach(k=>{ if (util[k] < n0) delete util[k]; });
+      if (util[r.charge.id]){ r.ok = false; r.motif = "Jeton déjà utilisé : demandez-en un nouveau au fournisseur."; } else { util[r.charge.id] = r.exp; await meta("jetons_utilises", util); } }
     if (!r.ok){ e.n++; ESSAIS_IP.set(ip, e); await audit("", "licence.jeton.refuse", r.motif, ip); return erreur(res, 400, r.motif); }
     if (!(await compteDe(LOGIN_FOURNISSEUR))) await B.run("INSERT INTO comptes(login,uid,nom,role,actif,hash,etat,changer,maj,mdp_le) VALUES(?,?,?,?,1,NULL,'actif',0,?,?)", LOGIN_FOURNISSEUR, "fournisseur", "Intervention du fournisseur", "fournisseur", maintenant(), maintenant());
     else await B.run("UPDATE comptes SET role='fournisseur', actif=1, hash=NULL WHERE login=?", LOGIN_FOURNISSEUR);
@@ -1886,6 +1911,12 @@ async function traiter(req, res){
     const deptsAvant = paquet.ref && Array.isArray(paquet.ref.depts) ? (((await D.referentielLecture()) || {}).depts || []) : null;
     const circuitsAvant = paquet.ref && Array.isArray(paquet.ref.circuits) ? (((await D.referentielLecture()) || {}).circuits || []) : null;
     const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
+    /* correctif 29 : capacité de la licence (nombre de salariés actifs) appliquée — elle n'était contrôlée nulle part */
+    if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length){ const licC = await licenceActive(), capa = licC ? LICENCE.normaliser(licC).capacite : null;
+      if (capa){ const tous = await D.employes(), parId = new Map(tous.map(e=>[String(e.id), e])), j0 = aujourdhui(), compte = e => !!e && !(e.sortie && e.sortie < j0) && e.recette !== true && !/^rec_/.test(String(e.id));
+        const actifs = tous.filter(compte).length, plus = paquet.colls.emps.put.filter(x=>x && compte(x) && !compte(parId.get(String(x.id)))).length;
+        if (plus && actifs + plus > capa){ const m = "Capacité de la licence atteinte : "+actifs+" salarié(s) actif(s), "+plus+" à ajouter ou réactiver, "+capa+" autorisé(s). Demandez une extension à votre fournisseur.";
+          await audit(C.login, "licence.capacite", m, ip); return erreur(res, 403, m, {capacite:true}); } } }
     const empsAvantIds = paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length ? new Set((await D.employes()).map(e=>String(e.id))) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
@@ -2098,6 +2129,8 @@ async function traiter(req, res){
   if (p === "/api/v1/travaux" && req.method === "POST"){
     const b = await corpsJson(req, 2e6);
     if (b.type !== "etat" || !b.etat || typeof b.etat !== "object" || !Array.isArray(b.etat.champs)) return erreur(res, 400, "Travail inconnu.");
+    /* correctif 29 : compteurs de temps (module Temps et présence) non exportables sans ce module */
+    if (MOD && !MOD.estActif("FW-Time") && b.etat.champs.length) return erreur(res, 403, "Les compteurs de temps relèvent du module « Temps et présence », non activé.");
     /* correctif 13 : mêmes contrôles que l'écran États, appliqués par le serveur — menu masqué, action « exporter »
        retirée, liste des états autorisés du profil ; la définition est relue dans le référentiel (seules les options
        de la visualisation sont reprises du navigateur, contrôlées) ; période contrôlée (dates valides, 3 ans au plus) */
@@ -2996,6 +3029,8 @@ async function traiter(req, res){
         await audit(C.login, "licence.programmee", JSON.stringify(diff)+(b.reference ? " — réf. "+String(b.reference).slice(0, 60) : ""), ip);
         return json(res, 200, {ok:true, programmee:true, debut:N.debut, changements:diff});
       }
+      /* correctif 29 : remplacer une licence valable par une licence déjà échue (consultation seule ou blocage) est refusé */
+      if (eN.restriction && !(LV.e && LV.e.restriction)){ const m = "Licence refusée : elle est déjà échue (fin le "+String(N.fin || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1")+") alors que la licence en place est valable."; await audit(C.login, "licence.refusee", m, ip); return erreur(res, 400, m); }
       const nRev = await revocationsAjouter(r.charge.revoque);
       if (nRev) await audit(C.login, "licence.revocation", nRev+" licence(s) ou jeton(s) révoqué(s) : "+r.charge.revoque.join(", "), ip);
       await meta("licence", {cle, activee:maintenant()});
@@ -3422,7 +3457,7 @@ async function demarrer(){
      passée depuis plus d'un jour sans traitement, une seule fois par salarié et date de sortie. */
   /* correctif 26 : absences en double d'une même demande et d'un même jour (régénérées par le navigateur avant ce correctif) :
      la première est gardée, les autres supprimées et tracées */
-  PLAN.planifier("absences-doublons", {intervalle:24*3600000, premier:120000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+  PLAN.planifier("absences-doublons", {intervalle:24*3600000, premier:120000, priorite:4, delai:30*60000, actif:()=>installe() && (!MOD || MOD.estActif("FW-Time")) && !licenceRestreinte(), fn:async ()=>{
     const vus = new Set(), aSuppr = [];
     for (const r of await B.all("SELECT id, mat, d, data FROM enreg WHERE coll='abs' AND data LIKE ? ORDER BY id", '%"dmdId"%')){
       let x; try { x = JSON.parse(r.data); } catch(e){ continue; } if (!x.dmdId) continue; const k = x.dmdId+"|"+r.d+"|"+r.mat; if (vus.has(k)) aSuppr.push(r); else vus.add(k); }
@@ -3431,7 +3466,7 @@ async function demarrer(){
     return aSuppr.length+" doublon(s) supprimé(s)"; }});
   /* correctif 26 : délai d'un niveau de circuit — une demande restée en attente au-delà du délai est relancée (notification
      et trace dans l'historique et l'audit), une fois par niveau ; auparavant le délai saisi à l'écran n'avait aucun effet */
-  PLAN.planifier("circuits-relances", {intervalle:3600000, premier:240000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+  PLAN.planifier("circuits-relances", {intervalle:3600000, premier:240000, priorite:4, delai:30*60000, actif:()=>installe() && (!MOD || MOD.estActif("FW-Time")) && !licenceRestreinte(), fn:async ()=>{
     const ref = await D.referentielLecture() || {}, j = aujourdhui(), z = v => String(v).padStart(2, "0"), n0 = new Date(); let n = 0;
     for (const row of await B.all("SELECT id, data FROM enreg WHERE coll='dmd' AND (data LIKE ? OR data NOT LIKE ?)", '%"etat":"attente"%', '%"etat":%')){
       let x; try { x = JSON.parse(row.data); } catch(e){ continue; } if ((x.etat || "attente") !== "attente") continue;
@@ -3446,7 +3481,7 @@ async function demarrer(){
     return n+" demande(s) relancée(s)"; }});
   /* correctif 25 : règles métier — sorties arrivées à échéance, services passés « hors effectif » : exécutées par le serveur
      (auparavant seulement signalées : « sortie non traitée ») */
-  PLAN.planifier("regles-metier", {intervalle:3600000, premier:180000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+  PLAN.planifier("regles-metier", {intervalle:3600000, premier:180000, priorite:4, delai:30*60000, actif:()=>installe() && !licenceRestreinte(), fn:async ()=>{
     const r = await executerRegles(null, "système", new Set()); return r.executions+" exécution(s), "+r.actions+" action(s)"; }});
   PLAN.planifier("purge-biometrique", {intervalle:6*3600000, premier:120000, priorite:3, delai:30*60000, actif:()=>installe() && !!PT, fn:async ()=>{ const r = await BS().purgerVisages(); return r.gabarits+" gabarit(s) de "+r.salaries+" salarié(s) effacé(s)"; }});
   PLAN.planifier("debit-purge", {intervalle:60000, priorite:3, delai:30000, actif:()=>installe() && B.type === "pg", fn:async ()=>{

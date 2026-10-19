@@ -14,7 +14,8 @@ const POLITIQUES = {
   contrat:       {grace:7, apres:"lecture"}    /* 4. politique contractuelle : grâce et effet portés par la licence */
 };
 const RAPPELS_DEFAUT = [30, 15, 7, 1];
-const dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s||""));
+/* correctif 29 : date réelle (« 2027-13-45 » provoquait une erreur 500) */
+const dateOk = s => { s = String(s||""); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; const d = new Date(s+"T12:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 function ajout(d, n){ const x = new Date(d+"T12:00:00Z"); x.setUTCDate(x.getUTCDate()+n); return x.toISOString().slice(0, 10); }
 function ecart(a, b){ return Math.round((Date.parse(b+"T12:00:00Z") - Date.parse(a+"T12:00:00Z")) / 864e5); }
 
@@ -26,7 +27,7 @@ function normaliser(p){
   const rappels = Array.isArray(p.rappels) && p.rappels.length ? p.rappels.map(Number).filter(n=>n > 0 && n <= 365).sort((a, b)=>b-a) : RAPPELS_DEFAUT;
   return {id:p.id || "", client:p.client || "", serie:Number(p.serie) || 0, debut:dateOk(p.debut) ? p.debut : null,
     fin:dateOk(p.fin) ? p.fin : (dateOk(p.expire) ? p.expire : null), politique:nomPol, grace, apres, rappels,
-    capacite:Number(p.capacite) || null};
+    capacite:Number.isInteger(Number(p.capacite)) && Number(p.capacite) > 0 ? Number(p.capacite) : null};
 }
 
 /* état de la licence à la date « jour » (date effective du serveur, horloge protégée) */
@@ -79,4 +80,4 @@ function creerHorloge({lire, ecrire, chiffrer, dechiffrer, aujourdhui, signaler}
   return {jour, oublier(){ derniere = null; }};
 }
 
-module.exports = {POLITIQUES, RAPPELS_DEFAUT, normaliser, etat, rappelDu, differences, creerHorloge, ajout, ecart};
+module.exports = {dateOk, POLITIQUES, RAPPELS_DEFAUT, normaliser, etat, rappelDu, differences, creerHorloge, ajout, ecart};
