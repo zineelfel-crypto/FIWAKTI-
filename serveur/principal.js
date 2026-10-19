@@ -616,13 +616,13 @@ async function portailGenerer(par, ids, ip){
    nouveaux : salariés créés par l'envoi. */
 const REGLE_LIB = {desac_compte:"compte désactivé", desac_portail:"portail désactivé", bloquer_badge:"badge bloqué", retirer_acces:"accès aux zones retirés", retirer_bio:"biométrie retirée des appareils", notif_rh:"notification RH", archiver:"(sans effet)", maj_workflows:"(sans effet)"};
 let REGLES_EN_COURS = Promise.resolve();
-function executerRegles(ids, par, nouveaux){ const p = REGLES_EN_COURS.then(()=>executerRegles0(ids, par, nouveaux || new Set())); REGLES_EN_COURS = p.catch(()=>{}); return p; }
-async function executerRegles0(ids, par, nouveaux){
+function executerRegles(ids, par, nouveaux, horsForce){ const p = REGLES_EN_COURS.then(()=>executerRegles0(ids, par, nouveaux || new Set(), horsForce || new Set())); REGLES_EN_COURS = p.catch(()=>{}); return p; }
+async function executerRegles0(ids, par, nouveaux, horsForce){
   const ref = await D.referentielLecture() || {}, j = aujourdhui(), regles = (ref.regles || []).filter(r=>r && r.actif === true && Array.isArray(r.actions));
   const hors = new Set((ref.depts || []).filter(d=>d && d.type === "hors").map(d=>d.id)), siteNom = id => ((ref.sites || []).find(s=>s && s.id === id) || {}).nom || id || "—";
   const z = v => String(v).padStart(2, "0"), n0 = new Date(), ts = n0.getFullYear()+"-"+z(n0.getMonth()+1)+"-"+z(n0.getDate())+" "+z(n0.getHours())+":"+z(n0.getMinutes());
   const jjmm = d => String(d || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1");
-  const journalL = [], notifs = [], comptesOff = new Map(), bio = new Set(), bilan = {salaries:0, executions:0, actions:0};
+  const journalL = [], notifs = [], comptesOff = new Map(), bio = new Set(), bilan = {salaries:0, executions:0, actions:0, mats:[]};
   const liste = (await D.employes()).filter(e=>e && e.id && (!ids || ids.has(String(e.id))));
   for (const e of liste){
     const etat = e.regleEtat && typeof e.regleEtat === "object" ? e.regleEtat : null, evts = [], x = JSON.parse(JSON.stringify(e)), nouv = nouveaux.has(String(e.id));
@@ -632,7 +632,7 @@ async function executerRegles0(ids, par, nouveaux){
       journalL.push({id:"js_reint_"+String(e.mat).replace(/[^A-Za-z0-9_.:-]/g, "_")+"_"+j, type:"systeme", code:"reintegration", mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim(), msg:"sortie annulée : les effets des règles de sortie (compte, portail, badge, accès, biométrie) sont à rétablir manuellement", par:"système", ts, at:ts+":00", srv:1}); }
     if (etat && !nouv && (etat.siteId !== (e.siteId || "") || etat.deptId !== (e.deptId || ""))) evts.push({type:"employe.mutation", detail:"→ "+siteNom(e.siteId)+" / "+(((ref.depts || []).find(d=>d && d.id === e.deptId) || {}).nom || e.deptId || "—")});
     const estHors = hors.has(e.deptId);
-    if (estHors && ((etat && !etat.hors) || (!etat && nouv))) evts.push({type:"employe.hors_effectif", detail:(((ref.depts || []).find(d=>d && d.id === e.deptId) || {}).nom || "hors effectif")});
+    if (estHors && !(e.sortie && e.sortie <= j) && ((etat && !etat.hors) || (!etat && (nouv || horsForce.has(e.deptId))))) evts.push({type:"employe.hors_effectif", detail:(((ref.depts || []).find(d=>d && d.id === e.deptId) || {}).nom || "hors effectif")});
     /* état de référence : posé à chaque fiche enregistrée ; la tâche planifiée ne réécrit pas 20 000 fiches pour l'initialiser */
     if (ids || etat || evts.length) x.regleEtat = {siteId:e.siteId || "", deptId:e.deptId || "", hors:estHors};
     for (const ev of evts) for (const r of regles){
@@ -655,7 +655,11 @@ async function executerRegles0(ids, par, nouveaux){
       journalL.push({id:("jr_"+r.id+"_"+e.mat+"_"+ev.type+"_"+j).replace(/[^A-Za-z0-9_.:-]/g, "_"), regleId:r.id, regleNom:String(r.nom || "").slice(0, 120), declencheur:ev.type, mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim().slice(0, 120),
         codes:faites, sansEffet, refuses:[], echecs:[], actions:faites.map(c=>REGLE_LIB[c] || c), detail:ev.detail, par:"système (règle) — "+String(par || "").slice(0, 60), ts, at:ts+":00", srv:1});
     }
-    if (JSON.stringify(x) !== JSON.stringify(e)){ await D.ecrire("emps", x, e); bilan.salaries++; }
+    /* effets visibles (badge, portail, accès…) : nouvelle version de la fiche — une copie plus ancienne envoyée ensuite par un
+       navigateur est refusée (conflit) au lieu d'annuler les effets ; le suivi interne seul ne change pas la version */
+    if (JSON.stringify(x) !== JSON.stringify(e)){ const sans = o=>{ const y = Object.assign({}, o); ["regleEtat", "sortieTraitee", "__v"].forEach(k=>delete y[k]); return JSON.stringify(y); };
+      if (sans(x) !== sans(e)){ x.__v = Number(e.__v || 0) + 1; if (bilan.mats.length < 200) bilan.mats.push(String(e.mat)); }
+      await D.ecrire("emps", x, e); bilan.salaries++; }
   }
   /* comptes : désactivation en une écriture du paramétrage (portail seul : comptes de niveau « simple ») */
   if (comptesOff.size){ const ref2 = await D.referentiel(); let n = 0;
@@ -1845,6 +1849,7 @@ async function traiter(req, res){
     const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
     const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
     const secuAvant = paquet.ref && paquet.ref.secu !== undefined ? secuDe(await D.referentielLecture()) : null;
+    const deptsAvant = paquet.ref && Array.isArray(paquet.ref.depts) ? (((await D.referentielLecture()) || {}).depts || []) : null;
     const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
     const empsAvantIds = paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length ? new Set((await D.employes()).map(e=>String(e.id))) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
@@ -1865,6 +1870,11 @@ async function traiter(req, res){
     /* correctif 25 : règles métier exécutées par le serveur sur les fiches réellement enregistrées */
     if (empsAvantIds){ const idsP = new Set((paquet.colls.emps.put || []).map(x=>x && String(x.id)).filter(Boolean));
       try { r.regles = await executerRegles(idsP, C.login, new Set(Array.from(idsP).filter(id=>!empsAvantIds.has(id)))); } catch(e){ journal("règles métier : "+e.message); } }
+    /* correctif 25 : service passé « hors effectif » → règles exécutées pour tous ses salariés (pas seulement ceux chargés
+       dans le navigateur) */
+    if (deptsAvant && (r.refCles || []).indexOf("depts") >= 0){ const etaitH = new Set(deptsAvant.filter(d=>d && d.type === "hors").map(d=>d.id)), nvH = new Set((((r.ref || {}).depts) || []).filter(d=>d && d.type === "hors" && !etaitH.has(d.id)).map(d=>d.id));
+      if (nvH.size){ try { const idsH = new Set((await D.employes()).filter(e=>e && nvH.has(e.deptId)).map(e=>String(e.id))); const rh = await executerRegles(idsH, C.login, new Set(), nvH);
+        r.regles = r.regles ? {salaries:r.regles.salaries + rh.salaries, executions:r.regles.executions + rh.executions, actions:r.regles.actions + rh.actions, mats:r.regles.mats.concat(rh.mats).slice(0, 200)} : rh; } catch(e){ journal("règles métier : "+e.message); } } }
     /* correctif 24 : création automatique des comptes du portail pour les salariés enregistrés (réglage « auto ») */
     if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length && secuDe(r.ref).premiere.auto === true){
       try { await portailGenerer(C.login, new Set((paquet.colls.emps.put || []).map(x=>x && String(x.id)).filter(Boolean)), ip); } catch(e){ journal("comptes du portail : "+e.message); } }
@@ -2023,7 +2033,15 @@ async function traiter(req, res){
       const fr = k => String(k||"").replace(/^(\d{4})-(\d{2})-(\d{2})/, "$3/$2/$1");
       const EN = q.lang === "en", AR = q.lang === "ar";
       const txt = "\uFEFF"+(coll === "journal"
-        ? [EN ? "Time;Type;Staff no.;Employee;Event;Trigger;Actions;By" : AR ? "التوقيت;النوع;المعرف;العون;الحدث;المُطلِق;الإجراءات;بواسطة" : "Horodatage;Type;Matricule;Salarié;Événement;Déclencheur;Actions;Par"].concat(l.map(x=>[fr(x.ts || x.at), x.type || (x.regleId ? "regle" : ""), x.mat, x.employe, x.regleNom || x.msg || x.action || "", x.declencheur, (Array.isArray(x.codes) ? x.codes : (x.actions || [])).join(", ")+((x.refuses || []).length ? " (non faites : "+x.refuses.join(", ")+")" : ""), x.par].map(cel).join(";")))
+        ? [EN ? "Time;Type;Staff no.;Employee;Event;Trigger;Actions done;Without effect;By" : AR ? "التوقيت;النوع;المعرف;العون;الحدث;المُطلِق;الإجراءات المنجزة;دون أثر;بواسطة" : "Horodatage;Type;Matricule;Salarié;Événement;Déclencheur;Actions faites;Sans effet;Par"].concat(l.map(x=>{
+          /* correctif 25 : valeurs traduites (type, déclencheur, actions) et colonne « sans effet » */
+          const L = EN ? "en" : AR ? "ar" : "fr", TR = {regle:{fr:"Règle", en:"Rule", ar:"قاعدة"}, systeme:{fr:"Système", en:"System", ar:"النظام"}, import:{fr:"Import", en:"Import", ar:"توريد"}, home:{fr:"Accueil", en:"Home", ar:"الرئيسية"},
+            "employe.sorti":{fr:"Sortie d'un salarié", en:"Employee leaves", ar:"مغادرة عون"}, "employe.mutation":{fr:"Mutation", en:"Transfer", ar:"نقلة"}, "employe.hors_effectif":{fr:"Passage hors effectif", en:"Moved out of headcount", ar:"خارج التعداد"}, "employe.cree":{fr:"Création d'un salarié", en:"Employee created", ar:"إحداث عون"},
+            desac_compte:{fr:"Désactiver le compte", en:"Disable the account", ar:"تعطيل الحساب"}, desac_portail:{fr:"Désactiver le portail", en:"Disable the portal", ar:"تعطيل البوابة"}, bloquer_badge:{fr:"Bloquer le badge", en:"Block the badge", ar:"حظر الشارة"}, retirer_acces:{fr:"Retirer les accès", en:"Remove access", ar:"سحب النفاذ"},
+            retirer_bio:{fr:"Retirer la biométrie", en:"Remove biometrics", ar:"سحب البصمة"}, notif_rh:{fr:"Notifier les RH", en:"Notify HR", ar:"إعلام الموارد البشرية"}, archiver:{fr:"Archiver", en:"Archive", ar:"أرشفة"}, maj_workflows:{fr:"Circuits", en:"Workflows", ar:"المسارات"},
+            sortie_non_traitee:{fr:"Sortie non traitée", en:"Departure not processed", ar:"مغادرة غير معالجة"}, reintegration:{fr:"Sortie annulée : effets à rétablir", en:"Departure cancelled: effects to restore", ar:"أُلغيت المغادرة: آثار يجب استرجاعها"}};
+          const tr = v => (TR[v] && TR[v][L]) || v || "", liste = l2 => (Array.isArray(l2) ? l2 : []).map(tr).join(", ");
+          return [fr(x.ts || x.at), tr(x.type || (x.regleId ? "regle" : "")), x.mat, x.employe, x.regleNom || x.msg || tr(x.code) || x.action || "", tr(x.declencheur), (Array.isArray(x.codes) ? liste(x.codes) : (x.actions || []).join(", "))+((x.refuses || []).length ? " ("+liste(x.refuses)+" : "+(EN ? "not done" : AR ? "لم تُنجز" : "non faites")+")" : ""), liste(x.sansEffet), x.par].map(cel).join(";"); }))
         : ["Horodatage;Compte;Type;Matricule;Journée;Avant;Après;Motif;Lot"].concat(l.map(x=>[fr(x.ts), x.user, x.type || "pointage", x.mat, fr(x.date), x.avant, x.apres, x.motif, x.lot ? "oui" : ""].map(cel).join(";")))).join("\r\n")+(tronque ? "\r\n"+cel("… export limité aux 200 000 entrées les plus récentes : réduisez la période") : "");
       entetes(res, true); res.writeHead(200, {"Content-Disposition":"attachment; filename=\""+coll+"-"+(q.du || "")+"_"+(q.au || aujourdhui())+".csv\"", "Content-Type":"text/csv; charset=utf-8"}); return res.end(txt);
     }

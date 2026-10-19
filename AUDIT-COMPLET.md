@@ -1728,3 +1728,38 @@ Vérifié :
   - Seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-24.zip (cumulatif : correctifs 2 à 23 inclus).
+
+## Correctif 25 — Administration › Règles métier (analyse approfondie)
+
+Deux analyses (serveur, exécution et effets réels ; écran et usages) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| R1 | Les règles ne s'exécutaient que dans le navigateur du compte qui enregistrait la fiche : jamais au-delà de 1 000 salariés (fiches non chargées), jamais par un import, jamais pour une sortie à date future ; le serveur se contentait de signaler « sortie non traitée » | **critique** | règles exécutées par le serveur sur les fiches réellement enregistrées (saisie, import, API) et par une tâche horaire (sorties arrivées à échéance, services passés hors effectif) ; 2 000 sorties traitées en 1,1 s avec 20 000 salariés |
+| R2 | Journal des règles écrit par le navigateur : effets annoncés jamais produits (règle inconnue, salarié non sorti, actions sans droit), vraie trace jetée comme doublon | **haute** | journal tenu par le serveur (un identifiant par règle, salarié, événement et date) ; entrée de règle envoyée par un navigateur refusée |
+| R3 | « sortieTraitee » écrit par un compte RH : la sortie n'était plus traitée ni signalée | **haute** | suivi (`sortieTraitee`, `regleEtat`) réservé au serveur |
+| R4 | Règle désactivée ou supprimée appliquée par un poste resté ouvert | **haute** | seules les règles actives du paramétrage en vigueur s'exécutent |
+| R5 | Actions annoncées sans effet réel : portail coupé mais compte actif ; biométrie non retirée en grand effectif ; « archiver » et « circuits » sans aucun effet ; compte d'un sortant laissé actif quand la sortie est saisie par un RH | **haute** | portail : comptes de niveau simple désactivés ; compte : désactivé par le serveur ; biométrie : retrait réel des appareils ; actions sans effet retirées de l'écran et refusées à la modification d'une règle |
+| R6 | Service passé « hors effectif » : seuls les salariés chargés dans le navigateur étaient traités (parfois un salarié déjà sorti) | **haute** | tous les salariés du service, sorties exclues |
+| R7 | Rubrique peu contrôlée : sites inexistants, champ de 3 Mo, 3 000 règles, règles identiques ; périmètre par sites inexistant à l'écran et à l'exécution | moyenne | clés connues, sites existants, 200 règles et 4 Ko au plus, doublons refusés ; champ « Sites concernés » à l'écran et filtre appliqué par le serveur |
+| R8 | Audit limité au mot « regles » ; écran autorisant la modification avec Système « validation » (refus du serveur après « Enregistré ») | moyenne | `regles.modifiees` (avant → après) et `regles.executees` ; droits de l'écran alignés sur le serveur (règles : Système configuration ; comptes et profils : administrateur) |
+| R9 | Annulation d'une fiche (« ↩ Annuler ») refusée comme conflit mais annoncée réussie ; sortie annulée sans effet sur les règles | moyenne | version courante conservée à l'annulation ; sortie annulée : suivi remis à zéro et signalement « effets à rétablir » dans le journal |
+| R10 | Export du journal non traduit (codes bruts), sans colonne « sans effet » ; note de la biométrie affichée sur l'écran Règles ; statut « off » non traduit | basse / moyenne | export traduit avec colonnes « Actions faites » et « Sans effet » ; textes propres à chaque écran dans les trois langues |
+
+Non traité : rétablissement automatique des effets d'une sortie annulée (signalé dans le journal, à faire à la main) ; « archiver » et « circuits » ne sont pas implémentés (retirés).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Sortie : compte désactivé, badge bloqué, portail coupé, accès fermés le lendemain, biométrie, notification, trace unique (deuxième envoi : aucune exécution).
+  - Journal falsifié refusé ; « sortieTraitee » du navigateur ignoré.
+  - Règle désactivée sans effet ; mutation et création déclenchées.
+  - Contrôles des règles (site inconnu, champ inconnu, doublon) ; audit détaillé.
+- **20 000 salariés.** 2 000 sorties en 1,1 s : 2 000 badges bloqués, portails coupés, entrées de journal.
+- **Chromium.**
+  - Champ « Sites concernés », actions sans effet signalées, sortie depuis la fiche avec effets rechargés à l'écran.
+  - Anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration et non-régression.**
+  - Règles exécutées localement en démonstration, comme avant.
+  - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-25.zip (cumulatif : correctifs 2 à 24 inclus).
