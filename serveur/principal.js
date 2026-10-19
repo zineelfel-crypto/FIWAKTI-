@@ -607,6 +607,70 @@ async function portailGenerer(par, ids, ip){
   return {crees:crees.length, conflits};
 }
 
+/* ---------------- correctif 25 : règles métier exécutées par le serveur ----------------
+   Auparavant exécutées dans le navigateur du compte qui enregistrait la fiche : jamais au-delà de 1 000 salariés (le
+   navigateur ne reçoit plus les fiches), ni pour un import, ni avec une règle désactivée entre-temps ; journal écrit par
+   le navigateur (falsifiable). Ici : événements déduits de la fiche ENREGISTRÉE et de son dernier état connu
+   (« regleEtat », tenu par le serveur), actions faites en base, journal écrit par le serveur (un identifiant par règle,
+   salarié, événement et date : jamais deux fois). ids : salariés à examiner (null = tous, tâche planifiée) ;
+   nouveaux : salariés créés par l'envoi. */
+const REGLE_LIB = {desac_compte:"compte désactivé", desac_portail:"portail désactivé", bloquer_badge:"badge bloqué", retirer_acces:"accès aux zones retirés", retirer_bio:"biométrie retirée des appareils", notif_rh:"notification RH", archiver:"(sans effet)", maj_workflows:"(sans effet)"};
+let REGLES_EN_COURS = Promise.resolve();
+function executerRegles(ids, par, nouveaux){ const p = REGLES_EN_COURS.then(()=>executerRegles0(ids, par, nouveaux || new Set())); REGLES_EN_COURS = p.catch(()=>{}); return p; }
+async function executerRegles0(ids, par, nouveaux){
+  const ref = await D.referentielLecture() || {}, j = aujourdhui(), regles = (ref.regles || []).filter(r=>r && r.actif === true && Array.isArray(r.actions));
+  const hors = new Set((ref.depts || []).filter(d=>d && d.type === "hors").map(d=>d.id)), siteNom = id => ((ref.sites || []).find(s=>s && s.id === id) || {}).nom || id || "—";
+  const z = v => String(v).padStart(2, "0"), n0 = new Date(), ts = n0.getFullYear()+"-"+z(n0.getMonth()+1)+"-"+z(n0.getDate())+" "+z(n0.getHours())+":"+z(n0.getMinutes());
+  const jjmm = d => String(d || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1");
+  const journalL = [], notifs = [], comptesOff = new Map(), bio = new Set(), bilan = {salaries:0, executions:0, actions:0};
+  const liste = (await D.employes()).filter(e=>e && e.id && (!ids || ids.has(String(e.id))));
+  for (const e of liste){
+    const etat = e.regleEtat && typeof e.regleEtat === "object" ? e.regleEtat : null, evts = [], x = JSON.parse(JSON.stringify(e)), nouv = nouveaux.has(String(e.id));
+    if (nouv) evts.push({type:"employe.cree", detail:"création"});
+    if (e.sortie && e.sortie <= j && e.sortieTraitee !== e.sortie){ evts.push({type:"employe.sorti", detail:"sortie au "+jjmm(e.sortie)}); x.sortieTraitee = e.sortie; }
+    if (!e.sortie && e.sortieTraitee){ delete x.sortieTraitee;
+      journalL.push({id:"js_reint_"+String(e.mat).replace(/[^A-Za-z0-9_.:-]/g, "_")+"_"+j, type:"systeme", code:"reintegration", mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim(), msg:"sortie annulée : les effets des règles de sortie (compte, portail, badge, accès, biométrie) sont à rétablir manuellement", par:"système", ts, at:ts+":00", srv:1}); }
+    if (etat && !nouv && (etat.siteId !== (e.siteId || "") || etat.deptId !== (e.deptId || ""))) evts.push({type:"employe.mutation", detail:"→ "+siteNom(e.siteId)+" / "+(((ref.depts || []).find(d=>d && d.id === e.deptId) || {}).nom || e.deptId || "—")});
+    const estHors = hors.has(e.deptId);
+    if (estHors && ((etat && !etat.hors) || (!etat && nouv))) evts.push({type:"employe.hors_effectif", detail:(((ref.depts || []).find(d=>d && d.id === e.deptId) || {}).nom || "hors effectif")});
+    /* état de référence : posé à chaque fiche enregistrée ; la tâche planifiée ne réécrit pas 20 000 fiches pour l'initialiser */
+    if (ids || etat || evts.length) x.regleEtat = {siteId:e.siteId || "", deptId:e.deptId || "", hors:estHors};
+    for (const ev of evts) for (const r of regles){
+      if (r.declencheur !== ev.type || (Array.isArray(r.siteIds) && r.siteIds.length && r.siteIds.indexOf(e.siteId) < 0)) continue;
+      const faites = [], sansEffet = [];
+      for (const a of r.actions){
+        if (a === "desac_compte" || a === "desac_portail"){ const m = comptesOff.get(String(e.id)) || {tous:false}; if (a === "desac_compte") m.tous = true; comptesOff.set(String(e.id), m);
+          if (a === "desac_portail" && x.portail !== false) x.portail = false; faites.push(a); }
+        else if (a === "bloquer_badge"){ if (x.badge && !String(x.badge).startsWith("BLK:")){ x.badge = "BLK:"+x.badge; faites.push(a); } else sansEffet.push(a); bio.add(String(e.mat)); }
+        else if (a === "retirer_acces"){ const dEff = x.sortie && x.sortie >= j ? ajoutJours(x.sortie, 1) : j, acc = Array.isArray(x.acces) ? x.acces : [], zones = new Set();
+          acc.forEach(y=>{ if (y && y.zoneId && y.from <= dEff) zones.add(y.zoneId); });
+          let n = 0; zones.forEach(zid=>{ const der = acc.filter(y=>y && y.zoneId === zid && y.from <= dEff).sort((a2, b2)=>a2.from < b2.from ? 1 : -1)[0]; if (!der || der.planId === "aucun") return;
+            const k = acc.findIndex(y=>y.zoneId === zid && y.from === dEff); if (k >= 0) acc[k].planId = "aucun"; else acc.push({zoneId:zid, planId:"aucun", from:dEff}); n++; });
+          if (n){ x.acces = acc.sort((a2, b2)=>a2.from < b2.from ? -1 : 1); faites.push(a); } else sansEffet.push(a); }
+        else if (a === "retirer_bio"){ bio.add(String(e.mat)); faites.push(a); }
+        else if (a === "notif_rh"){ notifs.push({id:"nf_rg_"+String(r.id).replace(/[^A-Za-z0-9_.:-]/g, "_")+"_"+String(e.mat).replace(/[^A-Za-z0-9_.:-]/g, "_")+"_"+j, d:j, mat:String(e.mat), txt:"Règle « "+String(r.nom || "").slice(0, 80)+" » : "+((e.nom || "")+" "+(e.prenom || "")).trim()+" ("+e.mat+") — "+ev.detail}); faites.push(a); }
+        else sansEffet.push(a);
+      }
+      bilan.executions++; bilan.actions += faites.length;
+      journalL.push({id:("jr_"+r.id+"_"+e.mat+"_"+ev.type+"_"+j).replace(/[^A-Za-z0-9_.:-]/g, "_"), regleId:r.id, regleNom:String(r.nom || "").slice(0, 120), declencheur:ev.type, mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim().slice(0, 120),
+        codes:faites, sansEffet, refuses:[], echecs:[], actions:faites.map(c=>REGLE_LIB[c] || c), detail:ev.detail, par:"système (règle) — "+String(par || "").slice(0, 60), ts, at:ts+":00", srv:1});
+    }
+    if (JSON.stringify(x) !== JSON.stringify(e)){ await D.ecrire("emps", x, e); bilan.salaries++; }
+  }
+  /* comptes : désactivation en une écriture du paramétrage (portail seul : comptes de niveau « simple ») */
+  if (comptesOff.size){ const ref2 = await D.referentiel(); let n = 0;
+    (ref2.users || []).forEach(u=>{ const m = u && comptesOff.get(String(u.empId)); if (!m || u.actif === false) return;
+      if (m.tous || PERIM.niveauProfil((ref2.profils || []).find(p=>p && p.id === u.profilId)) === "simple"){ u.actif = false; n++; } });
+    if (n){ const v = ref2.__versions || (ref2.__versions = {}); v.users = (Number(v.users) || 0) + 1;
+      await synchroniserComptes({users:ref2.users, profils:ref2.profils, emps:await D.employes(), secu:ref2.secu}, "système (règle)", new Set(comptesOff.keys()));
+      await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref2), maintenant(), CLE_APP); } }
+  if (journalL.length) await D.ecrireLot("journal", journalL);
+  if (notifs.length) await D.ecrireLot("notifs", notifs);
+  if (bio.size && PT) for (const m of bio){ try { await BS().retirerBiometrie(m, "regle"); } catch(err){ journal("règles métier : biométrie "+m+" : "+err.message); } }
+  if (bilan.executions) await audit(String(par || "système"), "regles.executees", bilan.executions+" exécution(s), "+bilan.actions+" action(s) faite(s), "+bilan.salaries+" fiche(s) mise(s) à jour", "");
+  return bilan;
+}
+
 /* ---------------- licence (signature ECDSA P-256 de l'éditeur) ---------------- */
 function empreinteMachine(){
   const macs = Object.values(os.networkInterfaces()).flat().filter(i=>i && !i.internal && i.mac && i.mac !== "00:00:00:00:00:00").map(i=>i.mac).sort();
@@ -1781,6 +1845,8 @@ async function traiter(req, res){
     const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
     const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
     const secuAvant = paquet.ref && paquet.ref.secu !== undefined ? secuDe(await D.referentielLecture()) : null;
+    const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
+    const empsAvantIds = paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length ? new Set((await D.employes()).map(e=>String(e.id))) : null;
     const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
@@ -1796,6 +1862,9 @@ async function traiter(req, res){
       await synchroniserComptes(docC, C.login, ids || undefined);
       if (JSON.stringify(vus) !== avant){ r.ref.users = docC.users; await B.run("UPDATE kv SET valeur=?, version=version+1 WHERE cle=?", JSON.stringify(r.ref), CLE_APP); }
     }
+    /* correctif 25 : règles métier exécutées par le serveur sur les fiches réellement enregistrées */
+    if (empsAvantIds){ const idsP = new Set((paquet.colls.emps.put || []).map(x=>x && String(x.id)).filter(Boolean));
+      try { r.regles = await executerRegles(idsP, C.login, new Set(Array.from(idsP).filter(id=>!empsAvantIds.has(id)))); } catch(e){ journal("règles métier : "+e.message); } }
     /* correctif 24 : création automatique des comptes du portail pour les salariés enregistrés (réglage « auto ») */
     if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length && secuDe(r.ref).premiere.auto === true){
       try { await portailGenerer(C.login, new Set((paquet.colls.emps.put || []).map(x=>x && String(x.id)).filter(Boolean)), ip); } catch(e){ journal("comptes du portail : "+e.message); } }
@@ -1851,6 +1920,11 @@ async function traiter(req, res){
           if (ch.length) l.push("« "+String(x.login).slice(0, 40)+" » — "+ch.join(" ; ")); av.delete(x.id); });
         av.forEach(a=>l.push("supprimé « "+String(a.login).slice(0, 40)+" »"));
         if (l.length) await audit(C.login, "comptes.modifies", l.join(" | ").slice(0, 2000), ip); }
+      /* correctif 25 : règles métier — détail tracé (activation, déclencheur, actions, sites) */
+      if (reglesAvant && (r.refCles || []).indexOf("regles") >= 0){ const av = new Map(reglesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), l = [], d = x=>(x.actif ? "active" : "inactive")+", "+x.declencheur+" → "+(x.actions || []).join("+")+((x.siteIds || []).length ? ", sites "+x.siteIds.join("+") : "");
+        (((r.ref || {}).regles) || []).forEach(x=>{ if (!x || !x.id) return; const a = av.get(x.id); av.delete(x.id); if (!a) l.push("créée « "+String(x.nom || x.id).slice(0, 60)+" » ("+d(x)+")"); else if (JSON.stringify(a) !== JSON.stringify(x)) l.push("modifiée « "+String(x.nom || x.id).slice(0, 60)+" » : "+d(a)+" ⇒ "+d(x)); });
+        av.forEach(a=>l.push("supprimée « "+String(a.nom || a.id).slice(0, 60)+" » ("+d(a)+")"));
+        if (l.length) await audit(C.login, "regles.modifiees", l.join(" | ").slice(0, 2000), ip); }
       if (sitesAvant && (r.refCles || []).indexOf("sites") >= 0){ const av = new Map(sitesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).sites || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [];
         ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé "+(x.code || id)+" « "+String(x.nom || "").slice(0, 60)+" » ("+(x.tz || "")+")"); return; }
           const ch = ["code","nom","ville","tz","actif"].filter(k=>JSON.stringify(a[k]) !== JSON.stringify(x[k])).map(k=>k+" : "+String(a[k] === undefined ? "" : a[k]).slice(0, 60)+" → "+String(x[k] === undefined ? "" : x[k]).slice(0, 60));
@@ -1865,7 +1939,7 @@ async function traiter(req, res){
       await audit(C.login, im.annulation ? "import.annule" : "import.execute", (im.cible === "badge" ? "badgeages" : "salariés")+(lib ? " — fichier « "+lib+" »" : "")+" — "+(["emps", "ptg", "users"].map(txt).filter(Boolean).join(" ; ") || "rien d'enregistré")+((r.ignores || []).length || (r.refusEmps || []).length ? " — refus : "+(r.refusEmps || []).map(x=>x && x.message).filter(Boolean).concat((r.ignores || []).filter(x=>!/^emps \(/.test(x) || /refusé\(s\)\)$/.test(x))).join(", ").slice(0, 600) : ""), ip);
     }
     if (r.conflits.length) await audit(C.login, "donnees.conflits", r.conflits.map(x=>x.type === "ref" ? "référentiel:"+x.cle : x.coll+":"+x.id).join(", ").slice(0, 500), ip);
-    return json(res, 200, {ok:true, ignores:r.ignores, ecrits:r.ecrits, parColl:r.parColl || {}, refusPar:r.refusPar || {}, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
+    return json(res, 200, {ok:true, regles:r.regles || null, ignores:r.ignores, ecrits:r.ecrits, parColl:r.parColl || {}, refusPar:r.refusPar || {}, conflits:r.conflits, versions:r.versions, refusEmps:r.refusEmps || []});
   }
 
   /* ---- correctif 18 : restauration d'un élément de la corbeille par le serveur — l'élément est réinséré avec tous les
@@ -3239,17 +3313,10 @@ async function demarrer(){
   /* correctif 16 : sorties échues — les règles « sortie d'un salarié » s'exécutent dans le navigateur d'un compte RH (et
      jamais en grand effectif, où le navigateur ne reçoit pas les fiches). Le serveur signale dans le journal chaque sortie
      passée depuis plus d'un jour sans traitement, une seule fois par salarié et date de sortie. */
-  PLAN.planifier("journal-sorties-non-traitees", {intervalle:6*3600000, premier:180000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
-    const lim = ajoutJours(aujourdhui(), -1), z = v => String(v).padStart(2, "0"), n0 = new Date(), h = n0.getFullYear()+"-"+z(n0.getMonth()+1)+"-"+z(n0.getDate())+" "+z(n0.getHours())+":"+z(n0.getMinutes());
-    let n = 0;
-    for (const e of await D.employes()){
-      if (!e || !e.sortie || e.sortie > lim || e.sortieTraitee === e.sortie) continue;
-      const id = ("js_"+e.mat+"_"+e.sortie).replace(/[^A-Za-z0-9_.:-]/g, "_");
-      if (await B.get("SELECT 1 x FROM enreg WHERE coll='journal' AND id=?", id)) continue;
-      await D.ecrire("journal", {id, type:"systeme", code:"sortie_non_traitee", sortie:e.sortie, mat:String(e.mat), employe:((e.nom || "")+" "+(e.prenom || "")).trim(), par:"système", ts:h, at:h+":"+z(n0.getSeconds()), srv:1}); n++;
-    }
-    return n+" sortie(s) non traitée(s) signalée(s)";
-  }});
+  /* correctif 25 : règles métier — sorties arrivées à échéance, services passés « hors effectif » : exécutées par le serveur
+     (auparavant seulement signalées : « sortie non traitée ») */
+  PLAN.planifier("regles-metier", {intervalle:3600000, premier:180000, priorite:4, delai:30*60000, actif:installe, fn:async ()=>{
+    const r = await executerRegles(null, "système", new Set()); return r.executions+" exécution(s), "+r.actions+" action(s)"; }});
   PLAN.planifier("purge-biometrique", {intervalle:6*3600000, premier:120000, priorite:3, delai:30*60000, actif:()=>installe() && !!PT, fn:async ()=>{ const r = await BS().purgerVisages(); return r.gabarits+" gabarit(s) de "+r.salaries+" salarié(s) effacé(s)"; }});
   PLAN.planifier("debit-purge", {intervalle:60000, priorite:3, delai:30000, actif:()=>installe() && B.type === "pg", fn:async ()=>{
     const r = await B.run("DELETE FROM fw_debit WHERE fenetre < ?", Math.floor(Date.now() / 10000) - 6); return r.n+" compteur(s) purgé(s)"; }});

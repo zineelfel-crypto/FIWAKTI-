@@ -300,6 +300,9 @@ function creer(B, PERIM){
   async function controleJournal(x, P, ref, admin){
     const rang = m => admin ? 4 : (RANG[((P.profil || {}).droits || {})[m]] || 0);
     const codes = l => (Array.isArray(l) ? l : []).map(String).filter(c=>REGLE_ACTIONS.indexOf(c) >= 0);
+    /* correctif 25 : les règles métier s'exécutent sur le serveur, qui tient leur journal — une entrée envoyée par un
+       navigateur annonçait des effets jamais produits (règle inconnue, salarié non sorti, actions sans droit) */
+    if (x.regleId) return {refus:"journal des règles métier tenu par le serveur"};
     if (x.regleId){
       if (!x.mat) return {refus:"salarié manquant"};
       if (rang("EMP") < 2 && !admin) return {refus:"droit Employés (saisie) requis"};
@@ -492,7 +495,7 @@ function creer(B, PERIM){
            partagé (elle était renvoyée à tous les comptes) */
         if (k === "impLast") continue;
         if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
-        if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
+        if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles, await sitesRetenus()); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
         if (k === "sites"){ const motif = await motifSites(); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
         if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, await sitesRetenus()) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)) || controleConvsPerim(ref.convs || [], r.convs, await sitesP()); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
@@ -575,6 +578,9 @@ function creer(B, PERIM){
             if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
             if (!okA){ refus++; ignores.push("abs (absence sans demande acceptée)"); continue; } }
           /* correctif 18 : fiche salarié — dates, adresse électronique et rattachements contrôlés */
+          /* correctif 25 : suivi des règles métier (sortie traitée, dernier état connu) tenu par le serveur seul — écrire
+             « sortieTraitee » faisait taire le traitement d'une sortie */
+          if (c === "emps") ["sortieTraitee", "regleEtat"].forEach(k=>{ if (avant && avant[k] !== undefined) x[k] = avant[k]; else delete x[k]; });
           if (c === "emps"){ const m = controleEmp(x, ref, avant, await matsLot()) || controleEmpClos(x, avant, clotC); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
           /* modification d'une fiche refusée par la matrice ; les droits d'accès aux zones (écran Droits d'accès) restent
              modifiables par leur propre écran */
@@ -746,8 +752,22 @@ async function controleCircuitsBase(B, ref, apres, profils, users){
   return "";
 }
 /* correctif 18 : règles automatiques — déclencheur et actions connus, nom, activation */
-function controleRegles(avant, apres){
+/* correctif 25 : règles contrôlées en entier — clés connues, sites existants, actions réellement exécutées par le serveur,
+   doublons, nombre et taille bornés (sites inexistants, champ de 3 Mo, 3 000 règles, règles identiques acceptés) */
+const REGLE_CLES = ["id", "nom", "declencheur", "actif", "actions", "siteIds"], REGLE_SANS_EFFET = ["archiver", "maj_workflows"];
+function controleRegles(avant, apres, sites){
   if (!Array.isArray(apres)) return "liste attendue";
+  if (apres.length > 200) return "200 règles au plus";
+  const sitesOk = new Set((sites || []).map(s=>s && s.id).filter(Boolean)), sig = new Map();
+  for (const r of apres){ if (!r || typeof r !== "object" || Array.isArray(r)) continue;
+    const ch = JSON.stringify((avant || []).find(z=>z && z.id === r.id)) !== JSON.stringify(r), l = "règle « "+String(r.nom || r.id).slice(0, 60)+" » : ";
+    if (JSON.stringify(r).length > 4096) return l+"trop volumineuse";
+    if (ch){ const k = Object.keys(r).find(c=>REGLE_CLES.indexOf(c) < 0); if (k) return l+"champ inconnu « "+String(k).slice(0, 30)+" »";
+      if (r.siteIds !== undefined && (!Array.isArray(r.siteIds) || r.siteIds.some(s=>!sitesOk.has(s)))) return l+"site inexistant";
+      if (Array.isArray(r.actions) && r.actions.some(a=>REGLE_SANS_EFFET.indexOf(a) >= 0)) return l+"action sans effet (archivage, circuits) retirée : décochez-la"; }
+    const cle = [r.declencheur, (r.actions || []).slice().sort().join(","), (r.siteIds || []).slice().sort().join(",")].join("|");
+    if (r.actif && sig.has(cle) && (ch || sig.get(cle).ch)) return l+"identique à la règle « "+String(sig.get(cle).r.nom || "").slice(0, 60)+" »";
+    if (r.actif) sig.set(cle, {r, ch}); }
   const ID = /^[A-Za-z0-9_.:-]{1,80}$/, DECL = ["employe.sorti", "employe.mutation", "employe.hors_effectif", "employe.cree"], ids = new Set();
   const av = new Map((avant || []).filter(r=>r && r.id).map(r=>[String(r.id), JSON.stringify(r)]));
   for (const r of apres){
