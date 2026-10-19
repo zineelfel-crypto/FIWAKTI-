@@ -68,8 +68,8 @@ function creer(dossier){
   /* empreinte d'une clé existante, sans jamais en créer une */
   function empreinteSiExiste(nom){ return existe(nom) ? empreinte(nom) : null; }
   function inventaire(){ const o = {}; noms().forEach(n=>{ const e = empreinteSiExiste(n); if (e) o[n] = e; }); return o; }
-  function trousseau(){ const o = {format:"fiwakti-trousseau-2", cree:new Date().toISOString(), cles:{}, empreintes:{}};
-    noms().forEach(n=>{ o.cles[n] = cle(n).toString("base64"); o.empreintes[n] = empreinte(n); }); return o; }
+  function trousseau(sans){ const o = {format:"fiwakti-trousseau-2", cree:new Date().toISOString(), cles:{}, empreintes:{}}, ex = new Set(sans || []);
+    noms().filter(n=>!ex.has(n)).forEach(n=>{ o.cles[n] = cle(n).toString("base64"); o.empreintes[n] = empreinte(n); }); return o; }
   function importer(t){
     let o = t; if (typeof t === "string"){ try { o = JSON.parse(t); } catch(e){ o = {cles:{sauvegarde:t.trim()}}; } }   /* ancien format : la seule clé des sauvegardes */
     const faites = [];

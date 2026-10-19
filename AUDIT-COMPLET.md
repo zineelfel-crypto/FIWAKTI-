@@ -1836,3 +1836,42 @@ Vérifié :
   - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-27.zip (cumulatif : correctifs 2 à 26 inclus).
+
+## Correctif 28 — Administration › État du système (analyse approfondie)
+
+Deux analyses (serveur, réglages et sécurité ; écran et usages) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| E1 | Sauvegarde annoncée « restaurable » d'après le seul manifeste : fichier supprimé ou corrompu toujours « ok » ; sauvegarde absente ou ancienne seulement « à vérifier » | **haute** | fichier, taille et empreinte vérifiés (cache par date de modification) ; absente ou de plus de 2 jours → bloquant |
+| E2 | Trousseau téléchargé sans nouvelle authentification et avec la clé qui scelle l'audit (audit réécrivable sans détection) | **haute** | mot de passe et code de double authentification redemandés ; clé de l'audit exclue sauf demande expresse, tracée |
+| E3 | Réglage refusé (400) mais appliqué en partie (copie, réseaux), écrit au prochain enregistrement ; export de l'audit écrit avant le refus | **haute** | validation complète sur une copie, enregistrement unique ; POST seulement ; refus tracés ; audit avant → après |
+| E4 | Copie « hors serveur » et export de l'audit contournables (lien symbolique vers les sauvegardes, chemin relatif, dossier des journaux) | **haute** | chemins absolus, liens résolus, hors du dossier des données ; avertissement si même disque |
+| E5 | Enregistrer depuis l'écran effaçait des durées de conservation (journal 10 → 5 ans, calculs 800 → 400 jours) ; valeurs piégées acceptées (`true`, `[5]`, `"0x5"`) | **haute** | clés absentes conservées, champs ajoutés à l'écran, entiers stricts |
+| E6 | Lecture des réglages en échec : formulaire vide qui écrasait la configuration au clic | **haute** | erreur affichée, pas de formulaire |
+| E7 | Port syslog jamais enregistré depuis l'écran (identifiant dupliqué) | **haute** | champ lu par son attribut propre |
+| E8 | Sauvegardes simultanées qui s'écrasent (fichier « altéré ») | **haute** | attente en série côté serveur, bouton désactivé pendant l'opération |
+| E9 | Pointeuses hors ligne absentes de l'état (texte figé), pas d'alerte au premier constat | **haute** | état réel de la supervision (hors ligne → bloquant) et alerte dès le premier constat |
+| E10 | Bascule vers PostgreSQL : écritures possibles pendant la copie, 4 tables recomptées sur toutes, audit absent de la nouvelle base, hôte non contrôlé ; partitionnement : anciennes tables supprimées sans recomptage | haute (à vérifier) | écritures suspendues et normalisation en pause pendant la copie, toutes les tables recomptées, audit avant la copie, échecs tracés ; hôte et port contrôlés ; suppression refusée en cas d'écart |
+| E11 | Tâche lancée à la main même inactive (purge irréversible d'un module coupé) ; erreurs des tâches jamais effacées | moyenne | tâche inactive refusée (409) ; erreur effacée après une réussite |
+| E12 | Seuils de disque contradictoires (contrôles / état), jamais « bloquant » ; file d'ingestion : lots abandonnés présentés comme « reprise automatique », attente longue non signalée | moyenne | règle unique (< 1 Go ou 5 % : bloquant) ; lots abandonnés bloquants, attente de plus de 30 min signalée |
+| E13 | Écran en lecture pour le profil mais actions actives (sauvegarde, restauration, PostgreSQL, tâches, réglages, trousseau) | moyenne | actions soumises à la matrice et refusées par le serveur |
+| E14 | Dates ISO dans l'état (licence, HTTPS), certificat expiré non signalé, supervision en heure UTC, diagnostic masquant les années et laissant les partages réseau ; sessions : refus affiché comme réussite, « Fermer toutes » ignorant le filtre ; tâches : erreur réseau non gérée | basse | jj/mm/aaaa, certificat expiré bloquant, heure locale avec l'année, dates gardées et partages masqués ; réponses contrôlées, filtre respecté, erreurs gérées |
+
+Non traité : titres et détails des éléments d'état rédigés en français par le serveur (traduction par codes à prévoir) ; noms de tâches non traduits ; accessibilité des pastilles d'état et des boutons répétés ; exécution réelle de la bascule PostgreSQL et du partitionnement (PostgreSQL indisponible dans le banc).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Réglage partiel refusé sans effet ; lien symbolique, chemin relatif et audit dans les données refusés ; conservation complétée sans perte ; PUT refusé.
+  - Trousseau : refusé sans mot de passe, téléchargé sans la clé de l'audit, puis avec sur demande (tracé).
+  - Tâche inactive refusée.
+  - Sauvegarde altérée détectée « bloquant » ; trois sauvegardes simultanées toutes vérifiées.
+  - Pointeuses hors ligne bloquantes ; audit des réglages avant → après.
+- **Chromium.**
+  - Port syslog et durée du journal enregistrés ; fenêtre du trousseau ; bouton de sauvegarde occupé.
+  - Anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration et non-régression.**
+  - Démonstration en mode poste autonome.
+  - 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-28.zip (cumulatif : correctifs 2 à 27 inclus).

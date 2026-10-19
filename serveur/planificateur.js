@@ -17,9 +17,9 @@ function creer(o){
   }
   function retirer(nom){ TACHES.delete(nom); }
   async function executer(t){
-    t.enCours = true; enCours++; const t0 = Date.now(); let fini = false;
-    const garde = setTimeout(()=>{ if (!fini){ t.delaiDepasse++; t.erreur = "délai de "+Math.round(t.delai/1000)+" s dépassé"; journal("tâche « "+t.nom+" » : délai de "+Math.round(t.delai/1000)+" s dépassé"); } }, t.delai);
-    try { const r = await (o.enveloppe ? o.enveloppe(()=>t.fn()) : t.fn()); t.resultat = r == null ? "ok" : (typeof r === "object" ? JSON.stringify(r).slice(0, 200) : String(r).slice(0, 200)); if (!t.delaiDepasse || t.erreur === null) t.erreur = null; }
+    t.enCours = true; enCours++; const t0 = Date.now(); let fini = false, depasse = false;
+    const garde = setTimeout(()=>{ if (!fini){ t.delaiDepasse++; depasse = true; t.erreur = "délai de "+Math.round(t.delai/1000)+" s dépassé"; journal("tâche « "+t.nom+" » : délai de "+Math.round(t.delai/1000)+" s dépassé"); } }, t.delai);
+    try { const r = await (o.enveloppe ? o.enveloppe(()=>t.fn()) : t.fn()); t.resultat = r == null ? "ok" : (typeof r === "object" ? JSON.stringify(r).slice(0, 200) : String(r).slice(0, 200)); t.erreur = depasse ? t.erreur : null; }   /* correctif 28 : erreur effacée après une exécution réussie dans le délai */
     catch(e){ t.echecs++; t.erreur = String(e && e.message || e).slice(0, 300); journal("tâche « "+t.nom+" » : "+t.erreur); }
     finally { fini = true; clearTimeout(garde); t.executions++; t.derniere = new Date(t0).toISOString(); t.duree = Date.now() - t0; t.enCours = false; enCours--;
       t.prochaine = t.intervalle > 0 ? Date.now() + t.intervalle : Infinity; }
@@ -29,7 +29,7 @@ function creer(o){
     const dues = Array.from(TACHES.values()).filter(t=>!t.enCours && t.prochaine <= n).sort((a, b)=>a.priorite - b.priorite || a.prochaine - b.prochaine);
     for (const t of dues){
       if (enCours >= MAX) break;
-      if (t.actif && !t.actif()){ t.prochaine = t.intervalle > 0 ? n + t.intervalle : Infinity; t.resultat = "inactive"; continue; }
+      if (t.actif && !t.actif()){ t.prochaine = t.intervalle > 0 ? n + t.intervalle : Infinity; t.resultat = "inactive"; t.erreur = null; continue; }
       executer(t);
     }
   }
@@ -41,7 +41,10 @@ function creer(o){
       derniere:t.derniere, dureeMs:t.duree, resultat:t.resultat, erreur:t.erreur, enCours:t.enCours, prochaine:Number.isFinite(t.prochaine) ? new Date(t.prochaine).toISOString() : null}));
   }
   /* exécution immédiate à la demande (administrateur) */
-  async function lancer(nom){ const t = TACHES.get(nom); if (!t) throw Object.assign(new Error("Tâche inconnue."), {code:404}); if (t.enCours) throw Object.assign(new Error("Tâche déjà en cours."), {code:409}); await executer(t); return etat().find(x=>x.nom === nom); }
+  async function lancer(nom){ const t = TACHES.get(nom); if (!t) throw Object.assign(new Error("Tâche inconnue."), {code:404}); if (t.enCours) throw Object.assign(new Error("Tâche déjà en cours."), {code:409});
+    /* correctif 28 : une tâche inactive (module coupé, base non concernée) ne se lance pas à la main — une purge irréversible
+       d'un module inactif s'exécutait */
+    if (t.actif && !t.actif()) throw Object.assign(new Error("Tâche inactive dans cette installation (module ou base non concerné)."), {code:409}); await executer(t); return etat().find(x=>x.nom === nom); }
   return {planifier, retirer, demarrer, arreter, etat, lancer, minuteries:()=>minuteur ? 1 : 0};
 }
 module.exports = {creer};

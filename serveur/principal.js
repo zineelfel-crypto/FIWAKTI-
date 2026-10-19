@@ -840,7 +840,8 @@ let SAUVEGARDE_EN_COURS = null;
 /* v56.23 : exécuté dans la réserve à délai long (opération de fond) */
 function sauvegarder(par, motif){ return (B && B.enTravail) ? B.enTravail(()=>sauvegarderInterne(par,motif)) : sauvegarderInterne(par,motif); }
 async function sauvegarderInterne(par, motif){
-  if (SAUVEGARDE_EN_COURS) await SAUVEGARDE_EN_COURS;
+  /* correctif 28 : attente en boucle — deux sauvegardes en attente repartaient ensemble et s'écrasaient */
+  while (SAUVEGARDE_EN_COURS) await SAUVEGARDE_EN_COURS;
   let fin; SAUVEGARDE_EN_COURS = new Promise(r=>fin = r);
   try {
     const chiffrer = !!(CONFIG.sauvegarde||{}).chiffrer;
@@ -1103,6 +1104,21 @@ function versionsInstallees(){ const V = path.join(RACINE, "versions"); try { re
 setTimeout(()=>{ try { const f = path.join(RACINE, "versions", "essai.txt"); if (fs.existsSync(f) && fs.readFileSync(f, "utf8").trim() === VERSION) fs.unlinkSync(f); } catch(e){} }, 90000);
 
 /* ---------------- contrôles et état du système ---------------- */
+/* correctif 28 : une seule règle pour l'espace disque (contrôles et État du système se contredisaient) */
+function etatDisque(d){ if (!d || !d.total) return "verifier"; const go = d.libre/1e9, pc = d.libre/d.total; return go < 1 || pc < 0.05 ? "bloquant" : go < 5 || pc < 0.15 ? "verifier" : "ok"; }
+const jjmm = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m ? m[3]+"/"+m[2]+"/"+m[1] : String(v || ""); };
+/* correctif 28 : sauvegarde réellement présente et intacte (fichier, taille, empreinte — mise en cache par date de
+   modification) ; auparavant seul le manifeste était lu : un fichier supprimé ou corrompu restait « restaurable » */
+const VERIF_SAUV = new Map();
+async function sauvegardeIntacte(man){
+  if (!man || !man.fichier) return {ok:false, motif:"manifeste incomplet"};
+  const f = path.join(D_SAUV, path.basename(String(man.fichier))); let st; try { st = fs.statSync(f); } catch(e){ return {ok:false, motif:"fichier de sauvegarde absent"}; }
+  if (man.taille && st.size !== Number(man.taille)) return {ok:false, motif:"taille différente du manifeste"};
+  if (!man.sha256) return {ok:true};
+  const cle = f+"|"+st.mtimeMs+"|"+st.size, c = VERIF_SAUV.get(cle); if (c) return c;
+  let r; try { r = (await sha256Fichier(f)) === man.sha256 ? {ok:true} : {ok:false, motif:"fichier altéré (empreinte différente)"}; } catch(e){ r = {ok:false, motif:"fichier illisible"}; }
+  if (VERIF_SAUV.size > 50) VERIF_SAUV.clear(); VERIF_SAUV.set(cle, r); return r;
+}
 function espaceDisque(){ try { const s = fs.statfsSync(DONNEES); return {libre:s.bavail*s.bsize, total:s.blocks*s.bsize}; } catch(e){ return null; } }
 function infoCertificat(){
   const c = certificat(); if (!c) return null;
@@ -1126,7 +1142,7 @@ async function controles(){
   catch(e){ ajout("base", "bloquant", "Base de données inaccessible", e.message, B.type === "pg" ? "Vérifier que PostgreSQL est démarré et que l'adresse est juste." : "Vérifier les droits sur le dossier des données."); }
   if (B.type !== "pg") ajout("pg", "verifier", "Base intégrée", "Adaptée à un poste unique ou à quelques centaines d'employés.", "Au-delà, choisir PostgreSQL (étape suivante de l'assistant, ou État du système une fois installé).");
   const d = espaceDisque();
-  if (d){ const go = d.libre/1e9; ajout("disque", go >= 5 ? "ok" : go >= 1 ? "verifier" : "bloquant", "Espace disque libre : "+go.toFixed(1)+" Go", "", go < 5 ? "Prévoir de l'espace : les sauvegardes quotidiennes en ont besoin." : ""); }
+  if (d){ const go = d.libre/1e9, ed = etatDisque(d); ajout("disque", ed, "Espace disque libre : "+go.toFixed(1)+" Go ("+Math.round(100*d.libre/d.total)+" %)", "", ed !== "ok" ? "Prévoir de l'espace : les sauvegardes quotidiennes en ont besoin." : ""); }
   const ci = infoCertificat();
   if (!ci) ajout("https", LOCAL_SEUL ? "verifier" : "bloquant", "HTTPS non actif", "Sans certificat, FIWAKTI n'accepte que les connexions de ce poste.", "Relancer l'installateur ou déposer un certificat dans donnees/certificats (cert.pem et cle.pem), ou placer FIWAKTI derrière un proxy HTTPS sur ce serveur.");
   else if (ci.erreur) ajout("https", "bloquant", "Certificat illisible", ci.erreur, "Remplacer le certificat.");
@@ -1203,18 +1219,28 @@ async function etatSysteme(){
         return it("partitions", horsPlage ? "verifier" : "ok", "Partitionnement mensuel", pa.tables.length+" tables partitionnées par mois"+(horsPlage ? " ; "+horsPlage+" ligne(s) hors plage dans les partitions par défaut" : " ; aucune ligne hors plage")); })(),
       it("moteur-source", "ok", "Source des badgeages du moteur", CONFIG.moteurSource === "normalise" ? "événements normalisés (niveau 2)" : "projection de compatibilité (identique aux événements normalisés tant que la comparaison est sans écart)"),
       await (async ()=>{ const g = await ING.etat(); const err = (g.file.erreur||{}).evenements || 0, rev = g.statuts.PENDING_REVIEW || 0;
-        return it("ingestion", err ? "bloquant" : (rev || g.pause ? "verifier" : "ok"), "Ingestion des pointages",
-          g.bruts+" événements bruts conservés, "+g.retransmissions+" retransmissions identifiées ; file : "+g.enAttente+"/"+g.capacite+(err ? " ; "+err+" en erreur (reprise automatique)" : "")+
+        /* correctif 28 : lots abandonnés (20 tentatives : plus de reprise automatique) et attente anormalement longue */
+        let aband = 0, vieux = null; try { aband = Number(((await B.get("SELECT COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE statut='erreur' AND tentatives>=20")) || {}).n || 0); } catch(e){ try { aband = Number(((await B.get("SELECT COUNT(*) n FROM ingestion_queue WHERE statut='erreur' AND tentatives>=20")) || {}).n || 0); } catch(e2){} }
+        try { vieux = ((await B.get("SELECT MIN(recu_utc) m FROM ingestion_queue WHERE statut='attente'")) || {}).m || null; } catch(e){}
+        const lent = vieux && Date.now() - new Date(vieux).getTime() > 30*60000 && !g.pause;
+        return it("ingestion", aband ? "bloquant" : err || rev || g.pause || lent ? "verifier" : "ok", "Ingestion des pointages",
+          g.bruts+" événements bruts conservés, "+g.retransmissions+" retransmissions identifiées ; file : "+g.enAttente+"/"+g.capacite+(aband ? " ; "+aband+" ABANDONNÉ(S) après 20 tentatives : intervention requise (Pointeuses › relancer)" : "")+(err && err > aband ? " ; "+(err - aband)+" en erreur (reprise automatique)" : "")+(lent ? " ; attente depuis plus de 30 min" : "")+
           (rev ? " ; "+rev+" en attente de revue (identifiant inconnu)" : "")+(g.migration && g.migration.etat === "en_cours" ? " ; migration v49 : "+g.migration.faits+"/"+g.migration.total : "")+(g.pause ? " ; NORMALISATION SUSPENDUE" : "")); })(),
-      ci && !ci.erreur ? it("https", ci.autoSigne ? "verifier" : "ok", "HTTPS", ci.fin ? "certificat valable jusqu'au "+ci.fin.slice(0,10)+(ci.autoSigne ? " (auto-signé)" : "") : "actif")
+      ci && !ci.erreur ? it("https", ci.fin && ci.fin < maintenant() ? "bloquant" : ci.autoSigne ? "verifier" : "ok", "HTTPS", ci.fin ? (ci.fin < maintenant() ? "certificat EXPIRÉ le " : "certificat valable jusqu'au ")+jjmm(ci.fin)+(ci.autoSigne ? " (auto-signé)" : "") : "actif")
          : it("https", "bloquant", "HTTPS", "absent : FIWAKTI n'écoute que sur ce poste (127.0.0.1) tant qu'aucun certificat n'est installé"),
-      !der ? it("sauvegarde", "verifier", "Sauvegarde", "aucune sauvegarde pour l'instant")
-        : it("sauvegarde", der.verification && der.verification.ok ? (der.cree.slice(0,10) >= ajoutJours(aujourdhui(), -2) ? "ok" : "verifier") : "bloquant", "Sauvegarde",
-          "dernière : "+new Date(der.cree).toLocaleString("fr-FR")+" — "+(der.verification && der.verification.ok ? "restauration d'essai réussie" : "vérification en échec")),
+      /* correctif 28 : absente (installation de plus d'un jour) ou de plus de 2 jours → bloquant ; fichier vérifié */
+      await (async ()=>{ if (!der) return it("sauvegarde", (st.emps || 0) > 0 ? "bloquant" : "verifier", "Sauvegarde", "aucune sauvegarde : lancez-en une (Sauvegardes) et vérifiez la sauvegarde automatique");
+        const fic = await sauvegardeIntacte(der), recente = der.cree.slice(0,10) >= ajoutJours(aujourdhui(), -2), ver = der.verification && der.verification.ok;
+        return it("sauvegarde", !fic.ok || !ver || !recente ? "bloquant" : "ok", "Sauvegarde", "dernière : "+jjmm(der.cree)+" "+new Date(der.cree).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"})+" — "+
+          (!fic.ok ? "FICHIER INUTILISABLE : "+fic.motif : ver ? "restauration d'essai réussie" : "vérification en échec")+(recente ? "" : " — plus de 2 jours : la sauvegarde automatique ne tourne pas")); })(),
       lic ? (()=>{ const LP = licencePublique(LIC_CACHE.v) || {}, ET = {active:["ok", "active"], bientot:["verifier", "expire bientôt"], grace:["verifier", "période de grâce"], lecture:["bloquant", "consultation seule"], bloquee:["bloquant", "bloquée"], pas_commencee:["bloquant", "pas encore en vigueur"]}[LP.etat] || ["ok", "active"];
-        return it("licence", ET[0], "Licence", lic.client+" — modules "+(lic.modules||(lic.fw||[]).join(", "))+" — "+ET[1]+(LP.fin ? " — du "+(LP.debut||"—")+" au "+LP.fin+(LP.joursRestants >= 0 ? " ("+LP.joursRestants+" j)" : "")+" — série "+LP.serie : " — sans échéance")); })() : it("licence", "bloquant", "Licence", "aucune licence valide"),
-      d ? it("disque", d.libre/d.total > 0.15 ? "ok" : "verifier", "Stockage", Math.round(100*d.libre/d.total)+" % disponible ("+(d.libre/1e9).toFixed(1)+" Go)") : it("disque", "verifier", "Stockage", "inconnu"),
-      it("terminaux", "verifier", "Service des terminaux", "test de liaison réseau disponible ; collecte par SDK constructeur non installée"),
+        return it("licence", ET[0], "Licence", lic.client+" — modules "+(lic.modules||(lic.fw||[]).join(", "))+" — "+ET[1]+(LP.fin ? " — du "+(LP.debut ? jjmm(LP.debut) : "—")+" au "+jjmm(LP.fin)+(LP.joursRestants >= 0 ? " ("+LP.joursRestants+" j)" : "")+" — série "+LP.serie : " — sans échéance")); })() : it("licence", "bloquant", "Licence", "aucune licence valide"),
+      d ? it("disque", etatDisque(d), "Stockage", Math.round(100*d.libre/d.total)+" % disponible ("+(d.libre/1e9).toFixed(1)+" Go)") : it("disque", "verifier", "Stockage", "inconnu"),
+      /* correctif 28 : état réel des pointeuses (supervision) au lieu d'un texte figé */
+      await (async ()=>{ let l = []; try { l = PT ? await PT.supervision((CONFIG.supervision||{}).seuilMinutes) : []; } catch(e){ return it("terminaux", "verifier", "Pointeuses", "supervision indisponible : "+e.message); }
+        if (!l.length) return it("terminaux", "ok", "Pointeuses", "aucune pointeuse déclarée");
+        const n = s => l.filter(x=>x.statut === s).length, off = n("OFFLINE"), deg = n("DEGRADED");
+        return it("terminaux", off ? "bloquant" : deg ? "verifier" : "ok", "Pointeuses", l.length+" pointeuse(s) : "+(l.length - off - deg)+" en ligne"+(deg ? ", "+deg+" dégradée(s)" : "")+(off ? ", "+off+" HORS LIGNE ("+l.filter(x=>x.statut === "OFFLINE").slice(0, 5).map(x=>x.nom || x.id).join(", ")+")" : "")); })(),
       await (async ()=>{ const v = await auditEtat(); return it("audit", v.ok ? "ok" : "bloquant", "Journal d'audit",
         v.ok ? v.n+" entrées scellées, chaîne intègre"+(v.anciens ? " ("+v.anciens+" antérieures au scellement)" : "") : (v.rupture.id ? "CHAÎNE ROMPUE à l'entrée "+v.rupture.id+" ("+v.rupture.ts+")"+(v.rupture.motif ? " — "+v.rupture.motif : "")+" : modification directe de la base" : "JOURNAL INCOMPLET : "+(v.rupture.motif || "entrées supprimées"))); })(),
       it("chiffrement", (CONFIG.sauvegarde||{}).chiffrer ? "ok" : "verifier", "Chiffrement au repos",
@@ -1239,7 +1265,8 @@ async function etatSysteme(){
 async function alertesSupervision(l){
   const avant = (await meta("supervision_statuts")) || {}, apres = {};
   for (const x of l){ apres[x.id] = x.statut;
-    if (avant[x.id] && avant[x.id] !== x.statut) await alerte("pointeuse."+x.statut.toLowerCase(), (x.nom||x.id)+" : "+avant[x.id]+" → "+x.statut+(x.motif ? " ("+x.motif+")" : "")); }
+    /* correctif 28 : une pointeuse hors ligne dès le premier constat est aussi signalée */
+    if ((avant[x.id] && avant[x.id] !== x.statut) || (!avant[x.id] && x.statut === "OFFLINE")) await alerte("pointeuse."+x.statut.toLowerCase(), (x.nom||x.id)+" : "+avant[x.id]+" → "+x.statut+(x.motif ? " ("+x.motif+")" : "")); }
   await meta("supervision_statuts", apres);
 }
 /* ---------------- travaux en arrière-plan (v49) ----------------
@@ -1376,7 +1403,10 @@ function origineOk(req){
 function pgUrl(b){
   if (b.url) return b.url;
   const e = encodeURIComponent;
-  return "postgres://"+e(b.utilisateur||"fiwakti")+":"+e(b.mdp||"")+"@"+(b.hote||"localhost")+":"+(Number(b.port)||5432)+"/"+e(b.nom||"fiwakti");
+  /* correctif 28 : hôte contrôlé (concaténé tel quel dans l'adresse auparavant) */
+  const h = String(b.hote || "localhost").trim(); if (!/^[A-Za-z0-9.-]{1,253}$/.test(h) && !net.isIP(h)) throw Object.assign(new Error("Nom de serveur PostgreSQL invalide."), {code:400});
+  const pt = Number(b.port) || 5432; if (!Number.isInteger(pt) || pt < 1 || pt > 65535) throw Object.assign(new Error("Port PostgreSQL invalide."), {code:400});
+  return "postgres://"+e(b.utilisateur||"fiwakti")+":"+e(b.mdp||"")+"@"+(net.isIP(h) === 6 ? "["+h+"]" : h)+":"+pt+"/"+e(b.nom||"fiwakti");
 }
 const dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(s||"");
 
@@ -1738,6 +1768,9 @@ async function traiter(req, res){
 
   /* v56.4 : maintenance du stockage — écritures, calculs et recalculs suspendus quelques minutes (les pointeuses
      restent reçues dans la file d'ingestion) */
+  /* correctif 28 : la copie vers PostgreSQL suspend aussi les écritures (une écriture pendant la copie était perdue) */
+  if (BASCULE && BASCULE.enCours && !p.startsWith("/api/v1/systeme/postgresql") && req.method !== "GET")
+    return erreur(res, 503, "Passage à PostgreSQL en cours : écritures suspendues quelques minutes.", {maintenance:true});
   if (PART && PART.enCours() && !p.startsWith("/api/v1/systeme/partitionnement") && (req.method !== "GET" || /^\/api\/v1\/(calcul|journees|recalculs|registre-anomalies|ajustements)/.test(p)))
     return erreur(res, 503, "Maintenance du stockage en cours (quelques minutes) : réessayez ensuite.", {maintenance:true});
   /* v56.30 : échéance de la licence — appliquée ici, pour toutes les routes (écran, API, appel direct) ;
@@ -2785,12 +2818,15 @@ async function traiter(req, res){
   }
 
   /* ---- administration ---- */
+  /* correctif 28 : profil administrateur avec l'écran État du système en lecture → aucune action d'écriture */
+  if (admin && req.method !== "GET" && /^\/api\/v1\/(systeme|sauvegardes|sessions)(\/|$)/.test(p) && !/^\/api\/v1\/systeme\/(audit|controles)$/.test(p)){ try { const refM = await D.referentielLecture() || {}, uM = (refM.users || []).find(x=>x && String(x.login).trim().toLowerCase() === String(C.login).toLowerCase()), prM = uM && (refM.profils || []).find(x=>x && x.id === uM.profilId);
+    if (prM && ((prM.menus || {}).systeme === "lecture" || (prM.menus || {}).systeme === "masque")) return erreur(res, 403, "Écran État du système en lecture seule pour votre profil."); } catch(e){} }
   if (/^\/api\/v1\/(systeme|sauvegardes|mise-a-jour|licence|comptes|audit-serveur|sessions|alertes)/.test(p) && !admin && !(C.role === "fournisseur" && /^\/api\/v1\/licence(\/|$)/.test(p))) return erreur(res, 403, "Réservé aux administrateurs.");
   if (p === "/api/v1/systeme") return json(res, 200, await etatSysteme());
   /* v56.30 (§ 7.3) : diagnostic exportable en un clic — aucun secret, aucune donnée personnelle (adresses, courriels et
      matricules masqués dans les messages) ; version, modules, licence, base, sauvegarde, disque, tâches, erreurs, P95 / P99 */
   if (p === "/api/v1/systeme/diagnostic" && req.method === "GET"){
-    const masquer = x => String(x||"").replace(/[^\s@]+@[^\s@]+/g, "[courriel]").replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[adresse]").replace(/\b\d{4,}\b/g, "[n°]");
+    const masquer = x => String(x||"").replace(/[^\s@]+@[^\s@]+/g, "[courriel]").replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[adresse]").replace(/\\\\[^\s\\]+/g, "\\\\[serveur]").replace(/\b(\d{4})-(\d{2})-(\d{2})/g, "DTx$1x$2x$3").replace(/\b\d{4,}\b/g, "[n°]").replace(/DTx(\d{4})x(\d{2})x(\d{2})/g, "$1-$2-$3");   /* correctif 28 : dates conservées, partages réseau masqués */
     const E = await etatSysteme(), M = await metriques().catch(()=>({}));
     const d = {genere:new Date().toISOString(), version:VERSION, versions:E.versions, base:B.type, installation:E.empreinte,
       systeme:{plateforme:os.platform()+" "+os.release(), architecture:os.arch(), node:process.version, processeurs:os.cpus().length, memoireGo:Math.round(os.totalmem()/1e9)},
@@ -2811,52 +2847,68 @@ async function traiter(req, res){
   if (p === "/api/v1/systeme/reglages"){
     if (req.method === "GET") return json(res, 200, {copie:(CONFIG.sauvegarde||{}).copie||"", chiffrer:!!(CONFIG.sauvegarde||{}).chiffrer, pushReseaux:CONFIG.pushReseaux||[], conservation:CONFIG.conservation, cle:CF.empreinte("sauvegarde"),
       syslog:CONFIG.syslog||{hote:"", port:514, protocole:"udp"}, auditExterne:CONFIG.auditExterne||"", proxyConfiance:CONFIG.proxyConfiance||[]});
-    const b = await corpsJson(req);
-    if (b.copie !== undefined){
-      const d = String(b.copie||"").trim();
-      /* correctif 18 : la copie « hors serveur » ne peut pas être dans le dossier des données (ni celui des sauvegardes) */
-      if (d){ const rd = path.resolve(d), rD = path.resolve(DONNEES); if (rd === rD || rd.startsWith(rD+path.sep) || rD.startsWith(rd+path.sep)) return erreur(res, 400, "La copie hors serveur doit être sur un autre emplacement que le dossier des données ("+DONNEES+")."); }
-      if (d){ try { fs.mkdirSync(d, {recursive:true}); const t = path.join(d, ".fiwakti-essai"); fs.writeFileSync(t, "x"); fs.unlinkSync(t); } catch(e){ return erreur(res, 400, "Emplacement inaccessible en écriture : "+d); } }
-      CONFIG.sauvegarde = Object.assign({}, CONFIG.sauvegarde, {copie:d});
-    }
+    /* correctif 28 : POST seulement ; tout le corps est validé sur une COPIE de la configuration, enregistrée en une fois
+       (une requête refusée modifiait déjà une partie des réglages, écrits au prochain enregistrement) ; chemins réels
+       (liens symboliques résolus), absolus et hors du disque des données ; refus tracés */
+    if (req.method !== "POST") return erreur(res, 405, "Méthode non permise.");
+    const b = await corpsJson(req), N = JSON.parse(JSON.stringify(CONFIG));
+    const refus = async m => { await audit(C.login, "systeme.reglages.refuses", m, ip); return erreur(res, 400, m); };
+    const horsDonnees = (d, quoi) => {
+      if (!path.isAbsolute(d)) return quoi+" : chemin absolu attendu (par exemple D:\\Sauvegardes-FIWAKTI ou \\\\serveur\\partage).";
+      try { fs.mkdirSync(d, {recursive:true}); const t = path.join(d, ".fiwakti-essai-"+Date.now()); fs.writeFileSync(t, "x"); fs.unlinkSync(t); } catch(e){ return quoi+" : emplacement inaccessible en écriture ("+d+")."; }
+      let rd, rD; try { rd = fs.realpathSync(d); rD = fs.realpathSync(DONNEES); } catch(e){ return quoi+" : emplacement illisible."; }
+      if (rd === rD || rd.startsWith(rD+path.sep) || rD.startsWith(rd+path.sep)) return quoi+" : doit être hors du dossier des données ("+DONNEES+").";
+      return ""; };
+    const avert = [];
+    if (b.copie !== undefined){ const d = String(b.copie||"").trim();
+      if (d){ const m = horsDonnees(d, "Copie hors serveur"); if (m) return refus(m); try { if (fs.statSync(fs.realpathSync(d)).dev === fs.statSync(DONNEES).dev) avert.push("la copie est sur le même disque que les données : une panne du disque emporterait les deux"); } catch(e){} }
+      N.sauvegarde = Object.assign({}, N.sauvegarde, {copie:d}); }
     if (b.pushReseaux !== undefined){
       const l = (Array.isArray(b.pushReseaux) ? b.pushReseaux : String(b.pushReseaux).split(/[\s,;]+/)).map(x=>String(x).trim()).filter(Boolean);
       const reseauOk = x => { const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(x); return !!m && [1,2,3,4].every(i=>+m[i] <= 255) && (m[5] === undefined || +m[5] <= 32); };
-      if (l.some(x=>!reseauOk(x))) return erreur(res, 400, "Réseau invalide : notation attendue 10.20.0.0/16 ou 10.20.1.15.");
-      CONFIG.pushReseaux = l;
-    }
-    if (b.syslog !== undefined){
-      const s = b.syslog || {};
-      if (s.hote && !/^[A-Za-z0-9.:-]{1,253}$/.test(s.hote)) return erreur(res, 400, "Serveur syslog invalide.");
-      CONFIG.syslog = {hote:String(s.hote||"").trim(), port:Math.min(65535, Math.max(1, Number(s.port)||514)), protocole:s.protocole === "tcp" ? "tcp" : "udp"};
-    }
-    if (b.auditExterne !== undefined){
-      const d = String(b.auditExterne||"").trim();
-      if (d){ try { fs.mkdirSync(d, {recursive:true}); const t = path.join(d, ".fiwakti-essai-"+Date.now()); fs.writeFileSync(t, "x"); fs.unlinkSync(t); } catch(e){ return erreur(res, 400, "Emplacement d'export de l'audit inaccessible : "+d); } }
-      CONFIG.auditExterne = d;
-      if (d){ ecrireConfig(CONFIG); try { await exporterAudit(); } catch(e){ return erreur(res, 400, "Export de l'audit impossible : "+e.message); } }
-    }
+      if (l.length > 100 || l.some(x=>!reseauOk(x))) return refus("Réseau invalide : notation attendue 10.20.0.0/16 ou 10.20.1.15.");
+      N.pushReseaux = l; }
+    if (b.syslog !== undefined){ const sy = b.syslog || {};
+      if (sy.hote && !/^[A-Za-z0-9.:-]{1,253}$/.test(String(sy.hote))) return refus("Serveur syslog invalide.");
+      if (sy.port !== undefined && sy.port !== "" && !(Number.isInteger(Number(sy.port)) && +sy.port >= 1 && +sy.port <= 65535)) return refus("Port syslog : entier de 1 à 65535.");
+      N.syslog = {hote:String(sy.hote||"").trim(), port:Number(sy.port) || 514, protocole:sy.protocole === "tcp" ? "tcp" : "udp"}; }
+    if (b.auditExterne !== undefined){ const d = String(b.auditExterne||"").trim();
+      if (d){ const m = horsDonnees(d, "Export de l'audit"); if (m) return refus(m); }
+      N.auditExterne = d; }
     if (b.proxyConfiance !== undefined){
       const l = (Array.isArray(b.proxyConfiance) ? b.proxyConfiance : String(b.proxyConfiance).split(/[\s,;]+/)).map(x=>String(x).trim()).filter(Boolean);
-      if (l.some(x=>!net.isIP(x))) return erreur(res, 400, "Adresse de proxy invalide.");
-      CONFIG.proxyConfiance = l;
-    }
-    if (b.conservation){
-      const c = b.conservation, ok = (v, min) => Number.isFinite(+v) && +v >= min;
-      /* correctif 18 : durées entières bornées (une valeur énorme rendait la limite invalide : « NaN-NaN-NaN ») */
-      const ent = (v, min, max) => Number.isInteger(+v) && +v >= min && +v <= max;
-      if (!ent(c.badgeagesAns, 1, 50) || !ent(c.auditAns, 1, 50) || (c.journalAns !== undefined && c.journalAns !== null && c.journalAns !== "" && !ent(c.journalAns, 1, 50)) || (c.calculsJours !== undefined && c.calculsJours !== "" && !ent(c.calculsJours, 60, 3650))) return erreur(res, 400, "Durées de conservation : de 1 à 50 ans (calculs : de 60 à 3 650 jours).");
-      CONFIG.conservation = {badgeagesAns:+c.badgeagesAns, auditAns:+c.auditAns, journalAns:c.journalAns ? +c.journalAns : undefined, calculsJours:+c.calculsJours || 400};
-    }
-    ecrireConfig(CONFIG);
-    await audit(C.login, "systeme.reglages", JSON.stringify({copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance}), ip);
-    return json(res, 200, {ok:true});
+      if (l.length > 20 || l.some(x=>!net.isIP(x))) return refus("Adresse de proxy invalide.");
+      N.proxyConfiance = l; }
+    if (b.conservation !== undefined){
+      const c = b.conservation && typeof b.conservation === "object" ? b.conservation : {}, av = CONFIG.conservation || {};
+      /* entiers JSON stricts (true, [5], "0x5" étaient acceptés) ; clés absentes conservées (l'écran remettait le journal
+         à 5 ans et les calculs à 400 jours à chaque enregistrement) */
+      const ent = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+      const v = k => c[k] === undefined ? av[k] : c[k];
+      if (!ent(v("badgeagesAns"), 1, 50) || !ent(v("auditAns"), 1, 50) || (v("journalAns") != null && v("journalAns") !== "" && !ent(v("journalAns"), 1, 50)) || (v("calculsJours") != null && v("calculsJours") !== "" && !ent(v("calculsJours"), 60, 3650)))
+        return refus("Durées de conservation : nombres entiers de 1 à 50 ans (calculs : 60 à 3650 jours).");
+      N.conservation = {badgeagesAns:v("badgeagesAns"), auditAns:v("auditAns"), journalAns:v("journalAns") || undefined, calculsJours:v("calculsJours") || 400}; }
+    const avant = {copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
+    Object.keys(CONFIG).forEach(k=>{ if (!(k in N)) delete CONFIG[k]; }); Object.assign(CONFIG, N); ecrireConfig(CONFIG);   /* même objet (référencé par les autres services) */
+    const apres = {copie:(CONFIG.sauvegarde||{}).copie, pushReseaux:CONFIG.pushReseaux, conservation:CONFIG.conservation, syslog:CONFIG.syslog, auditExterne:CONFIG.auditExterne, proxyConfiance:CONFIG.proxyConfiance};
+    const ch = Object.keys(apres).filter(k=>JSON.stringify(avant[k]) !== JSON.stringify(apres[k])).map(k=>k+" : "+JSON.stringify(avant[k] === undefined ? null : avant[k]).slice(0, 200)+" → "+JSON.stringify(apres[k] === undefined ? null : apres[k]).slice(0, 200));
+    await audit(C.login, "systeme.reglages", ch.join(" ; ").slice(0, 1800) || "aucun changement", ip);
+    if (b.auditExterne && CONFIG.auditExterne){ try { await exporterAudit(); } catch(e){ avert.push("export de l'audit impossible : "+e.message); } }
+    return json(res, 200, {ok:true, avertissements:avert});
   }
   if (p === "/api/v1/systeme/cle-sauvegarde" && req.method === "POST"){
-    /* la clé permet de relire les sauvegardes sur un autre serveur : téléchargement tracé */
-    await audit(C.login, "sauvegarde.cle.telechargee", "trousseau "+CF.empreinte("sauvegarde"), ip);
+    /* correctif 28 : mot de passe (et code de double authentification s'il est actif) redemandés ; la clé qui scelle
+       l'audit n'est jointe que sur demande expresse (avec elle, l'audit peut être réécrit sans être détecté) */
+    const b = await corpsJson(req), c = await compteDe(C.login);
+    if (!c || !c.hash || !(await verifier(String(b.mdp || ""), c.hash))){ await audit(C.login, "sauvegarde.cle.refusee", "mot de passe incorrect", ip); return erreur(res, 403, "Mot de passe incorrect."); }
+    if (Number(c.a2f_actif) && c.a2f_secret){ let okC = -1; try { okC = TOTP.verifier(CF.dechiffrerTexte(c.a2f_secret, "secrets"), b.code, c.a2f_pas); } catch(e){}
+      if (okC < 0){ await audit(C.login, "sauvegarde.cle.refusee", "code de vérification incorrect", ip); return erreur(res, 403, "Code de vérification incorrect."); }
+      await B.run("UPDATE comptes SET a2f_pas=? WHERE login=?", okC, c.login); }
+    const avecAudit = b.audit === true;
+    await audit(C.login, "sauvegarde.cle.telechargee", "trousseau "+CF.empreinte("sauvegarde")+(avecAudit ? " AVEC la clé de scellement de l'audit" : " (sans la clé de l'audit)"), ip);
     entetes(res, true); res.writeHead(200, {"Content-Type":"application/json; charset=utf-8", "Content-Disposition":"attachment; filename=\"fiwakti-trousseau-"+CF.empreinte("sauvegarde")+".key\""});
-    return res.end(JSON.stringify(CF.trousseau()));
+    return res.end(JSON.stringify(CF.trousseau(avecAudit ? [] : ["audit"])));
+
   }
   /* passage de la base intégrée à PostgreSQL, sans perte : copie, vérification, bascule */
   /* 56.33.5 : bascule sans délai imposé (la copie dépasse 30 s dès quelques milliers de salariés), une seule à la fois,
@@ -2866,25 +2918,29 @@ async function traiter(req, res){
   if (p === "/api/v1/systeme/postgresql" && req.method === "POST"){
     if (B.type === "pg") return erreur(res, 400, "La base est déjà PostgreSQL.");
     if (BASCULE && BASCULE.enCours) return erreur(res, 409, "Une copie vers PostgreSQL est déjà en cours ("+(BASCULE.etape||"")+") : patientez.");
-    const b = await corpsJson(req); const url = pgUrl(b);
-    const t = await testerPg(url); if (!t.ok) return erreur(res, 400, "PostgreSQL : "+t.motif);
+    const b = await corpsJson(req); let url; try { url = pgUrl(b); } catch(e){ return erreur(res, 400, e.message); }
+    const t = await testerPg(url); if (!t.ok){ await audit(C.login, "base.postgresql.echec", "connexion refusée : "+String(t.motif).slice(0, 200), ip); return erreur(res, 400, "PostgreSQL : "+t.motif); }
     BASCULE = {enCours:true, etape:"sauvegarde", debut:maintenant()};
+    /* correctif 28 : normalisation des pointages suspendue pendant la copie (les badgeages reçus restent dans la file),
+       audit écrit AVANT la copie pour figurer dans la nouvelle base, toutes les tables recomptées */
+    const pauseAvant = !!(CONFIG.ingestion || {}).pause; CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:true});
     try {
+      await audit(C.login, "base.postgresql", "passage de la base intégrée à PostgreSQL ("+String(b.hote || "").slice(0, 80)+")", ip);
       await sauvegarder(C.login, "avant passage à PostgreSQL");
       BASCULE.etape = "copie";
       const dst = await BD.ouvrir({type:"pg", url}, DONNEES);
       const n = await BD.copier(B, dst, (tb, nb)=>{ BASCULE.etape = "copie de "+tb+" ("+nb+")"; });
       BASCULE.etape = "vérification";
-      for (const tb of ["kv","enreg","comptes","audit"]){
+      for (const tb of Object.keys(n)){
         const a = Number((await B.get("SELECT COUNT(*) n FROM "+tb)).n), z = Number((await dst.get("SELECT COUNT(*) n FROM "+tb)).n);
-        if (a !== z){ await dst.fermer(); BASCULE = {enCours:false, erreur:"Copie incomplète ("+tb+" : "+z+"/"+a+")"}; return erreur(res, 500, "Copie incomplète ("+tb+" : "+z+"/"+a+") : la base intégrée reste en service."); }
+        if (a !== z){ await dst.fermer(); CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:pauseAvant}); BASCULE = {enCours:false, erreur:"Copie incomplète ("+tb+" : "+z+"/"+a+")"}; await audit(C.login, "base.postgresql.echec", "copie incomplète "+tb+" : "+z+"/"+a, ip); return erreur(res, 500, "Copie incomplète ("+tb+" : "+z+"/"+a+") : la base intégrée reste en service."); }
       }
       await dst.fermer();
+      CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:pauseAvant});
       CONFIG.base = {type:"pg", url}; ecrireConfig(CONFIG);
-      await audit(C.login, "base.postgresql", JSON.stringify(n), ip);
       BASCULE = {enCours:false, termine:true, etape:"redémarrage", copie:n};
       try { json(res, 200, {ok:true, copie:n, redemarrage:true}); } catch(e){}
-    } catch(e){ BASCULE = {enCours:false, erreur:e.message}; journal("bascule PostgreSQL : "+e.message); return erreur(res, 500, "Bascule interrompue : "+e.message+" — la base intégrée reste en service."); }
+    } catch(e){ CONFIG.ingestion = Object.assign({}, CONFIG.ingestion, {pause:pauseAvant}); BASCULE = {enCours:false, erreur:e.message}; journal("bascule PostgreSQL : "+e.message); try { await audit(C.login, "base.postgresql.echec", String(e.message).slice(0, 300), ip); } catch(x){} return erreur(res, 500, "Bascule interrompue : "+e.message+" — la base intégrée reste en service."); }
     setTimeout(()=>process.exit(75), 800); return;
   }
   if (p === "/api/v1/sauvegardes" && req.method === "POST"){ try { return json(res, 200, await sauvegarder(C.login, "manuelle")); } catch(e){ return erreur(res, 500, e.message); } }

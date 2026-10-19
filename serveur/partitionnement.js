@@ -92,6 +92,11 @@ function creer(o){
   /* fin de migration : suppression des anciennes tables (après vérification par l'administrateur) */
   async function terminer(login){
     const dg = await diagnostic(); if (!dg.applicable || !dg.aTerminer.length) throw Object.assign(new Error("Aucune ancienne table à supprimer."), {code:409});
+    /* correctif 28 : jamais de suppression sans recomptage — une ancienne table qui a reçu des lignes après la copie (ou
+       plus de lignes que la table partitionnée) est gardée */
+    const ecarts = [];
+    for (const t of dg.aTerminer){ const n0 = Number(((await q("SELECT COUNT(*) n FROM "+t+"_v561")).rows || [])[0].n || 0), n1 = Number(((await q("SELECT COUNT(*) n FROM "+t)).rows || [])[0].n || 0); if (n0 > n1) ecarts.push(t+" ("+n0+" ancienne(s) ligne(s) pour "+n1+")"); }
+    if (ecarts.length) throw Object.assign(new Error("Suppression refusée : les anciennes tables contiennent plus de lignes que les nouvelles — "+ecarts.join(", ")+". Relancez la migration ou contactez le support."), {code:409});
     for (const t of dg.aTerminer) await q("DROP TABLE "+t+"_v561 CASCADE");
     await audit(login, "partitionnement.anciennes_tables_supprimees", dg.aTerminer.join(", "));
     return {ok:true, supprimees:dg.aTerminer};
