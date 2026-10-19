@@ -28,7 +28,7 @@ function joursDe(coll, x){
 const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
 const RANG = {lecture:1, saisie:2, validation:3, config:4};
 /* correctif 31 : rubriques du paramétrage dont les éléments retirés passent par la corbeille ; libellé lisible d'une entrée */
-const CORB_REF = ["sites","depts","terms","tt","jours","cals","arits","etats","champs","profils","users","circuits","aplages","aplans","zones","bioRegles","convs","regles","etablissements"];
+const CORB_REF = ["affichages","sites","depts","terms","tt","jours","cals","arits","etats","champs","profils","users","circuits","aplages","aplans","zones","bioRegles","convs","regles","etablissements"];
 const corbNom = (ent, r) => { r = r || {}; if (ent === "emps") return ((r.nom || "")+" "+(r.prenom || "")).trim()+(r.mat ? " ("+r.mat+")" : "");
   if (ent === "ptg") return String(r.mat || "")+" "+String(r.ts || ((r.d || "")+" "+(r.h || ""))).replace("T", " ").slice(0, 16);
   if (ent === "dmd" || ent === "abs" || ent === "corrections" || ent === "ajust") return String(r.mat || "")+" "+String(r.du || r.d || "")+(r.au && r.au !== r.du ? " → "+r.au : "")+(r.type ? " "+r.type : "");
@@ -570,7 +570,21 @@ function creer(B, PERIM){
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
         /* correctif 27 : un élément existant ne devient jamais « de recette » (le marquer puis « recréer le jeu d'essai »
            supprimait de vrais salariés et sites) ; jeu d'essai créé par un administrateur, identifiants « rec_ » */
-        if (Array.isArray(r[k])){ const avK = new Map((ref[k] || []).filter(y=>y && y.id).map(y=>[y.id, y])), neuf = r[k].filter(z=>marqueRecette(z) && !marqueRecette(avK.get(z.id)));
+        /* correctif 32 : une rubrique en liste ne reçoit qu'une liste (une chaîne ou un objet bloquait ensuite tout
+           enregistrement de la rubrique en erreur 500) */
+        if (Array.isArray(ref[k]) && r[k] !== null && !Array.isArray(r[k])){ ignores.push(k+" (liste attendue)"); continue; }
+        /* correctif 32 : affichages du menu — contenu contrôlé (un affichage mal formé rendait l'application inutilisable
+           pour tous les comptes, administrateur compris) et matrice de l'écran Affichages du menu appliquée */
+        if (k === "affichages"){
+          if (!Array.isArray(r.affichages)){ ignores.push("affichages (liste attendue)"); continue; }
+          if (!admin && !PERIM.peutEcrire(P.profil, "affichages")){ ignores.push("affichages (réservé à un administrateur)"); continue; }
+          const motif = controleAffichages(r.affichages); if (motif){ ignores.push("affichages ("+motif+")"); continue; }
+          if (P.profil){ const avA = new Map((Array.isArray(ref.affichages) ? ref.affichages : []).filter(y=>y && y.id).map(y=>[String(y.id), JSON.stringify(y)])), apA = new Map(r.affichages.map(y=>[String(y.id), JSON.stringify(y)]));
+            const cree = [...apA.keys()].some(i=>!avA.has(i)), suppr = [...avA.keys()].some(i=>!apA.has(i)), modif = [...apA.keys()].some(i=>avA.has(i) && avA.get(i) !== apA.get(i));
+            if ((cree && acteEcran("affmenu", "creer")) || (suppr && acteEcran("affmenu", "supprimer")) || (modif && acteEcran("affmenu", "modifier"))){ ignores.push("affichages (écran Affichages du menu en lecture seule pour ce profil)"); continue; } } }
+        if (k === "profils" && Array.isArray(r.profils)){ const affIds = new Set((Array.isArray(ref.affichages) ? ref.affichages : []).concat(Array.isArray(r.affichages) ? r.affichages : []).filter(y=>y && y.id).map(y=>String(y.id)));
+          const motif = controleProfilsAff(r.profils, affIds); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
+        if (Array.isArray(r[k])){ const avK = new Map((Array.isArray(ref[k]) ? ref[k] : []).filter(y=>y && y.id).map(y=>[y.id, y])), neuf = r[k].filter(z=>marqueRecette(z) && !marqueRecette(avK.get(z.id)));
           if (neuf.length && !(opts || {}).recette){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
           if (neuf.some(z=>avK.has(z.id) || !/^rec_/.test(String(z.id || ""))) || (neuf.length && !admin)){ ignores.push(k+" (jeu d'essai : nouveaux éléments « rec_ » créés par un administrateur seulement)"); continue; } }
         /* correctif 22 : les profils ne se modifient que par un administrateur (comme l'écran) — un compte « Système
@@ -586,6 +600,13 @@ function creer(B, PERIM){
           ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
+      /* correctif 32 : affichage supprimé → retiré des profils qui l'autorisaient ou l'avaient par défaut (par le serveur :
+         si l'envoi des profils était refusé ou en conflit, des profils pointaient vers un affichage disparu) */
+      if (refCles.indexOf("affichages") >= 0 && Array.isArray(ref.profils)){ const ids = new Set((ref.affichages || []).filter(y=>y && y.id).map(y=>String(y.id))); let ch = false;
+        ref.profils = ref.profils.map(pr=>{ if (!pr || !pr.affichages || typeof pr.affichages !== "object") return pr; const A = pr.affichages, d = String(A.defaut || ""), au = Array.isArray(A.autorises) ? A.autorises : [];
+          const d2 = d.indexOf("aff:") === 0 && !ids.has(d.slice(4)) ? "" : d, au2 = au.filter(i=>ids.has(String(i)));
+          if (d2 === d && au2.length === au.length) return pr; ch = true; return Object.assign({}, pr, {affichages:Object.assign({}, A, {defaut:d2, autorises:au2})}); });
+        if (ch && refCles.indexOf("profils") < 0){ refCles.push("profils"); refModifie = true; } }
       refCles.forEach(k=>{ vers[k] = Number(vers[k]||0) + 1; nouvellesVersions.ref[k] = vers[k]; });
       if (refModifie){
         (ref.users||[]).forEach(u=>{ if (u){ delete u.mdp; delete u.mdpHisto; delete u.codeReset; } });
@@ -1156,6 +1177,40 @@ function controleEmp(x, ref, avant, mats){
    comptes du profil, un nom de 300 000 caractères étaient enregistrés) */
 const DROITS_OK = new Set(["aucun","lecture","saisie","validation","config"]), NIV_OK = new Set(["simple","avance","rh","admin"]);
 const MENU_OK = new Set(["visible","ecriture","lecture","masque"]), ACTES_OK = new Set(["lire","creer","modifier","supprimer","valider","exporter","imprimer"]);
+/* correctif 32 : affichages du menu — identifiants, noms (1 à 60 caractères, uniques), écrans (codes connus, sans doublon),
+   200 affichages et 64 Ko au plus */
+function controleAffichages(ap){
+  if (ap.length > 200) return "200 affichages au plus";
+  const ID = /^[A-Za-z0-9_.:-]{1,80}$/, EC = /^[A-Za-z0-9_-]{1,40}$/, ids = new Set(), noms = new Set();
+  for (const a of ap){
+    if (!a || typeof a !== "object" || Array.isArray(a)) return "élément invalide";
+    if (Object.keys(a).some(k=>k === "__proto__" || k === "constructor" || k === "prototype")) return "élément invalide";
+    if (typeof a.id !== "string" || !ID.test(a.id) || ids.has(a.id) || ["__proto__","constructor","prototype"].indexOf(a.id) >= 0) return "identifiant manquant, invalide ou en double";
+    ids.add(a.id);
+    const nom = typeof a.nom === "string" ? a.nom.trim() : "";
+    if (!nom || nom.length > 60) return "nom obligatoire, 60 caractères au plus";
+    if (/[<>]/.test(nom)) return "nom : caractères < et > interdits";
+    if (noms.has(nom.toLowerCase())) return "nom « "+nom+" » en double";
+    noms.add(nom.toLowerCase());
+    if (!Array.isArray(a.ecrans) || !a.ecrans.length || a.ecrans.length > 200) return "« "+nom+" » : 1 à 200 écrans";
+    if (a.ecrans.some(v=>typeof v !== "string" || !EC.test(v)) || new Set(a.ecrans).size !== a.ecrans.length) return "« "+nom+" » : écran invalide ou en double";
+  }
+  if (JSON.stringify(ap).length > 65536) return "64 Ko au plus";
+  return "";
+}
+/* correctif 32 : affichages d'un profil — {defaut: "" ou "aff:<id existant>", autorises: identifiants existants} */
+function controleProfilsAff(profils, affIds){
+  for (const p of profils){
+    if (!p || p.affichages === undefined || p.affichages === null) continue;
+    const A = p.affichages, nom = String((p && p.nom) || (p && p.id) || "");
+    if (typeof A !== "object" || Array.isArray(A) || Object.keys(A).some(k=>k !== "defaut" && k !== "autorises")) return "« "+nom+" » : affichages mal formés";
+    const d = A.defaut === undefined || A.defaut === null ? "" : A.defaut;
+    if (typeof d !== "string" || (d !== "" && !(d.indexOf("aff:") === 0 && affIds.has(d.slice(4))))) return "« "+nom+" » : affichage par défaut inconnu";
+    const au = A.autorises === undefined ? [] : A.autorises;
+    if (!Array.isArray(au) || au.length > 200 || au.some(i=>typeof i !== "string" || !affIds.has(i)) || new Set(au).size !== au.length) return "« "+nom+" » : affichages autorisés inconnus ou en double";
+  }
+  return "";
+}
 function validerProfils(avant, apres, ref){
   if (!Array.isArray(apres)) return "";
   const av = new Map((avant || []).map(p=>[p && p.id, JSON.stringify(p)])), ID = /^[A-Za-z0-9_.:-]{1,80}$/;

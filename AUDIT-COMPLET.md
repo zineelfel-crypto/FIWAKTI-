@@ -1997,3 +1997,42 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-31.zip (cumulatif : correctifs 2 à 30 inclus).
+
+## Correctif 32 — Administration › Affichages du menu (analyse approfondie)
+
+Deux analyses (serveur : droits, validation, profils, préférences, audit ; écran : éditeur, menu latéral, matrice, accessibilité) sur le serveur réel, Chromium et la démonstration.
+
+Point vérifié et correct : un affichage ne donne jamais accès à un écran interdit (le serveur ne s'appuie jamais sur les affichages ; le navigateur applique les droits d'abord).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| A1 | Aucun contrôle du contenu : affichage sans écrans, élément vide, nom vide / de 200 000 caractères / en double, identifiant `__proto__`, écrans inconnus, 4 Mo acceptés ; un seul affichage mal formé rendait l'application inutilisable pour tous, administrateur compris | **haute** | contrôle par le serveur (identifiant, nom de 1 à 60 caractères unique, sans < >, 1 à 200 écrans codés sans doublon, 200 affichages et 64 Ko au plus) ; lecture tolérante dans le navigateur |
+| A2 | Rubrique reçue sous forme de chaîne ou d'objet acceptée, puis tout enregistrement suivant en erreur 500 (toutes rubriques en liste) | moyenne | une rubrique en liste ne reçoit qu'une liste ; lecture protégée |
+| A3 | Affichages d'un profil non contrôlés (défaut inconnu, liste mal formée bloquant l'écran Profils et le compte) | moyenne | `{defaut, autorises}` contrôlés (affichages existants, sans doublon) |
+| A4 | Affichage supprimé laissé dans les profils (envoi partiel ou conflit sur les profils) | moyenne | profils nettoyés par le serveur à chaque suppression ; affichage supprimé conservé en corbeille |
+| A5 | Matrice de l'écran ignorée (création, modification, suppression en consultation seule) | **haute** | matrice appliquée par le navigateur (actions et cases) et par le serveur |
+| A6 | Brouillon écrit aussitôt : envoyé au serveur sans clic sur Enregistrer, sans « Annuler » ni avertissement en quittant ; nom effacé à chaque case cochée | moyenne | édition sur un brouillon, écrit seulement à l'enregistrement ; Annuler ; avertissement en quittant ou en changeant d'affichage ; nom conservé |
+| A7 | Un affichage actif retirait du menu l'Accueil, Clôture de période, Affichages du menu et les écrans des modules (non proposés dans l'éditeur) | moyenne | un écran non proposé par l'éditeur n'est jamais retiré ; Clôture de période ajoutée à l'éditeur |
+| A8 | Choix mémorisé devenu invalide → aucun affichage au lieu du défaut du profil ; choix non autorisé accepté par l'API ; préférences personnelles sans limite (5 × 4,9 Mo) | moyenne | retour au défaut du profil ; choix contrôlé par le serveur (403) ; 1 Mo par préférence, 300 par compte |
+| A9 | Audit sans détail (« affichages » ; profils « modifié — » vide) | moyenne | `affichages.modifies` (créé, renommé, écrans ajoutés / retirés, ordre, supprimé) ; nom et affichages des profils tracés |
+| A10 | Focus perdu après chaque case, libellés des cases mêlant niveau et flèches, groupes non balisés, ordre ↑/↓ entre groupes sans effet, pas de case « tout le groupe », ni de « Dupliquer », aperçu réduit à un compteur, niveaux incomplets, refus du serveur affiché avec la clé technique | basse | focus conservé, `fieldset` / `legend`, niveau lié par `aria-describedby`, flèches hors du libellé et ordre dans le groupe, case de groupe (état mixte), Dupliquer, aperçu du menu, niveaux complétés, motifs de refus explicites |
+
+Non traité : contrôle de version (`basesRef`) facultatif pour un appel direct à l'API (toutes rubriques ; le navigateur l'envoie toujours) ; noms de tous les affichages visibles par tous les comptes.
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Contenus refusés avec motif : sans écrans, élément vide, nom vide ou de 5 000 caractères, doublon, `__proto__`, écran « ../x », chaîne, HTML.
+  - Profil au défaut inconnu refusé.
+  - Suppression d'un affichage : profil nettoyé par le serveur.
+  - Choix non autorisé : 403 ; préférence de 1,1 Mo : 413 ; écriture par rh.s1 : « réservé à un administrateur ».
+  - Profil en consultation sur l'écran : création refusée.
+  - Audit détaillé.
+- **Chromium.**
+  - Brouillon non envoyé ; nom et focus conservés ; case de groupe ; ordre ; question en quittant.
+  - Enregistrement réel ; Dupliquer.
+  - Menu latéral : Accueil, Pilotage et Affichages du menu conservés.
+  - Données mal formées sans erreur ; anglais et arabe ; aucune erreur JavaScript.
+- **Démonstration.** Création et enregistrement sans erreur.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-32.zip (cumulatif : correctifs 2 à 31 inclus).

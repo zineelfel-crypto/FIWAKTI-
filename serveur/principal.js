@@ -1917,7 +1917,18 @@ async function traiter(req, res){
     if (req.method === "GET"){ const r = await B.get("SELECT valeur FROM kv WHERE cle=?", k); if (!r) return erreur(res, 404, "Absent"); return texteJson(res, r.valeur); }
     if (req.method === "PUT"){
       if (k === "fiwakti:home:admin:v2" && !admin) return erreur(res, 403, "Réservé aux administrateurs.");
-      const texte = await corps(req, 5e6); try { JSON.parse(texte); } catch(e){ return erreur(res, 400, "JSON invalide"); }
+      const texte = await corps(req, 5e6); let val; try { val = JSON.parse(texte); } catch(e){ return erreur(res, 400, "JSON invalide"); }
+      /* correctif 32 : choix de l'affichage du menu — "" ou un affichage autorisé par le profil ; clés personnelles bornées
+         (1 Mo par clé, 300 clés par compte) */
+      if (/^fiwakti:affichage:/.test(cle)){
+        if (!val || typeof val !== "object" || typeof val.v !== "string" || val.v.length > 80 || Object.keys(val).length !== 1) return erreur(res, 400, "Choix d'affichage invalide.");
+        if (val.v){ const refA = await D.referentielLecture() || {}, {P} = await D.perimetreDe(refA, C.login), A = (P.profil && P.profil.affichages) || {};
+          const existe = (refA.affichages || []).some(a=>a && a.id === val.v), ok = admin || (P.profil && PERIM.niveauProfil(P.profil) === "admin") || (Array.isArray(A.autorises) && A.autorises.indexOf(val.v) >= 0) || A.defaut === "aff:"+val.v;
+          if (!existe || !ok) return erreur(res, 403, "Affichage non autorisé pour votre profil."); } }
+      if (k.startsWith("u:")){
+        if (texte.length > 1048576) return erreur(res, 413, "Préférence trop volumineuse (1 Mo au plus).");
+        const pre = "u:"+C.login.toLowerCase()+":";
+        if (!(await B.get("SELECT 1 x FROM kv WHERE cle=?", k)) && Number((await B.get("SELECT COUNT(*) n FROM kv WHERE substr(cle,1,?)=?", pre.length, pre)).n) >= 300) return erreur(res, 413, "Trop de préférences enregistrées pour ce compte (300 au plus)."); }
       await B.run("INSERT INTO kv(cle,valeur,version,maj,par) VALUES(?,?,1,?,?) ON CONFLICT(cle) DO UPDATE SET valeur=excluded.valeur, version=kv.version+1, maj=excluded.maj, par=excluded.par", k, texte, maintenant(), C.login);
       return json(res, 200, {ok:true});
     }
@@ -1985,6 +1996,7 @@ async function traiter(req, res){
     const deptsAvant = paquet.ref && Array.isArray(paquet.ref.depts) ? (((await D.referentielLecture()) || {}).depts || []) : null;
     const circuitsAvant = paquet.ref && Array.isArray(paquet.ref.circuits) ? (((await D.referentielLecture()) || {}).circuits || []) : null;
     const reglesAvant = paquet.ref && Array.isArray(paquet.ref.regles) ? (((await D.referentielLecture()) || {}).regles || []) : null;
+    const affAvant = paquet.ref && paquet.ref.affichages !== undefined ? ((((await D.referentielLecture()) || {}).affichages) || []) : null;
     /* correctif 29 : capacité de la licence (nombre de salariés actifs) appliquée — elle n'était contrôlée nulle part */
     if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length){ const licC = await licenceActive(), capa = licC ? LICENCE.normaliser(licC).capacite : null;
       if (capa){ const tous = await D.employes(), parId = new Map(tous.map(e=>[String(e.id), e])), j0 = aujourdhui(), compte = e => !!e && !(e.sortie && e.sortie < j0) && e.recette !== true && !/^rec_/.test(String(e.id));
@@ -2044,6 +2056,15 @@ async function traiter(req, res){
     /* correctif 21 : paramétrage modifié tracé par le serveur (rubriques), détail des sites créés, modifiés, supprimés */
     { const cles = (r.refCles || []).filter(k=>["anoDec","corbeille","journal","notifs"].indexOf(k) < 0);
       if (cles.length) await audit(C.login, "parametrage.modifie", cles.join(", ").slice(0, 300), ip);
+      /* correctif 32 : affichages du menu — détail tracé (créé, renommé, écrans, supprimé) */
+      if (affAvant && (r.refCles || []).indexOf("affichages") >= 0){ const av = new Map((Array.isArray(affAvant) ? affAvant : []).filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map((((r.ref || {}).affichages) || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [];
+        ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé « "+String(x.nom).slice(0, 60)+" » ("+(x.ecrans || []).length+" écrans)"); return; } if (JSON.stringify(a) === JSON.stringify(x)) return;
+          const ch = []; if (a.nom !== x.nom) ch.push("nom « "+String(a.nom).slice(0, 60)+" » → « "+String(x.nom).slice(0, 60)+" »");
+          const ea = a.ecrans || [], ex = x.ecrans || [], plus = ex.filter(v=>ea.indexOf(v) < 0), moins = ea.filter(v=>ex.indexOf(v) < 0);
+          if (plus.length) ch.push("+ "+plus.join(", ")); if (moins.length) ch.push("− "+moins.join(", ")); if (!plus.length && !moins.length && JSON.stringify(ea) !== JSON.stringify(ex)) ch.push("ordre");
+          l.push("modifié « "+String(x.nom).slice(0, 60)+" » : "+ch.join(" ; ")); });
+        av.forEach((a, id)=>{ if (!ap.has(id)) l.push("supprimé « "+String(a.nom).slice(0, 60)+" »"); });
+        if (l.length) await audit(C.login, "affichages.modifies", l.join(" | ").slice(0, 2000), ip); }
       /* correctif 22 : profils — détail tracé (droits, niveau, drapeaux, périmètre) ; double authentification nouvellement
          exigée : les sessions ouvertes des comptes concernés doivent la passer */
       if (profilsAvant && (r.refCles || []).indexOf("profils") >= 0){ const av = new Map(profilsAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).profils || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [], a2fOn = [];
@@ -2052,7 +2073,10 @@ async function traiter(req, res){
           if (JSON.stringify(a) === JSON.stringify(x)) return; const ch = [];
           Object.keys(Object.assign({}, a.droits, x.droits)).forEach(m=>{ if ((a.droits || {})[m] !== (x.droits || {})[m]) ch.push(m+" "+((a.droits || {})[m] || "—")+"→"+((x.droits || {})[m] || "—")); });
           ["niveauMenu","a2f","sensibles","persoMasque","cloture","reouverture"].forEach(k=>{ if (a[k] !== x[k]) ch.push(k+" "+String(a[k])+"→"+String(x[k])); });
-          if (res(a) !== res(x)) ch.push("périmètre "+res(x).slice(0, 200)); if (JSON.stringify(a.menus || {}) !== JSON.stringify(x.menus || {})) ch.push("écrans"); if (JSON.stringify(a.actions || {}) !== JSON.stringify(x.actions || {})) ch.push("matrice des actions");
+          if (res(a) !== res(x)) ch.push("périmètre "+res(x).slice(0, 200));
+          /* correctif 32 : nom et affichages du menu du profil tracés (détail vide auparavant) */
+          if (a.nom !== x.nom) ch.push("nom « "+String(a.nom).slice(0, 60)+" » → « "+String(x.nom).slice(0, 60)+" »");
+          if (JSON.stringify(a.affichages || {}) !== JSON.stringify(x.affichages || {})) ch.push("affichages "+JSON.stringify(x.affichages || {}).slice(0, 200)); if (JSON.stringify(a.menus || {}) !== JSON.stringify(x.menus || {})) ch.push("écrans"); if (JSON.stringify(a.actions || {}) !== JSON.stringify(x.actions || {})) ch.push("matrice des actions");
           l.push("modifié « "+String(x.nom || id).slice(0, 60)+" » — "+ch.join(" ; ")); if (x.a2f === true && a.a2f !== true) a2fOn.push(id); });
         av.forEach((a, id)=>{ if (!ap.has(id)) l.push("supprimé « "+String(a.nom || id).slice(0, 60)+" »"); });
         if (l.length) await audit(C.login, "profils.modifies", l.join(" | ").slice(0, 2000), ip);
