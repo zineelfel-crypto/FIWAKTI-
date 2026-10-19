@@ -10,7 +10,12 @@ const L = {
     recue:"Reçue", preselection:"Présélection", entretien:"Entretien", decision:"Décision", retenu:"Retenu", refuse:"Refusé", vers:"→ {e}", historique:"Historique",
     motifDecision:"Motif de la décision (obligatoire, conservé dans l'historique)", confirmerT:"Décision", entretienAjout:"Ajouter un entretien", date:"Date", intervenant:"Intervenant",
     avis:"Avis", note:"Note (0 à 5)", rechercher:"Rechercher un candidat…", voirCv:"CV", aucun:"Aucun élément.", chargement:"Chargement…", enregistre:"Enregistré.", plage:"{a}–{b} sur {n}",
-    rappelDecision:"La décision finale est prise par une personne habilitée ; aucune décision n'est automatique."},
+    rappelDecision:"La décision finale est prise par une personne habilitée ; aucune décision n'est automatique.",
+    site:"Site", service:"Service", choisir:"Choisir…", aucunService:"—", reseau:"Serveur injoignable : vérifiez la connexion puis réessayez.", envoi:"Envoi en cours…",
+    cloreQ:"Clore le poste « {p} » ? Les candidatures en cours restent consultables mais n'avancent plus.", rouvrirQ:"Rouvrir le poste « {p} » ?", plus:"Voir {n} de plus",
+    doublonQ:"Un candidat portant ce courriel (ou ces nom, prénom et téléphone) existe déjà. Rattacher cette candidature à sa fiche existante ?", rattacher:"Rattacher",
+    effacer:"Effacer", effacerQ:"Effacer les données de « {n} » à sa demande ? Identité, coordonnées, CV et entretiens sont supprimés ; les étapes restent, anonymes. Action définitive.",
+    effaceOk:"Données du candidat effacées.", efface:"(effacé)", posteClos:"Poste clos", liste:"Liste des {x}"},
   en:{embaucher:"Create employee record", salarieCree:"Employee {m}", embaucheOk:"Record {m} created and linked to the application.", embaucheDroit:"Creating an employee record requires the employee entry right.", conservation:"Retention of unsuccessful candidates", mois:"{n} months", conservationH:"After that: identity, contact details, CV and interviews erased; stages kept anonymously. Hired candidates are never erased.", conservationConf:"Keep unsuccessful candidates for {n} months? Those past due are erased now.", conservationOk:"Saved; {e} candidate(s) erased.", titre:"Recruitment", lede:"Open positions, applications by stage, interviews and justified decisions. CVs are encrypted; every access is logged.",
     postes:"Positions", candidatures:"Applications", candidats:"Candidates", intitule:"Title", fonction:"Job", nb:"Openings", description:"Description",
     ouvrir:"Open position", ouverts:"Open", clos:"Closed", tous:"All", clore:"Close", rouvrir:"Reopen", nbCand:"Applications", retenus:"Hired", aucunPoste:"No position: open one.",
@@ -18,7 +23,12 @@ const L = {
     recue:"Received", preselection:"Shortlist", entretien:"Interview", decision:"Decision", retenu:"Hired", refuse:"Rejected", vers:"→ {e}", historique:"History",
     motifDecision:"Reason for the decision (required, kept in history)", confirmerT:"Decision", entretienAjout:"Add an interview", date:"Date", intervenant:"Interviewer",
     avis:"Opinion", note:"Score (0 to 5)", rechercher:"Search a candidate…", voirCv:"CV", aucun:"Nothing yet.", chargement:"Loading…", enregistre:"Saved.", plage:"{a}–{b} of {n}",
-    rappelDecision:"The final decision is made by an authorised person; no decision is automatic."},
+    rappelDecision:"The final decision is made by an authorised person; no decision is automatic.",
+    site:"Site", service:"Department", choisir:"Choose…", aucunService:"—", reseau:"Server unreachable: check the connection and try again.", envoi:"Sending…",
+    cloreQ:"Close position “{p}”? Ongoing applications stay visible but no longer move.", rouvrirQ:"Reopen position “{p}”?", plus:"Show {n} more",
+    doublonQ:"A candidate with this email (or these names and phone) already exists. Link this application to the existing record?", rattacher:"Link",
+    effacer:"Erase", effacerQ:"Erase the data of “{n}” at their request? Identity, contact details, CV and interviews are deleted; stages remain anonymously. This cannot be undone.",
+    effaceOk:"Candidate data erased.", efface:"(erased)", posteClos:"Closed position", liste:"List of {x}"},
   ar:{embaucher:"إنشاء ملف الأجير", salarieCree:"الأجير {m}", embaucheOk:"أنشئ الملف {m} وربط بالترشح.", embaucheDroit:"إنشاء ملف أجير يتطلب حق الإدخال.", conservation:"مدة حفظ المترشحين غير المقبولين", mois:"{n} شهرا", conservationH:"عند الأجل تمحى الهوية والسيرة والمقابلات.", conservationConf:"حفظ المترشحين {n} شهرا؟", conservationOk:"تم الحفظ؛ محي {e} مترشح.", titre:"الانتداب", lede:"المناصب الشاغرة والترشحات حسب المرحلة والمقابلات والقرارات المعللة. السير الذاتية مشفرة.",
     postes:"المناصب", candidatures:"الترشحات", candidats:"المترشحون", intitule:"التسمية", fonction:"الوظيفة", nb:"عدد المناصب", description:"الوصف",
     ouvrir:"فتح المنصب", ouverts:"مفتوحة", clos:"مغلقة", tous:"الكل", clore:"إغلاق", rouvrir:"إعادة الفتح", nbCand:"الترشحات", retenus:"المقبولون", aucunPoste:"لا مناصب: افتح منصبا.",
@@ -26,62 +36,84 @@ const L = {
     recue:"مستلم", preselection:"انتقاء أولي", entretien:"مقابلة", decision:"قرار", retenu:"مقبول", refuse:"مرفوض", vers:"← {e}", historique:"السجل",
     motifDecision:"تعليل القرار (إجباري)", confirmerT:"قرار", entretienAjout:"إضافة مقابلة", date:"التاريخ", intervenant:"المحاور",
     avis:"الرأي", note:"العدد (0 إلى 5)", rechercher:"بحث عن مترشح…", voirCv:"السيرة", aucun:"لا عناصر.", chargement:"جار التحميل…", enregistre:"تم الحفظ.", plage:"{a}–{b} من {n}",
-    rappelDecision:"يتخذ القرار النهائي شخص مؤهل؛ لا قرار آلي."}
+    rappelDecision:"يتخذ القرار النهائي شخص مؤهل؛ لا قرار آلي.",
+    site:"الموقع", service:"المصلحة", choisir:"اختر…", aucunService:"—", reseau:"تعذر الاتصال بالخادم: تحقق من الاتصال ثم أعد المحاولة.", envoi:"جار الإرسال…",
+    cloreQ:"إغلاق المنصب «{p}»؟ تبقى الترشحات الجارية قابلة للاطلاع ولكنها لا تتقدم.", rouvrirQ:"إعادة فتح المنصب «{p}»؟", plus:"عرض {n} إضافية",
+    doublonQ:"يوجد مترشح بنفس البريد (أو نفس الاسم واللقب والهاتف). ربط هذا الترشح بملفه الحالي؟", rattacher:"ربط",
+    effacer:"محو", effacerQ:"محو بيانات «{n}» بطلب منه؟ تحذف الهوية والبيانات والسيرة والمقابلات؛ تبقى المراحل مجهولة. إجراء نهائي.",
+    effaceOk:"محيت بيانات المترشح.", efface:"(ممحو)", posteClos:"منصب مغلق", liste:"قائمة {x}"}
 };
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
 const ETAPES = ["recue","preselection","entretien","decision","retenu","refuse"];
+/* correctif 34 : flèches selon le sens de lecture, message « réseau », droits renvoyés par le serveur (matrice de l'écran) */
+const fl = (ctx, g) => ctx.lang === "ar" ? (g === "‹" ? "›" : g === "›" ? "‹" : g) : g;
+const msgErr = (ctx, e) => (e && (e.name === "TypeError" || /Failed to fetch|NetworkError/i.test(e.message))) ? T(ctx, "reseau") : (e && e.message) || "";
+const droits = ctx => { const d = (ctx.etat.postes || {}).droits; return d || {creer:ctx.rang("EMP") >= 2, modifier:ctx.rang("EMP") >= 2, valider:ctx.rang("EMP") >= 3, perso:ctx.rang("EMP") >= 2, parametrer:ctx.rang("EMP") >= 4}; };
 function charger(ctx){
   const E = ctx.etat;
   if (!E.init){ const r = E.recherche; Object.assign(E, {init:true, onglet:"postes", statut:"ouvert", offP:0, postes:null, poste:"", pipe:null, q:"", offC:0, cands:null, histo:null, conserv:null});
     if (r){ E.onglet = "cands"; E.q = r; delete E.recherche; } }
-  if (ctx.rang("EMP") >= 4 && !E.conserv && !E.coEnCours){ E.coEnCours = true; ctx.api("api/v1/recrutement/parametres").then(j=>{ E.conserv = j; E.coEnCours = false; ctx.rendre(); }).catch(()=>{ E.coEnCours = false; }); }
-  if (!E.postes && !E.pEnCours){ E.pEnCours = true; ctx.api("api/v1/recrutement/postes?limit=50&offset="+E.offP+"&statut="+E.statut).then(j=>{ E.postes = j; E.pEnCours = false; ctx.rendre(); }).catch(e=>{ E.pEnCours = false; ctx.flash(e.message, "err"); }); }
+  if (ctx.rang("EMP") >= 4 && (!E.postes || (E.postes.droits || {parametrer:true}).parametrer) && !E.conserv && !E.coEnCours){ E.coEnCours = true; ctx.api("api/v1/recrutement/parametres").then(j=>{ E.conserv = j; E.coEnCours = false; ctx.rendre(); }).catch(()=>{ E.coEnCours = false; }); }
+  if (!E.postes && !E.pEnCours){ E.pEnCours = true; ctx.api("api/v1/recrutement/postes?limit=50&offset="+E.offP+"&statut="+E.statut).then(j=>{ E.postes = j; E.pEnCours = false; ctx.rendre(); }).catch(e=>{ E.pEnCours = false; ctx.flash(msgErr(ctx, e), "err"); }); }
 }
 function recharger(ctx, quoi){ const E = ctx.etat; (quoi||["postes","pipe","cands","histo"]).forEach(k=>{ E[k] = null; }); ctx.rendre(); }
+const jj = d => /^\d{4}-\d{2}-\d{2}/.test(String(d||"")) ? String(d).slice(0, 10).split("-").reverse().join("/") : String(d||"");
+const jjh = ts => { const d = new Date(ts); if (isNaN(d)) return String(ts||""); const z = n => String(n).padStart(2, "0"); return z(d.getDate())+"/"+z(d.getMonth()+1)+"/"+d.getFullYear()+" "+z(d.getHours())+":"+z(d.getMinutes()); };
 const champ = (ctx, l, h) => '<label class="fwr-c"><span>'+ctx.esc(l)+'</span>'+h+'</label>';
 function vuePostes(ctx){
-  const E = ctx.etat, P = E.postes, peut = ctx.rang("EMP") >= 2, dec = ctx.rang("EMP") >= 3;
-  return (peut ? '<div class="fw-card fw-u-p fwr-form">'+champ(ctx, T(ctx,"intitule"), '<input id="fwrIntit">')+champ(ctx, T(ctx,"fonction"), '<input id="fwrFonc">')+champ(ctx, T(ctx,"nb"), '<input id="fwrNb" type="number" min="1" value="1">')+
-      champ(ctx, T(ctx,"description"), '<input id="fwrDesc">')+'<button class="fw-btn pri" data-act="fwm:poste-ajout">'+ctx.esc(T(ctx,"ouvrir"))+'</button></div>' : '')+
+  const E = ctx.etat, P = E.postes, dr = droits(ctx), peut = dr.creer, dec = dr.valider, ch = (P || {}).choix || {sites:[], depts:[]};
+  const sel = (id, l, vide) => '<select id="'+id+'">'+(vide !== null ? '<option value="">'+ctx.esc(vide)+'</option>' : '')+l.map(z=>'<option value="'+ctx.esc(z.id)+'">'+ctx.esc(z.nom)+'</option>').join("")+'</select>';
+  /* correctif 34 : site et service du poste (un responsable de site ne pouvait pas ouvrir de poste) */
+  return (peut && P ? '<div class="fw-card fw-u-p fwr-form">'+champ(ctx, T(ctx,"intitule"), '<input id="fwrIntit" maxlength="120">')+champ(ctx, T(ctx,"fonction"), '<input id="fwrFonc" maxlength="80">')+champ(ctx, T(ctx,"nb"), '<input id="fwrNb" type="number" min="1" max="500" step="1" value="1">')+
+      (ch.sites.length ? champ(ctx, T(ctx,"site"), sel("fwrSite", ch.sites, ch.sites.length > 1 ? T(ctx,"choisir") : null)) : '')+(ch.depts.length ? champ(ctx, T(ctx,"service"), sel("fwrDept", ch.depts, T(ctx,"aucunService"))) : '')+
+      champ(ctx, T(ctx,"description"), '<input id="fwrDesc" maxlength="4000">')+'<button class="fw-btn pri" data-act="fwm:poste-ajout"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx, E.envoi ? "envoi" : "ouvrir"))+'</button></div>' : '')+
     (E.conserv ? '<div class="fw-toolbar"><label>'+ctx.esc(T(ctx,"conservation"))+' <select data-fwmc="conserv">'+E.conserv.durees.map(n=>'<option value="'+n+'"'+(n === E.conserv.conservationMois ? ' selected' : '')+'>'+ctx.esc(T(ctx,"mois").replace("{n}", n))+'</option>').join("")+'</select></label><span class="fw-hint">'+ctx.esc(T(ctx,"conservationH"))+'</span></div>' : '')+
-    '<div class="fw-toolbar"><select data-fwmc="statut">'+[["ouvert","ouverts"],["clos","clos"],["tous","tous"]].map(([v,k])=>'<option value="'+v+'"'+(E.statut === v ? ' selected' : '')+'>'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select>'+
+    '<div class="fw-toolbar"><select data-fwmc="statut" aria-label="'+ctx.esc(T(ctx,"postes"))+'">'+[["ouvert","ouverts"],["clos","clos"],["tous","tous"]].map(([v,k])=>'<option value="'+v+'"'+(E.statut === v ? ' selected' : '')+'>'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select>'+
       (P ? '<span class="fw-hint">'+ctx.esc(T(ctx,"plage").replace("{a}", P.total ? E.offP+1 : 0).replace("{b}", Math.min(E.offP+50, P.total)).replace("{n}", P.total))+'</span>'+
-      '<button class="fw-btn sm" data-act="fwm:p-prec"'+(E.offP ? '' : ' disabled')+'>‹</button><button class="fw-btn sm" data-act="fwm:p-suiv"'+(E.offP+50 < P.total ? '' : ' disabled')+'>›</button>' : '')+'</div>'+
+      '<button class="fw-btn sm" data-act="fwm:p-prec" aria-label="‹"'+(E.offP ? '' : ' disabled')+'>'+fl(ctx, "‹")+'</button><button class="fw-btn sm" data-act="fwm:p-suiv" aria-label="›"'+(E.offP+50 < P.total ? '' : ' disabled')+'>'+fl(ctx, "›")+'</button>' : '')+'</div>'+
     (!P ? '<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>' : !P.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucunPoste"))+'</div>' :
-    '<table class="fw-tbl"><thead><tr><th>'+ctx.esc(T(ctx,"intitule"))+'</th><th>'+ctx.esc(T(ctx,"fonction"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"nb"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"nbCand"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"retenus"))+'</th><th></th></tr></thead><tbody>'+
+    '<table class="fw-tbl"><caption class="fw-sr">'+ctx.esc(T(ctx,"liste").replace("{x}", T(ctx,"postes")))+'</caption><thead><tr><th scope="col">'+ctx.esc(T(ctx,"intitule"))+'</th><th scope="col">'+ctx.esc(T(ctx,"fonction"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"nb"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"nbCand"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"retenus"))+'</th><th></th></tr></thead><tbody>'+
       P.lignes.map(x=>'<tr><td><button class="fw-link" data-act="fwm:voir-poste" data-id="'+ctx.esc(x.id)+'">'+ctx.esc(x.intitule)+'</button></td><td>'+ctx.esc(x.fonction||"")+'</td><td class="fw-num">'+x.nb+'</td><td class="fw-num">'+x.candidatures+'</td><td class="fw-num">'+x.retenus+'</td><td>'+
-        (dec ? '<button class="fw-btn sm" data-act="fwm:'+(x.statut === "ouvert" ? "clore" : "rouvrir")+'" data-id="'+ctx.esc(x.id)+'">'+ctx.esc(T(ctx, x.statut === "ouvert" ? "clore" : "rouvrir"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table>');
+        (dec ? '<button class="fw-btn sm" data-act="fwm:'+(x.statut === "ouvert" ? "clore" : "rouvrir")+'" data-id="'+ctx.esc(x.id)+'"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx, x.statut === "ouvert" ? "clore" : "rouvrir"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table>');
 }
 function vuePipe(ctx){
-  const E = ctx.etat, P = E.postes || {lignes:[]}, peut = ctx.rang("EMP") >= 2;
-  let h = '<div class="fw-toolbar"><select data-fwmc="poste"><option value="">'+ctx.esc(T(ctx,"choisirPoste"))+'</option>'+P.lignes.filter(x=>x.statut === "ouvert").map(x=>'<option value="'+ctx.esc(x.id)+'"'+(E.poste === x.id ? ' selected' : '')+'>'+ctx.esc(x.intitule)+'</option>').join("")+'</select></div>';
+  const E = ctx.etat, P = E.postes || {lignes:[]}, dr = droits(ctx);
+  /* correctif 34 : le poste consulté figure dans la liste même s'il est clos ; rien ne bouge sur un poste clos */
+  const po = (E.pipe && E.pipe.poste) || null, opts = P.lignes.filter(x=>x.statut === "ouvert");
+  if (po && !opts.some(x=>x.id === po.id)) opts.unshift(po);
+  let h = '<div class="fw-toolbar"><select data-fwmc="poste" aria-label="'+ctx.esc(T(ctx,"choisirPoste"))+'"><option value="">'+ctx.esc(T(ctx,"choisirPoste"))+'</option>'+opts.map(x=>'<option value="'+ctx.esc(x.id)+'"'+(E.poste === x.id ? ' selected' : '')+'>'+ctx.esc(x.intitule+(x.statut === "clos" ? " — "+T(ctx,"posteClos") : ""))+'</option>').join("")+'</select></div>';
   if (!E.poste) return h;
-  if (!E.pipe){ if (!E.piEnCours){ E.piEnCours = true; ctx.api("api/v1/recrutement/candidatures?limit=200&poste="+encodeURIComponent(E.poste)).then(j=>{ E.pipe = j; E.piEnCours = false; ctx.rendre(); }).catch(e=>{ E.piEnCours = false; ctx.flash(e.message, "err"); }); } return h+'<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>'; }
-  if (peut) h += '<div class="fw-card fw-u-p fwr-form">'+["nom","prenom","email","tel","source"].map(k=>champ(ctx, T(ctx,k), '<input id="fwr_'+k+'">')).join("")+champ(ctx, T(ctx,"cv"), '<input id="fwr_cv" type="file" accept="application/pdf,image/png,image/jpeg">')+
-    '<button class="fw-btn pri" data-act="fwm:cand-ajout">'+ctx.esc(T(ctx,"ajouterCand"))+'</button></div>';
-  h += '<p class="fw-hint">'+ctx.esc(T(ctx,"rappelDecision"))+'</p><div class="fwr-pipe">'+ETAPES.map(et=>'<div class="fwr-col"><div class="fwr-tete">'+ctx.esc(T(ctx,et))+' <span class="fw-tag">'+(E.pipe.comptes[et]||0)+'</span></div>'+
-    E.pipe.lignes.filter(x=>x.etape === et).map(x=>'<div class="fwr-carte"><strong>'+ctx.esc(x.nom+" "+(x.prenom||""))+'</strong>'+(x.note != null ? ' <span class="fw-hint">'+x.note+'/5</span>' : '')+
-      '<div class="fwr-act">'+(x.cv ? '<a class="fw-btn sm" href="api/v1/recrutement/candidats/'+encodeURIComponent(x.candidat_id)+'/cv">'+ctx.esc(T(ctx,"voirCv"))+'</a>' : '')+
-      '<button class="fw-btn sm" data-act="fwm:histo" data-id="'+ctx.esc(x.id)+'">'+ctx.esc(T(ctx,"historique"))+'</button>'+
+  if (!E.pipe){ if (!E.piEnCours){ E.piEnCours = true; ctx.api("api/v1/recrutement/candidatures?limit=200&poste="+encodeURIComponent(E.poste)).then(j=>{ E.pipe = j; E.piEnCours = false; ctx.rendre(); }).catch(e=>{ E.piEnCours = false; ctx.flash(msgErr(ctx, e), "err"); }); } return h+'<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>'; }
+  const ouvert = !E.pipe.poste || E.pipe.poste.statut === "ouvert", peut = dr.modifier && ouvert;
+  if (dr.creer && ouvert) h += '<div class="fw-card fw-u-p fwr-form">'+["nom","prenom","email","tel","source"].map(k=>champ(ctx, T(ctx,k), '<input id="fwr_'+k+'">')).join("")+champ(ctx, T(ctx,"cv"), '<input id="fwr_cv" type="file" accept="application/pdf,image/png,image/jpeg">')+
+    '<button class="fw-btn pri" data-act="fwm:cand-ajout"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx, E.envoi ? "envoi" : "ajouterCand"))+'</button></div>';
+  const dis = E.envoi ? ' disabled' : '';
+  h += '<p class="fw-hint">'+ctx.esc(T(ctx,"rappelDecision"))+'</p><div class="fwr-pipe">'+ETAPES.map(et=>{ const l = E.pipe.lignes.filter(x=>x.etape === et), reste = (E.pipe.comptes[et]||0) - l.length;
+    return '<div class="fwr-col" role="group" aria-label="'+ctx.esc(T(ctx,et))+'"><div class="fwr-tete">'+ctx.esc(T(ctx,et))+' <span class="fw-tag">'+(E.pipe.comptes[et]||0)+'</span></div>'+
+    l.map(x=>'<div class="fwr-carte"><strong>'+ctx.esc(x.nom+" "+(x.prenom||""))+'</strong>'+(x.note != null ? ' <span class="fw-hint">'+x.note+'/5</span>' : '')+
+      '<div class="fwr-act">'+(x.cv && dr.perso ? '<a class="fw-btn sm" href="api/v1/recrutement/candidats/'+encodeURIComponent(x.candidat_id)+'/cv">'+ctx.esc(T(ctx,"voirCv"))+'</a>' : '')+
+      (dr.perso ? '<button class="fw-btn sm" data-act="fwm:histo" data-id="'+ctx.esc(x.id)+'">'+ctx.esc(T(ctx,"historique"))+'</button>' : '')+
       (et === "retenu" ? (x.salarie ? '<span class="fw-tag">'+ctx.esc(T(ctx,"salarieCree").replace("{m}", x.salarie))+'</span>' :
-        (peut ? '<button class="fw-btn sm pri" data-act="fwm:embaucher" data-id="'+ctx.esc(x.id)+'">'+ctx.esc(T(ctx,"embaucher"))+'</button>' : '')) : '')+
-      (peut ? (E.pipe.suivantes[et]||[]).map(v=>'<button class="fw-btn sm" data-act="fwm:etape" data-id="'+ctx.esc(x.id)+'" data-vers="'+v+'">'+ctx.esc(T(ctx,"vers").replace("{e}", T(ctx,v)))+'</button>').join("") : '')+'</div></div>').join("")+'</div>').join("")+'</div>';
+        (dr.modifier ? '<button class="fw-btn sm pri" data-act="fwm:embaucher" data-id="'+ctx.esc(x.id)+'"'+dis+'>'+ctx.esc(T(ctx,"embaucher"))+'</button>' : '')) : '')+
+      (peut ? (E.pipe.suivantes[et]||[]).filter(v=>dr.valider || !(v === "retenu" || v === "refuse" || et === "refuse")).map(v=>'<button class="fw-btn sm" data-act="fwm:etape" data-id="'+ctx.esc(x.id)+'" data-vers="'+v+'"'+dis+'>'+ctx.esc(T(ctx,"vers").replace("{e}", T(ctx,v)))+'</button>').join("") : '')+'</div></div>').join("")+
+      (reste > 0 ? '<button class="fw-btn sm" data-act="fwm:plus" data-e="'+et+'"'+(E.plusEnCours ? ' disabled' : '')+'>'+ctx.esc(T(ctx,"plus").replace("{n}", Math.min(200, reste)))+'</button>' : '')+'</div>'; }).join("")+'</div>';
   if (E.histo) h += '<div class="fw-card fw-u-p" style="margin-top:12px"><div class="fw-sec" style="margin-top:0">'+ctx.esc(T(ctx,"historique"))+'</div><ul class="fw-sm">'+
-    E.histo.historique.map(x=>'<li>'+ctx.esc(String(x.ts).slice(0,16).replace("T"," ")+" — "+(x.de ? T(ctx,x.de)+" → " : "")+T(ctx,x.vers)+" — "+(x.par||"")+(x.motif ? " : "+x.motif : ""))+'</li>').join("")+
-    E.histo.entretiens.map(x=>'<li>'+ctx.esc(x.d+" — "+T(ctx,"entretien")+" "+(x.intervenant||"")+(x.note != null ? " ("+x.note+"/5)" : "")+(x.avis ? " : "+x.avis : ""))+'</li>').join("")+'</ul>'+
-    (peut ? '<div class="fwr-form">'+champ(ctx, T(ctx,"date"), '<input id="fwrEd" type="date">')+champ(ctx, T(ctx,"intervenant"), '<input id="fwrEi">')+champ(ctx, T(ctx,"note"), '<input id="fwrEn" type="number" min="0" max="5">')+
-      champ(ctx, T(ctx,"avis"), '<input id="fwrEa">')+'<button class="fw-btn" data-act="fwm:entretien" data-id="'+ctx.esc(E.histo.id)+'">'+ctx.esc(T(ctx,"entretienAjout"))+'</button></div>' : '')+'</div>';
+    E.histo.historique.map(x=>'<li>'+ctx.esc(jjh(x.ts)+" — "+(x.de ? T(ctx,x.de)+" → " : "")+T(ctx,x.vers)+" — "+(x.par||"")+(x.motif ? " : "+x.motif : ""))+'</li>').join("")+
+    E.histo.entretiens.map(x=>'<li>'+ctx.esc(jj(x.d)+" — "+T(ctx,"entretien")+" "+(x.intervenant||"")+(x.note != null ? " ("+x.note+"/5)" : "")+(x.avis ? " : "+x.avis : ""))+'</li>').join("")+'</ul>'+
+    (peut ? '<div class="fwr-form">'+champ(ctx, T(ctx,"date"), '<input id="fwrEd" type="date">')+champ(ctx, T(ctx,"intervenant"), '<input id="fwrEi" maxlength="80">')+champ(ctx, T(ctx,"note"), '<input id="fwrEn" type="number" min="0" max="5" step="1">')+
+      champ(ctx, T(ctx,"avis"), '<input id="fwrEa" maxlength="2000">')+'<button class="fw-btn" data-act="fwm:entretien" data-id="'+ctx.esc(E.histo.id)+'"'+dis+'>'+ctx.esc(T(ctx,"entretienAjout"))+'</button></div>' : '')+'</div>';
   return h;
 }
 function vueCands(ctx){
   const E = ctx.etat;
-  if (!E.cands){ if (!E.cEnCours){ E.cEnCours = true; ctx.api("api/v1/recrutement/candidats?limit=50&offset="+E.offC+"&q="+encodeURIComponent(E.q)).then(j=>{ E.cands = j; E.cEnCours = false; ctx.rendre(); }).catch(e=>{ E.cEnCours = false; ctx.flash(e.message, "err"); }); } }
-  const C = E.cands;
+  if (!E.cands){ if (!E.cEnCours){ E.cEnCours = true; ctx.api("api/v1/recrutement/candidats?limit=50&offset="+E.offC+"&q="+encodeURIComponent(E.q)).then(j=>{ E.cands = j; E.cEnCours = false; ctx.rendre(); }).catch(e=>{ E.cEnCours = false; ctx.flash(msgErr(ctx, e), "err"); }); } }
+  const C = E.cands, dr = droits(ctx);
   return '<div class="fw-toolbar"><input type="search" data-fwmc="q" value="'+ctx.esc(E.q)+'" placeholder="'+ctx.esc(T(ctx,"rechercher"))+'" aria-label="'+ctx.esc(T(ctx,"rechercher"))+'">'+
-    (C ? '<span class="fw-hint">'+ctx.esc(T(ctx,"plage").replace("{a}", C.total ? E.offC+1 : 0).replace("{b}", Math.min(E.offC+50, C.total)).replace("{n}", C.total))+'</span><button class="fw-btn sm" data-act="fwm:c-prec"'+(E.offC ? '' : ' disabled')+'>‹</button><button class="fw-btn sm" data-act="fwm:c-suiv"'+(E.offC+50 < C.total ? '' : ' disabled')+'>›</button>' : '')+'</div>'+
+    (C ? '<span class="fw-hint">'+ctx.esc(T(ctx,"plage").replace("{a}", C.total ? E.offC+1 : 0).replace("{b}", Math.min(E.offC+50, C.total)).replace("{n}", C.total))+'</span><button class="fw-btn sm" data-act="fwm:c-prec" aria-label="‹"'+(E.offC ? '' : ' disabled')+'>'+fl(ctx, "‹")+'</button><button class="fw-btn sm" data-act="fwm:c-suiv" aria-label="›"'+(E.offC+50 < C.total ? '' : ' disabled')+'>'+fl(ctx, "›")+'</button>' : '')+'</div>'+
     (!C ? '<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>' : !C.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucun"))+'</div>' :
-    '<table class="fw-tbl"><thead><tr><th>'+ctx.esc(T(ctx,"nom"))+'</th><th>'+ctx.esc(T(ctx,"email"))+'</th><th>'+ctx.esc(T(ctx,"source"))+'</th><th></th></tr></thead><tbody>'+
-      C.lignes.map(x=>'<tr><td>'+ctx.esc(x.nom+" "+(x.prenom||""))+'</td><td>'+ctx.esc(x.email||"")+'</td><td>'+ctx.esc(x.source||"")+'</td><td>'+(x.cv ? '<a class="fw-btn sm" href="api/v1/recrutement/candidats/'+encodeURIComponent(x.id)+'/cv">'+ctx.esc(T(ctx,"voirCv"))+'</a>' : '')+'</td></tr>').join("")+'</tbody></table>');
+    '<table class="fw-tbl"><caption class="fw-sr">'+ctx.esc(T(ctx,"liste").replace("{x}", T(ctx,"candidats")))+'</caption><thead><tr><th scope="col">'+ctx.esc(T(ctx,"nom"))+'</th><th scope="col">'+ctx.esc(T(ctx,"email"))+'</th><th scope="col">'+ctx.esc(T(ctx,"source"))+'</th><th></th></tr></thead><tbody>'+
+      C.lignes.map(x=>{ const ef = x.nom === "—"; return '<tr><td>'+ctx.esc(ef ? T(ctx,"efface") : x.nom+" "+(x.prenom||""))+'</td><td>'+ctx.esc(x.email||"")+'</td><td>'+ctx.esc(x.source||"")+'</td><td>'+(x.cv && dr.perso ? '<a class="fw-btn sm" href="api/v1/recrutement/candidats/'+encodeURIComponent(x.id)+'/cv">'+ctx.esc(T(ctx,"voirCv"))+'</a>' : '')+
+        (dr.valider && !ef && !Number(x.retenu) ? ' <button class="fw-btn sm dgr" data-act="fwm:effacer" data-id="'+ctx.esc(x.id)+'" data-n="'+ctx.esc(x.nom+" "+(x.prenom||""))+'"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx,"effacer"))+'</button>' : '')+'</td></tr>'; }).join("")+'</tbody></table>');
 }
 const val = id => ((document.getElementById(id)||{}).value || "").trim();
 FIWAKTI_MODULES.enregistrer({
@@ -92,40 +124,52 @@ FIWAKTI_MODULES.enregistrer({
     charger(ctx); const E = ctx.etat;
     const ong = [["postes", T(ctx,"postes")], ["pipe", T(ctx,"candidatures")], ["cands", T(ctx,"candidats")]];
     return '<div class="fw-module fwr"><div class="fw-hero fw-hero-mod"><div class="fw-hero-main"><div class="fw-hero-kicker">'+ctx.esc(window.HERO_KICKER || "FIWAKTI")+'</div><h1>'+ctx.esc(T(ctx,"titre"))+'</h1><p class="fw-hero-lede">'+ctx.esc(T(ctx,"lede"))+'</p></div></div>'+
-      '<div class="fw-stabs" role="tablist">'+ong.map(([k, l], i)=>'<button type="button" role="tab" class="'+k+(E.onglet === k ? ' on' : '')+'" aria-selected="'+(E.onglet === k)+'" data-act="fwm:onglet" data-o="'+k+'">'+ctx.esc(l)+'</button>').join("")+'</div>'+
-      '<div style="margin-top:12px">'+(E.onglet === "pipe" ? vuePipe(ctx) : E.onglet === "cands" ? vueCands(ctx) : vuePostes(ctx))+'</div></div>';
+      '<div class="fw-stabs" role="tablist">'+ong.map(([k, l], i)=>'<button type="button" role="tab" id="fwrT-'+k+'" aria-controls="fwrP" class="'+k+(E.onglet === k ? ' on' : '')+'" aria-selected="'+(E.onglet === k)+'" data-act="fwm:onglet" data-o="'+k+'">'+ctx.esc(l)+'</button>').join("")+'</div>'+
+      '<div id="fwrP" role="tabpanel" aria-labelledby="fwrT-'+E.onglet+'" style="margin-top:12px">'+(E.onglet === "pipe" ? vuePipe(ctx) : E.onglet === "cands" ? vueCands(ctx) : vuePostes(ctx))+'</div></div>';
   },
   action(a, el, ctx){
-    const E = ctx.etat, ok = () => ctx.flash(T(ctx,"enregistre"), "ok"), ko = e => ctx.flash(e.message, "err");
+    const E = ctx.etat, ok = () => ctx.flash(T(ctx,"enregistre"), "ok"), ko = e => ctx.flash(msgErr(ctx, e), "err");
+    /* correctif 34 : un envoi à la fois (un double clic créait deux candidatures) */
+    const envoi = f => { if (E.envoi) return; E.envoi = true; ctx.rendre(); return Promise.resolve().then(f).catch(ko).then(()=>{ E.envoi = false; ctx.rendre(); }); };
     if (a === "onglet"){ E.onglet = el.dataset.o; return ctx.rendre(); }
     if (a === "p-prec" || a === "p-suiv"){ E.offP = Math.max(0, E.offP + (a === "p-suiv" ? 50 : -50)); return recharger(ctx, ["postes"]); }
     if (a === "c-prec" || a === "c-suiv"){ E.offC = Math.max(0, E.offC + (a === "c-suiv" ? 50 : -50)); return recharger(ctx, ["cands"]); }
     if (a === "voir-poste"){ E.poste = el.dataset.id; E.onglet = "pipe"; return recharger(ctx, ["pipe","histo"]); }
-    if (a === "poste-ajout") return ctx.api("api/v1/recrutement/postes", {corps:{intitule:val("fwrIntit"), fonction:val("fwrFonc"), nb:Number(val("fwrNb"))||1, description:val("fwrDesc")}}).then(()=>{ ok(); recharger(ctx, ["postes"]); }).catch(ko);
-    if (a === "clore" || a === "rouvrir") return ctx.api("api/v1/recrutement/postes/"+encodeURIComponent(el.dataset.id)+"/"+a, {corps:{}}).then(()=>{ ok(); recharger(ctx, ["postes"]); }).catch(ko);
+    if (a === "poste-ajout"){ const corps = {intitule:val("fwrIntit"), fonction:val("fwrFonc"), nb:val("fwrNb") === "" ? 1 : Number(val("fwrNb")), description:val("fwrDesc"), siteId:val("fwrSite") || null, deptId:val("fwrDept") || null};
+      return envoi(()=>ctx.api("api/v1/recrutement/postes", {corps}).then(()=>{ ok(); E.postes = null; })); }
+    if (a === "clore" || a === "rouvrir"){ const x = ((E.postes||{}).lignes||[]).find(z=>z.id === el.dataset.id) || {intitule:""};
+      return ctx.confirmer({titre:T(ctx, a), message:T(ctx, a+"Q").replace("{p}", x.intitule), okLabel:T(ctx, a)}).then(r=>{ if (r.ok) envoi(()=>ctx.api("api/v1/recrutement/postes/"+encodeURIComponent(el.dataset.id)+"/"+a, {corps:{}}).then(()=>{ ok(); E.postes = null; E.pipe = null; })); }); }
+    if (a === "plus"){ const et = el.dataset.e, n = E.pipe.lignes.filter(x=>x.etape === et).length; if (E.plusEnCours) return; E.plusEnCours = true;
+      return ctx.api("api/v1/recrutement/candidatures?limit=200&poste="+encodeURIComponent(E.poste)+"&etape="+et+"&offset="+n).then(j=>{ const vus = new Set(E.pipe.lignes.map(x=>x.id)); j.lignes.forEach(x=>{ if (!vus.has(x.id)) E.pipe.lignes.push(x); }); E.pipe.comptes = j.comptes; }).catch(ko).then(()=>{ E.plusEnCours = false; ctx.rendre(); }); }
+    if (a === "effacer") return ctx.confirmer({titre:T(ctx,"effacer"), message:T(ctx,"effacerQ").replace("{n}", el.dataset.n), okLabel:T(ctx,"effacer"), danger:true}).then(r=>{ if (r.ok) envoi(()=>ctx.api("api/v1/recrutement/candidats/"+encodeURIComponent(el.dataset.id)+"/effacer", {corps:{}}).then(()=>{ ctx.flash(T(ctx,"effaceOk"), "ok"); E.cands = null; E.pipe = null; })); });
     if (a === "histo") return ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/historique").then(j=>{ E.histo = Object.assign(j, {id:el.dataset.id}); ctx.rendre(); }).catch(ko);
-    if (a === "entretien") return ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/entretien", {corps:{d:val("fwrEd"), intervenant:val("fwrEi"), note:val("fwrEn") === "" ? null : Number(val("fwrEn")), avis:val("fwrEa")}})
-      .then(()=>{ ok(); return ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/historique"); }).then(j=>{ E.histo = Object.assign(j, {id:el.dataset.id}); ctx.rendre(); }).catch(ko);
+    if (a === "entretien"){ const corps = {d:val("fwrEd"), intervenant:val("fwrEi"), note:val("fwrEn") === "" ? null : Number(val("fwrEn")), avis:val("fwrEa")};
+      return envoi(()=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/entretien", {corps})
+      .then(()=>{ ok(); return ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/historique"); }).then(j=>{ E.histo = Object.assign(j, {id:el.dataset.id}); })); }
     if (a === "etape"){
-      const vers = el.dataset.vers, envoyer = motif => ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/etape", {corps:{vers, motif}}).then(()=>{ ok(); recharger(ctx, ["pipe","postes","histo"]); }).catch(ko);
-      if (vers === "retenu" || vers === "refuse") return ctx.confirmer({titre:T(ctx,"confirmerT")+" : "+T(ctx,vers), message:T(ctx,"rappelDecision"), motif:true, motifLabel:T(ctx,"motifDecision"), motifObligatoire:true, okLabel:T(ctx,vers)}).then(r=>{ if (r.ok) envoyer(r.motif); });
+      const vers = el.dataset.vers, de = (((E.pipe||{}).lignes||[]).find(z=>z.id === el.dataset.id) || {}).etape;
+      const envoyer = motif => envoi(()=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/etape", {corps:{vers, motif}}).then(()=>{ ok(); ["pipe","postes","histo"].forEach(k=>{ E[k] = null; }); }));
+      if (vers === "retenu" || vers === "refuse" || de === "refuse") return ctx.confirmer({titre:T(ctx,"confirmerT")+" : "+T(ctx,vers), message:T(ctx,"rappelDecision"), motif:true, motifLabel:T(ctx,"motifDecision"), motifObligatoire:true, okLabel:T(ctx,vers)}).then(r=>{ if (r.ok) envoyer(r.motif); });
       return envoyer("");
     }
     /* embauche : la fiche salarié s'ouvre pré-remplie (identité, coordonnées, fonction, site et service du poste) ;
        une fois enregistrée, la candidature y est rattachée — aucune double saisie */
     if (a === "embaucher"){
-      const c = (E.pipe.lignes||[]).find(z=>z.id === el.dataset.id), po = ((E.postes||{}).lignes||[]).find(z=>z.id === E.poste) || {};
+      const c = (E.pipe.lignes||[]).find(z=>z.id === el.dataset.id), po = E.pipe.poste || ((E.postes||{}).lignes||[]).find(z=>z.id === E.poste) || {};
       if (!c) return;
       const pre = {nom:c.nom||"", prenom:c.prenom||"", email:c.email||"", tel:c.tel||"", poste:po.fonction || po.intitule || "", entree:new Date().toISOString().slice(0, 10)};
       if (po.site_id) pre.siteId = po.site_id; if (po.dept_id) pre.deptId = po.dept_id;
       const ok = ctx.nouveauSalarie && ctx.nouveauSalarie(pre, mat=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(c.id)+"/embauche", {corps:{mat}})
-        .then(()=>ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok")).catch(e=>ctx.flash(e.message, "err")));
+        .then(()=>{ ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok"); E.pipe = null; ctx.rendre(); }).catch(ko));
       if (!ok) ctx.flash(T(ctx,"embaucheDroit"), "err");
       return;
     }
     if (a === "cand-ajout"){
+      if (E.envoi) return;
       const f = (document.getElementById("fwr_cv")||{}).files, corps = {posteId:E.poste}; ["nom","prenom","email","tel","source"].forEach(k=>{ corps[k] = val("fwr_"+k); });
-      const go = () => ctx.api("api/v1/recrutement/candidats", {corps}).then(()=>{ ok(); recharger(ctx, ["pipe","cands","postes"]); }).catch(ko);
+      const fin = () => { ok(); ["pipe","cands","postes"].forEach(k=>{ E[k] = null; }); };
+      /* candidat déjà enregistré : rattachement confirmé (au lieu d'un doublon) */
+      const go = () => envoi(()=>ctx.api("api/v1/recrutement/candidats", {corps}).then(fin, e=>{ if (e.statut === 409 && /rattach/i.test(e.message || "")) return ctx.confirmer({titre:T(ctx,"rattacher"), message:T(ctx,"doublonQ"), okLabel:T(ctx,"rattacher")}).then(r=>{ if (r.ok) return ctx.api("api/v1/recrutement/candidats", {corps:Object.assign({}, corps, {doublonAccepte:true})}).then(fin); }); throw e; }));
       if (f && f[0]){ const rd = new FileReader(); rd.onload = () => { corps.cv = {nom:f[0].name, type:f[0].type, donnees:String(rd.result).split(",")[1]}; go(); }; rd.readAsDataURL(f[0]); return; }
       return go();
     }
@@ -136,7 +180,7 @@ FIWAKTI_MODULES.enregistrer({
     if (k === "poste"){ E.poste = el.value; return recharger(ctx, ["pipe","histo"]); }
     if (k === "q"){ E.q = el.value.trim(); E.offC = 0; return recharger(ctx, ["cands"]); }
     if (k === "conserv") return ctx.confirmer({titre:T(ctx,"conservation"), message:T(ctx,"conservationConf").replace("{n}", el.value)}).then(r=>{ if (!r.ok){ ctx.rendre(); return; }
-      ctx.api("api/v1/recrutement/parametres", {corps:{conservationMois:Number(el.value)}}).then(j=>{ E.conserv.conservationMois = j.conservationMois; ctx.flash(T(ctx,"conservationOk").replace("{e}", j.effaces), "ok"); recharger(ctx, ["cands","pipe"]); }).catch(e=>ctx.flash(e.message, "err")); });
+      ctx.api("api/v1/recrutement/parametres", {corps:{conservationMois:Number(el.value)}}).then(j=>{ E.conserv.conservationMois = j.conservationMois; ctx.flash(T(ctx,"conservationOk").replace("{e}", j.effaces), "ok"); recharger(ctx, ["cands","pipe"]); }).catch(e=>{ ctx.flash(msgErr(ctx, e), "err"); ctx.rendre(); }); });
   }
 });
 })();
