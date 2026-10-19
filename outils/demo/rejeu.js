@@ -151,14 +151,48 @@
     if ((m = /^\/api\/v1\/recrutement\/candidatures\/([^/]+)\/embauche$/.exec(p))){ modifier(m[1], {salarie:b.mat}); return {ok:true, demo:true, mat:b.mat}; }
     return undefined;
   }
+  /* correctif 36 : intégration — parcours créé avec ses tâches et sa progression, statuts « termine » / « annule »,
+     réouverture, coche et commentaire, modification d'un modèle ; tâches cochables (« peut ») */
+  const ajoutJ = (k, n) => { const p = String(k).split("-").map(Number); return new Date(Date.UTC(p[0], p[1]-1, p[2] + n)).toISOString().slice(0, 10); };
+  const aujL = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2, "0")+"-"+String(d.getDate()).padStart(2, "0"); };
+  const ONB_L = "/api/v1/onboarding/parcours";
+  const onbDetail = id => REP[ONB_L+"/"+id];
+  function onbProgression(id){
+    const d = onbDetail(id); if (!d) return; const j = aujL(), t = d.taches || [];
+    const g = {total:t.length, faites:t.filter(x => x.faite_le).length, retard:t.filter(x => !x.faite_le && x.echeance < j).length, prochaine:(t.filter(x => !x.faite_le).map(x => x.echeance).sort()[0]) || null};
+    modifier(id, {progression:g});
+  }
+  function integ(methode, c, b){
+    const p = sansQ(c); if (p.indexOf("/api/v1/onboarding/") !== 0) return undefined; b = b || {};
+    let m;
+    if (methode === "GET"){
+      if ((m = /^\/api\/v1\/onboarding\/parcours\/([^/]+)$/.exec(p))){ const d = onbDetail(m[1]); if (!d) return undefined; const v = copie(d);
+        v.parcours.nom = v.parcours.nom || nomDe(v.parcours.mat); v.taches.forEach(t => { t.peut = v.parcours.statut === "en_cours"; }); return v; }
+      return undefined;
+    }
+    if (p === ONB_L){
+      const mods = ((REP["/api/v1/onboarding/modeles"] || {}).modeles || []), mo = mods.find(z => z.id === b.modeleId) || mods[0];
+      const r = {ok:true, demo:true, id:creer(p, b).id}, debut = b.debut || aujL();
+      const taches = ((mo || {}).taches || []).map((t, i) => ({id:nouvelId("ot"), parcours_id:r.id, ordre:i, titre:t.titre, responsable:t.responsable, echeance:ajoutJ(debut, +t.jour || 0), faite_le:null, faite_par:null, commentaire:null}));
+      modifier(r.id, {debut, fin_essai:b.finEssai || ajoutJ(debut, 90), modele_id:mo ? mo.id : null, nom:nomDe(b.mat)});
+      REP[ONB_L+"/"+r.id] = {parcours:{id:r.id, mat:b.mat, modele_id:mo ? mo.id : null, modele:mo ? mo.nom : "", debut, fin_essai:b.finEssai || ajoutJ(debut, 90), statut:"en_cours", cree:maint(), par:"admin"}, taches};
+      onbProgression(r.id); return r;
+    }
+    if ((m = /^\/api\/v1\/onboarding\/parcours\/([^/]+)\/(terminer|annuler|rouvrir)$/.exec(p))){ modifier(m[1], {statut:{terminer:"termine", annuler:"annule", rouvrir:"en_cours"}[m[2]]}); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/onboarding\/taches\/([^/]+)$/.exec(p))){
+      const z = {}; if (b.faite !== undefined) Object.assign(z, b.faite ? {faite_le:maint(), faite_par:"admin"} : {faite_le:null, faite_par:null}); if (b.commentaire !== undefined) z.commentaire = b.commentaire;
+      modifier(m[1], z); const d = Object.keys(REP).filter(k => k.indexOf(ONB_L+"/") === 0).map(k => REP[k]).find(v => (v.taches || []).some(t => t.id === m[1])); if (d) onbProgression(d.parcours.id); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/onboarding\/modeles\/([^/]+)$/.exec(p))){ modifier(m[1], {nom:b.nom, fonction:b.fonction, taches:b.taches}); return {ok:true, demo:true}; }
+    return undefined;
+  }
   return function(chemin, o){
     const c = "/"+String(chemin || "").replace(/^\.?\//, "");
     const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
     if (methode !== "GET"){
-      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
+      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
       return new Promise(ok => setTimeout(() => ok(r), 150));
     }
-    const rr = recrut("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
+    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
     const p = sansQ(c), parent = p.replace(/\/[^/]+$/, "/"), cles = chemins();
     let k = REP[c] !== undefined ? c : cles.find(x => sansQ(x) === p);
     if (!k) k = cles.find(x => { const y = sansQ(x); return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });

@@ -2137,3 +2137,33 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-35.zip (cumulatif : correctifs 2 à 34 inclus).
+
+## Correctif 36 — Talents › Intégration (FW-Onboarding, analyse approfondie)
+
+Analyse de l'écran après le correctif 34, sur le serveur réel en SQLite puis en PostgreSQL 16, avec des comptes à menu masqué, en lecture, à actions refusées, un manager (EMP lecture) et un compte en saisie, dans Chromium (fr / ar) et la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| I1 | « Démarrer un parcours » et « Enregistrer le modèle » envoyaient des champs vides : le verrou d'envoi (correctif 34) redessinait l'écran avant la lecture des champs. Même défaut dans Formation (session, inscription), Évaluations (lancer, saisie) et Recrutement (CV joint perdu) | **critique** | l'action lit les champs avant le rendu ; saisie conservée (`E.form`) et vidée seulement après succès ; vérifié dans Chromium sur les quatre écrans (corps des requêtes remplis) |
+| I2 | Matrice de l'écran ignorée : menu masqué → lecture et création ; menu en lecture → création, coche, annulation ; actions « créer / valider » refusées → création et clôture ; « À traiter » et fiche 360° affichés | **critique** | `droitsEcran` (menu, actions) côté serveur pour toutes les routes, « À traiter » et la fiche 360° ; droits renvoyés à l'écran |
+| I3 | PostgreSQL : six créations simultanées → six parcours en cours ; modèle standard créé en double ; clôtures simultanées → deux 200 et deux audits | **critique** | verrou par salarié dans la transaction ; modèle standard à identifiant fixe (`ON CONFLICT DO NOTHING`) ; passage d'état conditionnel (vérifié : `200,409×5`) |
+| I4 | JSON invalide → 500 ; champs non typés (« [object Object] », `taches:[null]` → 500, `faite:"false"` cochait, `jour:2.5`, responsable inconnu remplacé en silence) ; messages en français en anglais / arabe | haute | 400 ; champs texte stricts, `faite` booléen, jour entier 0–365, responsable connu ; messages trilingues |
+| I5 | Fin d'essai dépassée disparue d'« À traiter » ; fiche 360° « en retard 7 » sur un parcours terminé | haute | clé « fin d'essai dépassée » (libellés trilingues ajoutés à l'application) ; retard et échéance pour un parcours en cours seulement |
+| I6 | Aucun lien avec l'embauche | haute | après une embauche du Recrutement, démarrage du parcours proposé (début = date d'entrée) |
+| I7 | Début par défaut au jour de saisie et non à l'entrée ; début avant l'entrée ; fin d'essai après la sortie prévue ; sortie : `<=` à la création, `<` dans la tâche de nuit | moyenne | début = date d'entrée par défaut, jamais avant ; fin d'essai ≤ sortie ; même règle de sortie partout |
+| I8 | Tâche de nuit : un changement de matricule annulait le parcours (« salarié supprimé »), sans réouverture possible ; aucune protection si la liste des salariés est vide | moyenne | lien parcours → fiche (identifiant) : matricule suivi ; salarié introuvable laissé en cours ; garde-fou ; écritures groupées ; route « rouvrir » (validation, motif) |
+| I9 | Retirer tous les modèles : le modèle standard réapparaissait ; pas de modification de modèle ni de suppression de ligne ; liste « Modèle » vide au premier usage | moyenne | modèle standard semé seulement si aucun modèle n'a existé (sinon « aucun modèle actif ») ; modification ; suppression de ligne ; modèle standard proposé dès le premier usage |
+| I10 | Tâches cochées par n'importe quel compte en saisie, jamais par le manager (EMP lecture) ni le salarié ; pas de commentaire à l'écran | moyenne | droit « modifier » de l'écran, ou manager du salarié pour une tâche « responsable », ou le salarié pour sa tâche ; chaque tâche indique si elle est cochable ; commentaire saisi et enregistré |
+| I11 | Liste sans recherche ni filtre (`q`, « tous » ignorés) ; annulation sans motif ni avertissement ; détail sans nom ni modèle | moyenne | recherche (matricule, nom), statuts dont « tous », « en retard seulement » ; annulation et réouverture avec motif ; avertissement des tâches non faites ; nom, modèle et statut affichés |
+| I12 | Démonstration : progression « undefined », détail d'un autre salarié, statuts « terminee / annulee » ignorés par le filtre, cases désactivées, progression figée | moyenne | rejeu propre : parcours créé avec tâches et progression, statuts `termine` / `annule` / `en_cours`, coche et commentaire, modification de modèle |
+| I13 | Accessibilité : focus perdu après une coche, barre de progression sans nom, pagination « ‹ », retard signalé par la couleur seule, autres cases actives pendant un envoi ; journal recopiant le commentaire ; jour UTC à l'écran ; pagination instable | basse | focus rétabli, `aria-label`, « En retard » écrit, cases désactivées pendant l'envoi ; « commentaire modifié » seulement ; jour local ; tri `debut, id` et index |
+
+Non traité : relances par courriel des responsables ; responsable nominatif (login) d'une tâche ; navigation des onglets aux flèches (commune à l'application).
+
+Vérifié :
+- **SQLite.** Modèle standard proposé puis semé une fois ; matrice (masqué 403, lecture 403 en écriture, actions refusées 403) ; JSON invalide 400 ; champs objets 400 ; début avant l'entrée, fin d'essai après la sortie → 400 ; début par défaut = entrée ; modèles (jour 2,5, responsable inconnu, `[null]` → 400 ; modification ; tous retirés → « aucun modèle actif ») ; manager coche sa tâche (200) mais pas la tâche RH (403) ; `faite:"false"` → 400 ; annulation sans motif 400 ; trois clôtures simultanées `200,409,409` ; réouverture avec motif ; recherche, « tous », « en retard » ; « À traiter » masqué vide ; tâche de nuit : matricule suivi, salarié sorti annulé.
+- **PostgreSQL 16.** Six créations simultanées `200,409×5`, quatre `409,409,200,409` ; un seul modèle standard ; clôtures `200,409,409` ; compteurs numériques ; JSON invalide 400 ; tâche de nuit.
+- **Chromium.** Démarrage depuis l'écran (corps rempli), saisie gardée après erreur, coche avec focus rétabli, commentaire, modèle avec suppression de ligne ; Évaluations (lancer) et Formation (session) depuis l'écran ; arabe ; démonstration : démarrage, coche, progression, terminé filtré ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-36.zip (cumulatif : correctifs 2 à 35 inclus).

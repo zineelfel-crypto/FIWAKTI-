@@ -97,7 +97,8 @@ FIWAKTI_MODULES.enregistrer({
   action(a, el, ctx){
     /* correctif 34 : un seul envoi à la fois (double clic : deux campagnes) ; validation et clôture confirmées */
     const E = ctx.etat, ko = e => ctx.flash(msgErr(ctx, e), "err");
-    const verrou = f => { if (E.envoi) return; E.envoi = true; ctx.rendre(); return Promise.resolve().then(f).finally(()=>{ E.envoi = false; ctx.rendre(); }); };
+    /* correctif 36 : f est appelée AVANT le rendu (le rendu recréait les champs : la requête partait vide) */
+    const verrou = f => { if (E.envoi) return; E.envoi = true; let pr; try { pr = Promise.resolve(f()); } catch(e){ pr = Promise.reject(e); } ctx.rendre(); return pr.finally(()=>{ E.envoi = false; ctx.rendre(); }); };
     if (a === "supprimer") return ctx.confirmer({titre:T(ctx,"supprimer"), message:T(ctx,"supprimerQ").replace("{n}", el.dataset.nom || ""), danger:true}).then(r=>{ if (!r.ok) return;
       return verrou(()=>ctx.api("api/v1/evaluation/campagnes/"+encodeURIComponent(el.dataset.id)+"/supprimer", {corps:{}}).then(()=>{ E.camp = null; }).catch(ko)); });
     if (a === "onglet"){ E.onglet = el.dataset.o; E.detail = null; E.liste = null; return ctx.rendre(); }

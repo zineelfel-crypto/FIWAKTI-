@@ -2,7 +2,7 @@
   "id": "FW-Formation",
   "nom": "Formation et habilitations",
   "categorie": "metier",
-  "version": "1.1",
+  "version": "1.2",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -44,7 +44,7 @@
     "FW-Competences"
   ],
   "integrite": {
-    "js": "sha384-yQwCAzhUkqSL2Z4+nhu91+eBvDu/g+7kiKdXXG7igJmwuVcnRJR3BjeIcnuKSn+Y",
+    "js": "sha384-xa2FVvSQ21Hgw0uVcGCQZJB/Yc2okO3CIvgPfhqf5ZbpwcRMwITDkLWfNTaXOuEV",
     "css": "sha384-HDdk6JjJa8kfGODLMGx8v93XdRtJLKPoOAjVGs636fCXwkA+36Sc6VSLhCJTADxB"
   }
 }

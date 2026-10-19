@@ -21,7 +21,8 @@ const L = {
     cvRemplacer:"Remplacer le CV", cvSupprimer:"Supprimer le CV", cvSupprimerQ:"Supprimer le CV de ce candidat ?", cvTropGros:"CV trop volumineux : 5 Mo au plus.", cvIgnore:"Le candidat avait déjà un CV : il est conservé (remplacement depuis sa fiche).",
     exporter:"Exporter (CSV)", relier:"Relier une fiche existante", matricule:"Matricule", fermer:"Fermer", desister:"Désistement",
     precedent:"Page précédente", suivant:"Page suivante", motifSaisie:"Pas de donnée personnelle (santé, famille…) dans le motif.", quotaAtteint:"Tous les postes sont pourvus.",
-    ms_cand:"candidature enregistrée", ms_fiche:"fiche salarié créée : {m}", actEtape:"{e} — {n}", voirFiche:"Voir la fiche de {n}"},
+    ms_cand:"candidature enregistrée", ms_fiche:"fiche salarié créée : {m}", actEtape:"{e} — {n}", voirFiche:"Voir la fiche de {n}",
+    integration:"Intégration", integrationQ:"Démarrer le parcours d'intégration du salarié {m} (à partir de sa date d'entrée) ?", integrationOk:"Démarrer", integrationFait:"Parcours d'intégration démarré pour {m}."},
   en:{embaucher:"Create employee record", salarieCree:"Employee {m}", embaucheOk:"Record {m} created and linked to the application.", embaucheDroit:"Creating an employee record requires the employee entry right.", conservation:"Retention of unsuccessful candidates", mois:"{n} months", conservationH:"After that: identity, contact details, CV and interviews erased; stages kept anonymously. Candidates with an employee record are never erased.", conservationConf:"Keep unsuccessful candidates for {n} months? Those past due are erased now.", conservationOk:"Saved; {e} candidate(s) erased.", titre:"Recruitment", lede:"Open positions, applications by stage, interviews and justified decisions. CVs are encrypted; every access is logged.",
     postes:"Positions", candidatures:"Applications", candidats:"Candidates", intitule:"Title", fonction:"Job", nb:"Openings", description:"Description",
     ouvrir:"Open position", ouverts:"Open", clos:"Closed", tous:"All", clore:"Close", rouvrir:"Reopen", nbCand:"Applications", retenus:"Hired", aucunPoste:"No position: open one.",
@@ -40,7 +41,8 @@ const L = {
     cvRemplacer:"Replace CV", cvSupprimer:"Delete CV", cvSupprimerQ:"Delete this candidate's CV?", cvTropGros:"CV too large: 5 MB max.", cvIgnore:"The candidate already had a CV: it is kept (replace it from the record).",
     exporter:"Export (CSV)", relier:"Link an existing record", matricule:"Employee ID", fermer:"Close", desister:"Withdrawal",
     precedent:"Previous page", suivant:"Next page", motifSaisie:"No personal data (health, family…) in the reason.", quotaAtteint:"All openings are filled.",
-    ms_cand:"application recorded", ms_fiche:"employee record created: {m}", actEtape:"{e} — {n}", voirFiche:"Open the record of {n}"},
+    ms_cand:"application recorded", ms_fiche:"employee record created: {m}", actEtape:"{e} — {n}", voirFiche:"Open the record of {n}",
+    integration:"Onboarding", integrationQ:"Start the onboarding path of employee {m} (from the hire date)?", integrationOk:"Start", integrationFait:"Onboarding path started for {m}."},
   ar:{embaucher:"إنشاء ملف الأجير", salarieCree:"الأجير {m}", embaucheOk:"أنشئ الملف {m} وربط بالترشح.", embaucheDroit:"إنشاء ملف أجير يتطلب حق الإدخال.", conservation:"مدة حفظ المترشحين غير المقبولين", mois:"{n} شهرا", conservationH:"عند الأجل تمحى الهوية والبيانات والسيرة والمقابلات؛ تبقى المراحل مجهولة. لا يُمحى المترشحون المنتدبون.", conservationConf:"حفظ المترشحين غير المقبولين {n} شهرا؟ من تجاوز الأجل يُمحى فورا.", conservationOk:"تم الحفظ؛ محي {e} مترشح.", titre:"الانتداب", lede:"المناصب الشاغرة والترشحات حسب المرحلة والمقابلات والقرارات المعللة. السير الذاتية مشفرة.",
     postes:"المناصب", candidatures:"الترشحات", candidats:"المترشحون", intitule:"التسمية", fonction:"الوظيفة", nb:"عدد المناصب", description:"الوصف",
     ouvrir:"فتح المنصب", ouverts:"مفتوحة", clos:"مغلقة", tous:"الكل", clore:"إغلاق", rouvrir:"إعادة الفتح", nbCand:"الترشحات", retenus:"المقبولون", aucunPoste:"لا مناصب: افتح منصبا.",
@@ -59,7 +61,8 @@ const L = {
     cvRemplacer:"تعويض السيرة", cvSupprimer:"حذف السيرة", cvSupprimerQ:"حذف سيرة هذا المترشح؟", cvTropGros:"السيرة كبيرة جدا: 5 م.ب كحد أقصى.", cvIgnore:"للمترشح سيرة سابقة: حُفظت (يمكن تعويضها من ملفه).",
     exporter:"تصدير (CSV)", relier:"ربط ملف موجود", matricule:"الرقم", fermer:"إغلاق", desister:"انسحاب",
     precedent:"الصفحة السابقة", suivant:"الصفحة التالية", motifSaisie:"لا بيانات شخصية (صحة، عائلة…) في التعليل.", quotaAtteint:"كل المناصب مشغولة.",
-    ms_cand:"سُجل الترشح", ms_fiche:"أنشئ ملف الأجير: {m}", actEtape:"{e} — {n}", voirFiche:"فتح ملف {n}"}
+    ms_cand:"سُجل الترشح", ms_fiche:"أنشئ ملف الأجير: {m}", actEtape:"{e} — {n}", voirFiche:"فتح ملف {n}",
+    integration:"الإدماج", integrationQ:"بدء مسار إدماج الأجير {m} (من تاريخ دخوله)؟", integrationOk:"بدء", integrationFait:"بدأ مسار الإدماج لـ {m}."}
 };
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
 const ETAPES = ["recue","preselection","entretien","decision","retenu","refuse"];
@@ -191,7 +194,12 @@ FIWAKTI_MODULES.enregistrer({
     /* correctif 34 : un envoi à la fois ; correctif 35 : le focus revient sur l'élément d'origine après le rendu */
     const cible = el && el.dataset ? '[data-act="'+el.dataset.act+'"]'+(el.dataset.id ? '[data-id="'+CSS.escape(el.dataset.id)+'"]' : '') : null;
     const refocus = () => { setTimeout(()=>{ const x = cible && document.querySelector(cible); if (x) x.focus(); else { const p = document.getElementById("fwrP"); if (p){ p.setAttribute("tabindex", "-1"); p.focus(); } } }, 80); };
-    const envoi = f => { if (E.envoi) return; E.envoi = true; ctx.rendre(); return Promise.resolve().then(f).catch(ko).then(()=>{ E.envoi = false; ctx.rendre(); refocus(); }); };
+    /* correctif 36 : f est appelée AVANT le rendu (le fichier choisi pour le CV était perdu au rendu) */
+    const envoi = f => { if (E.envoi) return; E.envoi = true; let pr; try { pr = Promise.resolve(f()); } catch(e){ pr = Promise.reject(e); } ctx.rendre(); return pr.catch(ko).then(()=>{ E.envoi = false; ctx.rendre(); refocus(); }); };
+    /* correctif 36 : après l'embauche, le parcours d'intégration est proposé (module Intégration actif) */
+    const integration = mat => { let actif = false; try { actif = typeof FW_MODULES !== "undefined" && !!(FW_MODULES.cat || {})["FW-Onboarding"]; } catch(e){}
+      if (!actif) return; setTimeout(()=>ctx.confirmer({titre:T(ctx,"integration"), message:T(ctx,"integrationQ").replace("{m}", mat), okLabel:T(ctx,"integrationOk")}).then(r=>{ if (!r.ok) return;
+        ctx.api("api/v1/onboarding/parcours", {corps:{mat}}).then(()=>ctx.flash(T(ctx,"integrationFait").replace("{m}", mat), "ok")).catch(ko); }), 300); };
     const vider = pre => Object.keys(E.form).forEach(k=>{ if (k.indexOf(pre) === 0) delete E.form[k]; });
     const rafraichirFiche = id => ctx.api("api/v1/recrutement/candidats/"+encodeURIComponent(id)).then(j=>{ E.fiche = j; ["nom","prenom","email","tel","source"].forEach(k=>{ E.form["fwrR_"+k] = j.candidat[k] || ""; }); });
     if (a === "onglet"){ E.onglet = el.dataset.o; return ctx.rendre(); }
@@ -239,12 +247,12 @@ FIWAKTI_MODULES.enregistrer({
       /* correctif 35 : si la liaison échoue (fiche enregistrée ailleurs, nom modifié…), le matricule est gardé dans
          « Relier une fiche existante » au lieu de reproposer une création (second salarié) */
       const lancer = ctx.nouveauSalarie && ctx.nouveauSalarie(pre, mat=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(c.id)+"/embauche", {corps:{mat}})
-        .then(()=>{ ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok"); E.pipe = null; ctx.rendre(); }).catch(e=>{ E.form["fwrMat-"+c.id] = mat; ko(e); ctx.rendre(); }));
+        .then(()=>{ ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok"); E.pipe = null; ctx.rendre(); integration(mat); }).catch(e=>{ E.form["fwrMat-"+c.id] = mat; ko(e); ctx.rendre(); }));
       if (!lancer) ctx.flash(T(ctx,"embaucheDroit"), "err");
       return;
     }
     if (a === "relier"){ const mat = val("fwrMat-"+el.dataset.id); if (!mat) return;
-      return envoi(()=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/embauche", {corps:{mat}}).then(()=>{ ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok"); delete E.form["fwrMat-"+el.dataset.id]; E.pipe = null; })); }
+      return envoi(()=>ctx.api("api/v1/recrutement/candidatures/"+encodeURIComponent(el.dataset.id)+"/embauche", {corps:{mat}}).then(()=>{ ctx.flash(T(ctx,"embaucheOk").replace("{m}", mat), "ok"); delete E.form["fwrMat-"+el.dataset.id]; E.pipe = null; integration(mat); })); }
     if (a === "cand-ajout"){
       if (E.envoi) return;
       const corps = {posteId:E.poste}; ["nom","prenom","email","tel","source"].forEach(k=>{ corps[k] = val("fwr_"+k); });

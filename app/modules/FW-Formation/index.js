@@ -120,7 +120,8 @@ FIWAKTI_MODULES.enregistrer({
   action(a, el, ctx){
     /* correctif 34 : un seul envoi à la fois (le double clic créait deux sessions) */
     const E = ctx.etat, ok = () => ctx.flash(T(ctx,"enregistre"), "ok"), ko = e => ctx.flash(msgErr(ctx, e), "err");
-    const verrou = f => { if (E.envoi) return; E.envoi = true; ctx.rendre(); return Promise.resolve().then(f).finally(()=>{ E.envoi = false; ctx.rendre(); }); };
+    /* correctif 36 : f est appelée AVANT le rendu (le rendu recréait les champs : la requête partait vide) */
+    const verrou = f => { if (E.envoi) return; E.envoi = true; let pr; try { pr = Promise.resolve(f()); } catch(e){ pr = Promise.reject(e); } ctx.rendre(); return pr.finally(()=>{ E.envoi = false; ctx.rendre(); }); };
     if (a === "onglet"){ E.onglet = el.dataset.o; E.session = null; E.B = E.S = E.H = null; E.BErr = E.SErr = E.HErr = null; return ctx.rendre(); }
     if (a === "reessayer"){ E[el.dataset.k+"Err"] = null; return ctx.rendre(); }
     if (a === "pageB" || a === "pageS" || a === "pageH"){ const k = a.slice(4), o = "off"+k; E[o] = Math.max(0, E[o] + Number(el.dataset.d)); E[k] = null; return ctx.rendre(); }

@@ -2,7 +2,7 @@
   "id": "FW-Onboarding",
   "nom": "Intégration des nouveaux collaborateurs",
   "categorie": "metier",
-  "version": "1.1",
+  "version": "1.2",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -40,7 +40,7 @@
     "css_ko": 4
   },
   "integrite": {
-    "js": "sha384-xHCJLGQSM9ytfUEQXkBpNQE1B5G7K42BjmzdTH01bcxd7DuVCgTFKiuaR9VYbLZ5",
+    "js": "sha384-RopKWxjDNlBrU05IE2+yFIG9XuANsA1ho23cEeWH40Kynk52tlWWiw1ek8ybekJA",
     "css": "sha384-jFTUO3Vve1GKCnvc6y0YbQIKYLcsYtrWtoM6x1syO49UEykhBtkpQzKszFpIgRw8"
   }
 }
