@@ -623,7 +623,8 @@ async function executerRegles0(ids, par, nouveaux, horsForce){
   const z = v => String(v).padStart(2, "0"), n0 = new Date(), ts = n0.getFullYear()+"-"+z(n0.getMonth()+1)+"-"+z(n0.getDate())+" "+z(n0.getHours())+":"+z(n0.getMinutes());
   const jjmm = d => String(d || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1");
   const journalL = [], notifs = [], comptesOff = new Map(), bio = new Set(), bilan = {salaries:0, executions:0, actions:0, mats:[]};
-  const liste = (await D.employes()).filter(e=>e && e.id && (!ids || ids.has(String(e.id))));
+  /* correctif 27 : salarié d'essai (recette) exclu des règles métier */
+  const liste = (await D.employes()).filter(e=>e && e.id && e.recette !== true && !/^rec_/.test(String(e.id)) && (!ids || ids.has(String(e.id))));
   for (const e of liste){
     const etat = e.regleEtat && typeof e.regleEtat === "object" ? e.regleEtat : null, evts = [], x = JSON.parse(JSON.stringify(e)), nouv = nouveaux.has(String(e.id));
     if (nouv) evts.push({type:"employe.cree", detail:"création"});
@@ -3002,6 +3003,30 @@ async function traiter(req, res){
      la connexion restait refusée) */
   /* correctif 23 : changement de mot de passe imposé à la prochaine connexion (le bouton de l'écran ne changeait que le
      paramétrage : la connexion répondait « changer: false ») */
+  /* ---- correctif 27 : recette des calculs — matricule libre et suppression complète par le serveur ---- */
+  if (p.startsWith("/api/v1/recette/") && !admin) return erreur(res, 403, "Réservé aux administrateurs.");
+  if (p === "/api/v1/recette/matricule" && req.method === "GET"){
+    const mats = new Set((await D.employes()).map(e=>String(e.mat))); let m = 99001; while (mats.has(String(m)) && m < 9999999) m++;
+    const clot = ((await D.referentielLecture()) || {}).clotures || [];
+    return json(res, 200, {mat:String(m), recette:!!CONFIG.recette, cloture:clot.reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "")});
+  }
+  if (p === "/api/v1/recette/supprimer" && req.method === "POST"){
+    const ref = await D.referentiel() || {}, marque = z => !!z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || "")));
+    const emps = (await D.employes()).filter(marque), mats = emps.map(e=>String(e.mat)), bilan = {salaries:emps.length, badgeages:0, parametrage:0, autres:0};
+    for (const m of mats){
+      bilan.badgeages += Number(((await B.run("DELETE FROM enreg WHERE coll='ptg' AND mat=?", m)) || {}).n || 0);
+      for (const cl of ["abs","dmd","corrections","notifs","journal","audit","ajust"]) bilan.autres += Number(((await B.run("DELETE FROM enreg WHERE coll=? AND mat=?", cl, m)) || {}).n || 0);
+      for (const t of ["anomalies", "day_states", "day_transitions", "calc_jour"]) try { bilan.autres += Number(((await B.run("DELETE FROM "+t+" WHERE mat=?", m)) || {}).n || 0); } catch(e){}
+    }
+    for (const e of emps) await B.run("DELETE FROM enreg WHERE coll='emps' AND id=?", String(e.id));
+    if (emps.length){ D.oublierEmployes(); }
+    ["convs","sites","jours","cals","etats"].forEach(k=>{ if (Array.isArray(ref[k])){ const n0 = ref[k].length; ref[k] = ref[k].filter(x=>!marque(x)); bilan.parametrage += n0 - ref[k].length; if (n0 !== ref[k].length){ const v = ref.__versions || (ref.__versions = {}); v[k] = (Number(v[k]) || 0) + 1; } } });
+    if (Array.isArray(ref.corbeille)){ const n0 = ref.corbeille.length; ref.corbeille = ref.corbeille.filter(c=>!(c && marque(c.row))); if (n0 !== ref.corbeille.length){ const v = ref.__versions || (ref.__versions = {}); v.corbeille = (Number(v.corbeille) || 0) + 1; } }
+    await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), maintenant(), CLE_APP);
+    try { await K.invalider([], ["convs","sites","jours","cals"]); } catch(e){}
+    await audit(C.login, "recette.supprimee", JSON.stringify(bilan), ip);
+    return json(res, 200, Object.assign({ok:true}, bilan));
+  }
   if (p === "/api/v1/comptes/portail" && req.method === "GET"){ const ref = await D.referentielLecture() || {}, pr = portailProfil(ref);
     return json(res, 200, {eligibles:(await portailEligibles(ref)).length, profil:pr ? {id:pr.id, nom:pr.nom} : null}); }
   if (p === "/api/v1/comptes/portail/generer" && req.method === "POST"){ const r = await portailGenerer(C.login, null, ip);

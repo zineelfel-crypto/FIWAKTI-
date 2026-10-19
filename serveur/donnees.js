@@ -26,6 +26,7 @@ function joursDe(coll, x){
 }
 const ETATS_DMD = ["attente","acceptee","refusee","annulee"];
 const RANG = {lecture:1, saisie:2, validation:3, config:4};
+const marqueRecette = z => !!z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || "")));
 const PERIM_NIV = p => require("./perimetre.js").niveauProfil(p);
 /* correctif 18 : circuit de validation appliqué par le serveur (même logique que l'écran) — valideur du niveau en cours :
    responsable direct (hier), responsable du responsable (hier2), responsable du service ou du service parent
@@ -552,7 +553,11 @@ function creer(B, PERIM){
         if (k === "sites"){ const motif = await motifSites(); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
         if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, await sitesRetenus()) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)) || controleConvsPerim(ref.convs || [], r.convs, await sitesP()); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
-        if (!(opts || {}).recette && Array.isArray(r[k]) && r[k].some(z=>z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || ""))) && !(ref[k] || []).some(y=>y && y.id === z.id))){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
+        /* correctif 27 : un élément existant ne devient jamais « de recette » (le marquer puis « recréer le jeu d'essai »
+           supprimait de vrais salariés et sites) ; jeu d'essai créé par un administrateur, identifiants « rec_ » */
+        if (Array.isArray(r[k])){ const avK = new Map((ref[k] || []).filter(y=>y && y.id).map(y=>[y.id, y])), neuf = r[k].filter(z=>marqueRecette(z) && !marqueRecette(avK.get(z.id)));
+          if (neuf.length && !(opts || {}).recette){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
+          if (neuf.some(z=>avK.has(z.id) || !/^rec_/.test(String(z.id || ""))) || (neuf.length && !admin)){ ignores.push(k+" (jeu d'essai : nouveaux éléments « rec_ » créés par un administrateur seulement)"); continue; } }
         /* correctif 22 : les profils ne se modifient que par un administrateur (comme l'écran) — un compte « Système
            configuration » de niveau RH élargissait par l'API un profil attribué (périmètre, écrans, matrice) */
         if (k === "profils" && !admin){ ignores.push("profils (réservé à un administrateur)"); continue; }
@@ -610,7 +615,12 @@ function creer(B, PERIM){
           if (!immuable && avant && Number(avant.__v||0) !== Number(x.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(x.id), mat:avant.mat||""}); continue; }
           if (UNI){ const d = doublonEmp(UNI, x, avant); if (d){ refus++; refusEmps.push(d); continue; } }
           if (!admin && !avant && acteRefuse(c, "creer")){ refus++; continue; }
-          if (!(opts || {}).recette && !avant && (x.recette === true || x.src === "recette" || /^rec_/.test(String(x.id)))){ refus++; ignores.push(c+" (outils de recette réservés à une installation de recette)"); continue; }
+          if (marqueRecette(x) && !marqueRecette(avant)){
+            if (!(opts || {}).recette){ refus++; ignores.push(c+" (outils de recette réservés à une installation de recette)"); continue; }
+            /* correctif 27 : jeu d'essai — administrateur, nouvel enregistrement, et badgeages seulement sur le salarié d'essai
+               (en grand effectif, 150 badgeages d'essai étaient écrits sur un vrai salarié au matricule 99001) */
+            const eR = c === "ptg" ? (await employes()).find(e=>String(e.mat) === String(x.mat)) : null;
+            if (!admin || avant || (c === "ptg" ? !(eR && marqueRecette(eR)) : !/^rec_/.test(String(x.id)))){ refus++; ignores.push(c+" (jeu d'essai : réservé à l'administrateur, sur le seul salarié d'essai)"); continue; } }
           /* correctif 19 : badgeage — salarié existant et horodatage réel exigés (un import pouvait écrire des badgeages
              sans matricule, ou rattachés à « __proto__ » / « constructor », comptés ensuite nulle part) */
           if (c === "ptg" && (!avant || String(avant.mat) !== String(x.mat) || String(avant.ts) !== String(x.ts))){
