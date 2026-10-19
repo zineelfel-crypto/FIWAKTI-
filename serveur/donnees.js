@@ -383,12 +383,31 @@ function creer(B, PERIM){
           if (nI) ignores.push("anoDec ("+nI+" décision(s) en période clôturée ignorée(s) : ajustement de période antérieure requis)"); r.anoDec = n0; } }
         /* correctif 22 : un compte ne peut porter (ni recevoir en délégation) qu'un profil existant — un profil inconnu
            donnait à l'écran tous les menus d'administration */
+        /* correctif 23 : identifiants sans espaces (« ␣adm » échappait à la double authentification exigée pour « adm ») ;
+           date de dernière connexion jamais reprise du navigateur (elle vient du serveur) */
+        if (k === "users" && admin && Array.isArray(r.users)){ const avU = new Map((ref.users || []).filter(u=>u && u.id).map(u=>[u.id, u]));
+          r.users = r.users.map(u=>{ if (!u || typeof u !== "object") return u; const c = Object.assign({}, u); if (c.login != null) c.login = String(c.login).trim(); const a = avU.get(c.id);
+            if (a && a.derniereConx !== undefined) c.derniereConx = a.derniereConx; else delete c.derniereConx; return c; }); }
         if (k === "users" && admin && Array.isArray(r.users)){ const pids = new Set((Array.isArray(r.profils) && peutK("profils") ? r.profils : (ref.profils || [])).map(p=>p && p.id));
           const x = r.users.find(u=>u && ((u.profilId && !pids.has(u.profilId)) || (u.deleg || []).some(d=>d && d.profilId && !pids.has(d.profilId))));
-          if (x){ ignores.push("users (compte "+String(x.login || x.id).slice(0, 40)+" : profil inconnu)"); continue; } }
+          if (x){ ignores.push("users (compte "+String(x.login || x.id).slice(0, 40)+" : profil inconnu)"); continue; }
+          /* correctif 23 : contenu des comptes contrôlé (identifiants en double, salarié inexistant ou déjà rattaché,
+             délégations aux dates impossibles, périmètre sur des sites inexistants… étaient enregistrés) */
+          const nouvE = ((((paquet.colls || {}).emps) || {}).put || []).filter(z=>z && z.id);
+          const mU = controleUsers(ref.users || [], r.users, (await employes()).concat(nouvE), {sites:[].concat(ref.sites || [], Array.isArray(r.sites) ? r.sites : []), depts:[].concat(ref.depts || [], Array.isArray(r.depts) ? r.depts : []), terms:[].concat(ref.terms || [], Array.isArray(r.terms) ? r.terms : [])});
+          if (mU){ ignores.push("users ("+mU+")"); continue; } }
         if (k === "users" && !admin){
           const moi = (r.users||[]).find(x=>x && x.id === P.u.id);
-          if (moi){ ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, pick(moi, ["ntfVus","derniereConx","langue","prefs","homeLayout"]))); refModifie = true; }
+          /* correctif 23 : champs propres bornés (langue connue, préférences ≤ 32 Ko : 20 Mo étaient acceptés et alourdissaient
+             l'ouverture de chacun) ; date de dernière connexion jamais reprise du navigateur */
+          if (moi){ const p0 = pick(moi, ["ntfVus","langue","prefs","homeLayout"]);
+            if ("langue" in p0 && LANGUES_U.indexOf(p0.langue) < 0){ delete p0.langue; ignores.push("users (langue non prévue)"); }
+            [["prefs", 32768], ["homeLayout", 32768], ["ntfVus", 262144]].forEach(([c, max])=>{ if (c in p0 && (JSON.stringify(p0[c] === undefined ? null : p0[c]) || "").length > max){ delete p0[c]; ignores.push("users ("+c+" trop volumineux)"); } });
+            ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, p0)); refModifie = true; }
+          /* correctif 23 : toute autre modification des comptes est réservée à un administrateur — elle était ignorée sans
+             le dire (« ok » affiché, rien d'enregistré) */
+          const stU = new Map((ref.users || []).filter(u=>u && u.id).map(u=>[u.id, u])), cleU = u=>JSON.stringify([String(u.login || "").trim(), u.nom || "", u.empId || "", u.profilId || "", u.actif !== false, (u.deleg || []).length ? u.deleg : []]);
+          if ((r.users || []).some(u=>u && (!stU.has(u.id) || cleU(stU.get(u.id)) !== cleU(u)))) ignores.push("users (réservé à un administrateur)");
           continue;
         }
         /* décisions sur les anomalies : droit de correction des pointages (PTG ≥ saisie) sur son périmètre, jamais sur
@@ -797,6 +816,53 @@ function controleConvs(avant, apres, sites){
 /* correctif 19 : date réelle aaaa-mm-jj (« 2026-13-45 » levait une exception : erreur 500 au lieu d'un refus) */
 function jourReel(j){ j = String(j == null ? "" : j); if (!/^\d{4}-\d{2}-\d{2}$/.test(j)) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j; }
 /* ===== correctif 20 : période clôturée — les données sources d'une journée close ne changent plus ===== */
+/* correctif 23 : contrôle des comptes envoyés par un administrateur — seuls les comptes nouveaux ou modifiés sont
+   examinés (un ancien compte imparfait ne bloque pas l'écran) */
+const LANGUES_U = ["fr","en","ar"], LOGIN_OK = /^[\p{L}\p{N}._@-]{2,64}$/u;
+function controleUsers(avant, apres, emps, refs){
+  const av = new Map((avant || []).filter(u=>u && u.id).map(u=>[String(u.id), JSON.stringify(u)]));
+  const lib = u => "« "+String((u && (u.login || u.id)) || "").slice(0, 40)+" »";
+  const empIds = new Set(emps.map(e=>e && e.id)), mats = new Set(emps.map(e=>e && String(e.mat)));
+  const ens = l => new Set((l || []).map(x=>x && x.id).filter(Boolean)), sites = ens(refs.sites), depts = ens(refs.depts), terms = ens(refs.terms);
+  const ids = new Map(), logins = new Map(), parEmp = new Map(), uids = new Set(apres.map(u=>u && String(u.id)));
+  for (const u of apres){
+    if (!u || typeof u !== "object" || Array.isArray(u)) return "entrée invalide";
+    const ch = av.get(String(u.id)) !== JSON.stringify(u);
+    const id = String(u.id == null ? "" : u.id), lg = String(u.login == null ? "" : u.login), lgM = lg.toLowerCase();
+    if (!id || id.length > 64) return "compte sans identifiant interne";
+    if (ids.has(id)) return "identifiant interne « "+id.slice(0, 40)+" » en double";
+    ids.set(id, ch);
+    if (logins.has(lgM) && (ch || logins.get(lgM))) return "identifiant "+lib(u)+" déjà utilisé (majuscules et minuscules ne distinguent pas deux comptes)";
+    logins.set(lgM, ch);
+    if (u.empId){ const k = String(u.empId); if (parEmp.has(k) && (ch || parEmp.get(k).ch)) return "le salarié de "+lib(u)+" est déjà rattaché au compte "+lib(parEmp.get(k).u); parEmp.set(k, {u, ch}); }
+    if (!ch) continue;
+    if (!LOGIN_OK.test(lg)) return "identifiant "+lib(u)+" invalide : 2 à 64 caractères, lettres, chiffres, point, tiret, souligné ou @";
+    const nom = String(u.nom == null ? "" : u.nom);
+    if (nom.length > 120 || /[<>]/.test(nom) || /^[=+@\t\r]/.test(nom)) return "nom de "+lib(u)+" invalide (120 caractères au plus, sans < > ni formule)";
+    if (u.empId && !empIds.has(u.empId)) return "compte "+lib(u)+" rattaché à un salarié inexistant";
+    if (u.langue !== undefined && u.langue !== "" && LANGUES_U.indexOf(u.langue) < 0) return "langue de "+lib(u)+" non prévue (fr, en, ar)";
+    for (const [c, max] of [["prefs", 32768], ["homeLayout", 32768], ["ntfVus", 262144]]) if (u[c] !== undefined && (JSON.stringify(u[c]) || "").length > max) return c+" de "+lib(u)+" trop volumineux";
+    if (u.deleg !== undefined && !Array.isArray(u.deleg)) return "délégations de "+lib(u)+" invalides";
+    const dl = (u.deleg || []).slice().sort((a, b)=>String((a || {}).du) < String((b || {}).du) ? -1 : 1);
+    for (let i = 0; i < dl.length; i++){ const d = dl[i] || {};
+      if (!jourReel(d.du) || !jourReel(d.au)) return "délégation de "+lib(u)+" : dates invalides";
+      if (d.du > d.au) return "délégation de "+lib(u)+" : la date de début ("+jjD(d.du)+") suit la date de fin ("+jjD(d.au)+")";
+      if (!d.profilId) return "délégation de "+lib(u)+" sans profil";
+      if (i && d.du <= dl[i-1].au) return "délégations de "+lib(u)+" qui se chevauchent ("+jjD(d.du)+")"; }
+    if (u.delegPerim !== undefined && !Array.isArray(u.delegPerim)) return "délégations de périmètre de "+lib(u)+" invalides";
+    for (const g of (u.delegPerim || [])){ if (!g || !g.a || !uids.has(String(g.a))) return "délégation de périmètre de "+lib(u)+" vers un compte inexistant";
+      if (String(g.a) === id) return "délégation de périmètre de "+lib(u)+" vers lui-même";
+      if (!jourReel(g.du) || !jourReel(g.au) || g.du > g.au) return "délégation de périmètre de "+lib(u)+" : dates invalides"; }
+    /* périmètre propre : seules les valeurs AJOUTÉES doivent exister (un site supprimé depuis ne bloque pas le compte) */
+    const q = u.perim, q0 = (av.has(id) ? (JSON.parse(av.get(id)) || {}).perim : null) || {};
+    if (q !== undefined && q !== null){ if (typeof q !== "object" || Array.isArray(q)) return "périmètre de "+lib(u)+" invalide";
+      for (const [c, set, n] of [["sites", sites, "site"], ["depts", depts, "service"], ["terms", terms, "terminal"], ["mats", mats, "matricule"], ["exclus", mats, "matricule exclu"]]){ const l = q[c];
+        if (l === undefined) continue; if (!Array.isArray(l) || l.length > 50000) return "périmètre de "+lib(u)+" invalide ("+c+")";
+        const deja = new Set((Array.isArray(q0[c]) ? q0[c] : []).map(String)), num = c === "mats" || c === "exclus";
+        const x = l.find(v=>!deja.has(String(v)) && !set.has(num ? String(v) : v)); if (x !== undefined) return "périmètre de "+lib(u)+" : "+n+" « "+String(x).slice(0, 30)+" » inexistant"; } }
+  }
+  return "";
+}
 function jjD(j){ return String(j || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1"); }
 function clotDe(ref){ return ((ref && ref.clotures) || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, ""); }
 /* fiche salarié : entrée, sortie, historique du calendrier et des champs datés ne se modifient pas avant la clôture */

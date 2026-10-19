@@ -136,7 +136,8 @@ function perimDirect(C, u){
 /* périmètre complet : propre + délégations reçues ; null = tout le personnel */
 function perimetre(doc, login){
   const C = contexte(doc);
-  const u = (doc.users||[]).find(x=>String(x.login).toLowerCase() === String(login).toLowerCase());
+  /* correctif 23 : identifiant comparé sans les espaces (comme à la connexion) */
+  const lg = String(login == null ? "" : login).trim().toLowerCase(), u = (doc.users||[]).find(x=>x && String(x.login).trim().toLowerCase() === lg);
   if (!u) return {u:null, set:new Set(), profil:null, C};
   let set = perimDirect(C, u);
   if (set !== null){

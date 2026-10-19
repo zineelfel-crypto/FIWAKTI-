@@ -465,13 +465,14 @@ async function definirMdp(c, nouveau, secu){
 /* la double authentification est exigée par le profil (écran Profils) ou pour le compte */
 async function a2fRequise(login){
   const ref = await D.referentielLecture() || {};
-  const u = (ref.users||[]).find(x=>String(x.login).toLowerCase() === String(login).toLowerCase());
+  /* correctif 23 : comparaison sans les espaces (un compte « ␣adm » se connectait par « adm » sans double authentification) */
+  const lg = String(login == null ? "" : login).trim().toLowerCase(), u = (ref.users||[]).find(x=>x && String(x.login).trim().toLowerCase() === lg);
   if (!u) return false;
   const j = new Date().toISOString().slice(0,10);
   const dl = (u.deleg||[]).find(x=>x.du <= j && j <= x.au && x.profilId);
   /* correctif 22 : exigée si le profil propre OU le profil délégué l'exige (une délégation d'un profil sans double
      authentification l'annulait) */
-  return [u.profilId, dl && dl.profilId].filter(Boolean).some(id=>((ref.profils||[]).find(x=>x && x.id === id) || {}).a2f === true) || !!u.a2fForce;
+  return [u.profilId, dl && dl.profilId].filter(Boolean).some(id=>((ref.profils||[]).find(x=>x && x.id === id) || {}).a2f === true) || !!u.a2fForce || u.a2f === true;   /* correctif 23 : case de l'écran Utilisateurs (« a2f ») */
 }
 const compteDe = login => B.get("SELECT * FROM comptes WHERE lower(login)=lower(?)", String(login||"").trim());
 /* 56.33.11 : compte rattaché à un salarié sorti (date de sortie passée) — refusé à la connexion et à chaque requête,
@@ -492,13 +493,16 @@ async function synchroniserComptes(doc, par, empIds){
   const partiel = empIds instanceof Set, usersVus = partiel ? doc.users.filter(u=>u && empIds.has(String(u.empId))) : doc.users;
   const profils = {}; (doc.profils||[]).forEach(p=>{ profils[p.id] = p; });
   const emps = {}; (doc.emps||[]).forEach(e=>{ emps[e.id] = e; });
-  const vus = new Set();
+  const vus = new Set(), tousLogins = new Set(doc.users.filter(u=>u && u.login).map(u=>String(u.login).trim().toLowerCase()));
   /* 56.33.11 : tous les comptes lus en une requête, et seuls ceux qui changent sont réécrits. Auparavant chaque
      enregistrement d'un salarié (import, modification d'une fiche) relisait et réécrivait chaque compte un par un :
      avec un portail de 50 000 comptes, ~100 000 requêtes par modification. */
   const champsC = "login, uid, nom, matricule, role, actif, etat, temp_le";
   const lus = !partiel ? await B.all("SELECT "+champsC+" FROM comptes") : usersVus.length ? await B.all("SELECT "+champsC+" FROM comptes WHERE lower(login) IN ("+usersVus.map(()=>"lower(?)").join(",")+")", ...usersVus.map(u=>String(u.login||"").trim())) : [];
   const existants = new Map(lus.map(c=>[String(c.login).toLowerCase(), c]));
+  /* correctif 23 : identifiant renommé → même ligne de compte (mot de passe conservé) ; auparavant un nouveau compte sans mot
+     de passe était créé et l'ancien désactivé, en gardant son mot de passe pour une réutilisation du nom */
+  const parUid = new Map(); if (!partiel) lus.forEach(c=>{ if (c.uid && !tousLogins.has(String(c.login).toLowerCase())) parUid.set(String(c.uid), c); });
   for (const u of usersVus){
     if (!u || !u.login) continue;
     const login = String(u.login).trim(); vus.add(login.toLowerCase());
@@ -507,22 +511,40 @@ async function synchroniserComptes(doc, par, empIds){
     const role = niveau === "admin" || login.toLowerCase() === String(CONFIG.adminInitial||"").toLowerCase() ? "admin" : "utilisateur";
     const emp = emps[u.empId]; const mat = emp ? String(emp.mat||"") : "";
     const actif = u.actif !== false && !(emp && emp.sortie && emp.sortie < aujourdhui()) ? 1 : 0;
-    const c = existants.get(login.toLowerCase());
+    let c = existants.get(login.toLowerCase());
+    const rn = !c && u.id ? parUid.get(String(u.id)) : null;
+    if (rn && Number(rn.actif)){ await B.run("UPDATE comptes SET login=?, maj=? WHERE login=?", login, maintenant(), rn.login); await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", rn.login);
+      await audit(par, "compte.renomme", rn.login+" → "+login); parUid.delete(String(u.id)); existants.delete(String(rn.login).toLowerCase()); rn.login = login; existants.set(login.toLowerCase(), rn); c = rn; }
+    /* correctif 19/23 : jamais de mot de passe temporaire = matricule pour un compte administrateur ou ayant un droit
+       d'écriture en Administration (un matricule se devine), ni à la création ni à la réinitialisation */
+    const matOk = !!mat && role !== "admin" && !({saisie:1, validation:1, config:1}[d.SYS]);
     if (!c){
       /* correctif 19 : jamais de mot de passe temporaire = matricule pour un compte administrateur ou ayant un droit
          d'écriture en Administration (un matricule se devine) : ces comptes attendent un mot de passe (invitation) */
-      const temp = !!u.mdpTemp && !!mat && role !== "admin" && !({saisie:1, validation:1, config:1}[d.SYS]);
+      const temp = !!u.mdpTemp && matOk;
       await B.run("INSERT INTO comptes(login,uid,nom,matricule,role,actif,etat,temp_le,changer,raison,maj) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         login, u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, 1, temp ? "premiere" : "invitation", maintenant());
       await audit(par, "compte.cree", login+" — profil "+(pr.nom || u.profilId || "aucun")+(role === "admin" ? " (administrateur)" : "")+" ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
       existants.set(login.toLowerCase(), {login, uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null});
     } else {
+      /* correctif 23 : compte retiré puis recréé, ou identifiant repris par une autre personne (autre identifiant interne) :
+         remis à zéro — il héritait du mot de passe, de la double authentification et de l'historique de l'ancien titulaire */
+      const repris = (c.uid && u.id && String(c.uid) !== String(u.id) && login.toLowerCase() !== String(CONFIG.adminInitial||"").toLowerCase()) || (!Number(c.actif) && c.raison === "retire" && actif);
+      if (repris){ const temp = !!u.mdpTemp && matOk;
+        await B.run("UPDATE comptes SET uid=?, nom=?, matricule=?, role=?, actif=?, hash=NULL, historique=NULL, mdp_le=NULL, a2f_secret=NULL, a2f_actif=0, a2f_pas=NULL, etat=?, temp_le=?, changer=1, raison=?, echecs=0, verrou=NULL, maj=? WHERE login=?",
+          u.id||"", u.nom||login, mat, role, actif, temp ? "temp_matricule" : "sans_mdp", temp ? (u.mdpTempLe || aujourdhui()) : null, temp ? "premiere" : "invitation", maintenant(), c.login);
+        await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", c.login);
+        await audit(par, "compte.reactive", login+" — nouveau titulaire ou compte recréé : mot de passe et double authentification remis à zéro ("+(temp ? "mot de passe temporaire = matricule" : "en attente d'un mot de passe")+")");
+        Object.assign(c, {uid:u.id||"", nom:u.nom||login, matricule:mat, role, actif, etat:temp ? "temp_matricule" : "sans_mdp", temp_le:temp ? (u.mdpTempLe || aujourdhui()) : null, raison:temp ? "premiere" : "invitation"}); }
       const nv = {uid:u.id||c.uid, nom:u.nom||c.nom, matricule:mat, role, actif};
       if (Object.keys(nv).some(k=>String(nv[k] == null ? "" : nv[k]) !== String(c[k] == null ? "" : c[k]))){
+        const ch = []; if (String(c.role) !== role) ch.push("rôle "+c.role+" → "+role); if (Number(c.actif) !== actif) ch.push(actif ? "activé" : "désactivé");
         await B.run("UPDATE comptes SET uid=?, nom=?, matricule=?, role=?, actif=?, maj=? WHERE login=?", nv.uid, nv.nom, mat, role, actif, maintenant(), c.login);
+        if (!actif && Number(c.actif)) await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", c.login);
+        if (ch.length) await audit(par, "compte.modifie", login+" — "+ch.join(" ; "));
         Object.assign(c, nv);
       }
-      if (u.mdpTemp && mat && c.etat !== "temp_matricule" && u.mdpChangeRaison === "reinit" && (u.mdpTempLe||"") > (c.temp_le||"")){
+      if (u.mdpTemp && matOk && c.etat !== "temp_matricule" && u.mdpChangeRaison === "reinit" && (u.mdpTempLe||"") > (c.temp_le||"")){
         await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", u.mdpTempLe, c.login);
         c.etat = "temp_matricule"; c.temp_le = u.mdpTempLe;
         await audit(par, "compte.reinitialise", login+" (matricule)");
@@ -532,7 +554,9 @@ async function synchroniserComptes(doc, par, empIds){
   }
   if (!partiel) for (const c of await B.all("SELECT login FROM comptes WHERE actif=1")){
     if (!vus.has(c.login.toLowerCase()) && c.login.toLowerCase() !== String(CONFIG.adminInitial||"").toLowerCase()){
-      await B.run("UPDATE comptes SET actif=0 WHERE login=?", c.login); await audit(par, "compte.desactive", c.login+" (retiré de l'application)");
+      /* correctif 23 : compte retiré — mot de passe et secret de double authentification effacés (ils restaient en base) */
+      await B.run("UPDATE comptes SET actif=0, raison='retire', hash=NULL, historique=NULL, a2f_secret=NULL, a2f_actif=0, a2f_pas=NULL WHERE login=?", c.login);
+      await B.run("DELETE FROM sessions WHERE lower(login)=lower(?)", c.login); await audit(par, "compte.desactive", c.login+" (retiré de l'application)");
     }
   }
 }
@@ -1461,15 +1485,18 @@ async function traiter(req, res){
     const secu = secuDe(await D.referentielLecture());
     if (c.etat === "temp_matricule"){
       const validite = Number((secu.premiere||{}).validiteJours) || 30;
-      if (c.temp_le && validite > 0 && new Date(c.temp_le).getTime() + validite*86400000 < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez une réinitialisation au service RH.");
+      /* correctif 23 : même coût et même réponse qu'un mot de passe faux tant que le mot de passe n'est pas vérifié
+         (l'état du compte se lisait dans le message et le temps de réponse) */
+      await hacher("leurre");
       ok = !!c.matricule && egalConstant(String(b.mdp||""), c.matricule);
+      if (ok && c.temp_le && validite > 0 && new Date(c.temp_le).getTime() + validite*86400000 < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez une réinitialisation au service RH.");
     } else if (c.etat === "temp_code"){
       /* mot de passe temporaire remis par l'administrateur : valable « resetValiditeMin » minutes */
       const lim = Math.max(5, Number(secu.resetValiditeMin)||60)*60000;
-      if (c.temp_le && new Date(c.temp_le).getTime() + lim < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez-en un nouveau à l'administrateur.");
       ok = await verifier(b.mdp, c.hash);
+      if (ok && c.temp_le && new Date(c.temp_le).getTime() + lim < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez-en un nouveau à l'administrateur.");
     } else if (c.hash) ok = await verifier(b.mdp, c.hash);
-    else return erreur(res, 401, "Ce compte n'a pas encore de mot de passe : demandez une réinitialisation à l'administrateur.");
+    else { await hacher("leurre"); ok = false; }   /* correctif 23 : compte sans mot de passe — réponse générique, tentatives comptées */
     if (!ok){
       const n = (Number(c.echecs)||0) + 1, max = Number(secu.tentatives) || 5;
       const vm = Math.max(1, Number(secu.verrouillageMin)||15);
@@ -1510,7 +1537,7 @@ async function traiter(req, res){
      n'était recalculé qu'à la prochaine synchronisation des comptes : un profil rétrogradé restait administrateur) */
   let admin = C.role === "admin";
   if (admin && String(C.login).toLowerCase() !== String(CONFIG.adminInitial || "").toLowerCase() && D && D.referentielLecture){ try { const refA = await D.referentielLecture();
-    const uA = refA && (refA.users || []).find(x=>x && String(x.login || "").toLowerCase() === String(C.login).toLowerCase());
+    const uA = refA && (refA.users || []).find(x=>x && String(x.login || "").trim().toLowerCase() === String(C.login).trim().toLowerCase());
     if (uA && PERIM.niveauProfil((refA.profils || []).find(x=>x && x.id === uA.profilId)) !== "admin") admin = false; } catch(e){} }
   if (C.role === "fournisseur"){
     const exp = JETONS_SESS.get(sess.sid);
@@ -1697,6 +1724,7 @@ async function traiter(req, res){
     /* correctif 21 : sites avant l'envoi, pour tracer précisément ce qui change (fuseau compris) */
     const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
     const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
+    const usersAvant = admin && paquet.ref && Array.isArray(paquet.ref.users) ? (((await D.referentielLecture()) || {}).users || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
     /* correctif 22 : un profil modifié change le rôle des comptes qui le portent (administrateur promu ou rétrogradé) */
@@ -1738,6 +1766,19 @@ async function traiter(req, res){
         if (a2fOn.length){ const j0 = aujourdhui(), log = ((r.ref || {}).users || []).filter(u=>u && (a2fOn.indexOf(u.profilId) >= 0 || (u.deleg || []).some(d=>d && a2fOn.indexOf(d.profilId) >= 0 && d.du <= j0 && j0 <= d.au))).map(u=>String(u.login));
           for (const lg of log) await B.run("UPDATE sessions SET a2f_ok=0 WHERE lower(login)=lower(?) AND id<>?", lg, sess.sid);
           if (log.length) await audit(C.login, "a2f.exigee", log.length+" compte(s) : sessions ouvertes soumises à la double authentification", ip); } }
+      /* correctif 23 : comptes — détail tracé (profil, activation, salarié, délégations, périmètre, double authentification) ;
+         seules deux lignes « parametrage.modifie | users » apparaissaient */
+      if (usersAvant && (r.refCles || []).indexOf("users") >= 0){ const av = new Map(usersAvant.filter(x=>x && x.id).map(x=>[x.id, x])), l = [], pn = id=>(((r.ref || {}).profils || []).find(x=>x && x.id === id) || {}).nom || id || "aucun";
+        ((r.ref || {}).users || []).forEach(x=>{ if (!x || !x.id) return; const a = av.get(x.id); if (!a){ l.push("créé « "+String(x.login).slice(0, 40)+" » profil "+pn(x.profilId)); return; } const ch = [];
+          if (String(a.login).trim() !== String(x.login).trim()) ch.push("identifiant « "+String(a.login).slice(0, 40)+" »→« "+String(x.login).slice(0, 40)+" »");
+          if (a.profilId !== x.profilId) ch.push("profil "+pn(a.profilId)+"→"+pn(x.profilId)); if ((a.actif !== false) !== (x.actif !== false)) ch.push(x.actif !== false ? "activé" : "désactivé");
+          if ((a.empId || "") !== (x.empId || "")) ch.push("salarié "+(a.empId || "—")+"→"+(x.empId || "—")); if (!!(a.a2f || a.a2fForce) !== !!(x.a2f || x.a2fForce)) ch.push("double authentification "+(x.a2f || x.a2fForce ? "imposée" : "non imposée"));
+          if (JSON.stringify(a.deleg || []) !== JSON.stringify(x.deleg || [])) ch.push("délégations "+JSON.stringify((x.deleg || []).map(d=>[d.du, d.au, pn(d.profilId)])).slice(0, 200));
+          if (JSON.stringify(a.delegPerim || []) !== JSON.stringify(x.delegPerim || [])) ch.push("délégations de périmètre "+JSON.stringify((x.delegPerim || []).map(g=>[g.a, g.du, g.au])).slice(0, 200));
+          if (JSON.stringify(a.perim || {}) !== JSON.stringify(x.perim || {})){ const q = x.perim || {}; ch.push("périmètre "+(q.tout ? "tout le personnel" : JSON.stringify({sites:(q.sites || []).length, services:(q.depts || []).length, matricules:(q.mats || []).length, terminaux:(q.terms || []).length, equipe:q.equipe || ""}))); }
+          if (ch.length) l.push("« "+String(x.login).slice(0, 40)+" » — "+ch.join(" ; ")); av.delete(x.id); });
+        av.forEach(a=>l.push("supprimé « "+String(a.login).slice(0, 40)+" »"));
+        if (l.length) await audit(C.login, "comptes.modifies", l.join(" | ").slice(0, 2000), ip); }
       if (sitesAvant && (r.refCles || []).indexOf("sites") >= 0){ const av = new Map(sitesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).sites || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [];
         ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé "+(x.code || id)+" « "+String(x.nom || "").slice(0, 60)+" » ("+(x.tz || "")+")"); return; }
           const ch = ["code","nom","ville","tz","actif"].filter(k=>JSON.stringify(a[k]) !== JSON.stringify(x[k])).map(k=>k+" : "+String(a[k] === undefined ? "" : a[k]).slice(0, 60)+" → "+String(x[k] === undefined ? "" : x[k]).slice(0, 60));
@@ -2764,7 +2805,12 @@ async function traiter(req, res){
       await audit(C.login, "a2f.reinitialisee", c.login, ip);
       return json(res, 200, {ok:true, mode:"a2f"});
     }
-    if (c.matricule && b.mode !== "code"){
+    /* correctif 23 : jamais le matricule pour un administrateur ou un profil en écriture en Administration (le correctif 19
+       ne protégeait que la création) — un mot de passe temporaire aléatoire est remis à la place */
+    let matInterdit = c.role === "admin";
+    if (!matInterdit){ const refR = await D.referentielLecture() || {}, uR = (refR.users || []).find(x=>x && String(x.login || "").trim().toLowerCase() === String(c.login).toLowerCase());
+      const prR = uR && (refR.profils || []).find(x=>x && x.id === uR.profilId); matInterdit = !!(prR && ({saisie:1, validation:1, config:1}[(prR.droits || {}).SYS] || PERIM.niveauProfil(prR) === "admin")); }
+    if (c.matricule && b.mode !== "code" && !matInterdit){
       await B.run("UPDATE comptes SET etat='temp_matricule', hash=NULL, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", aujourdhui(), c.login);
       await audit(C.login, "compte.reinitialise", c.login+" (matricule)", ip);
       return json(res, 200, {ok:true, mode:"matricule"});
@@ -2774,10 +2820,33 @@ async function traiter(req, res){
     await audit(C.login, "compte.reinitialise", c.login+" (mot de passe temporaire)", ip);
     return json(res, 200, {ok:true, mode:"code", temporaire:code});
   }
-  if (p === "/api/v1/comptes") return json(res, 200, {comptes:await B.all("SELECT login,nom,role,actif,etat,changer,derniere,verrou,a2f_actif FROM comptes ORDER BY login")});
+  /* correctif 23 : déverrouillage d'un compte par le serveur (le bouton de l'écran n'écrivait que dans le paramétrage :
+     la connexion restait refusée) */
+  if (p === "/api/v1/comptes/deverrouiller" && req.method === "POST"){
+    const b = await corpsJson(req), c = await compteDe(b.login);
+    if (!c) return erreur(res, 404, "Compte inconnu du serveur.");
+    await B.run("UPDATE comptes SET echecs=0, verrou=NULL WHERE login=?", c.login); ECHECS_INCONNUS.delete(String(c.login).toLowerCase());
+    await audit(C.login, "compte.deverrouille", c.login+(c.verrou && c.verrou > maintenant() ? " (verrouillé jusqu'à "+c.verrou+")" : " (n'était pas verrouillé)"), ip);
+    return json(res, 200, {ok:true});
+  }
+  /* correctif 23 : liste filtrée et paginée (50 000 comptes du portail : 7,6 Mo à chaque ouverture de l'écran) —
+     ?logins=a,b (comptes affichés), ?q= (recherche), ?limite= et ?decalage= ; sans paramètre, liste complète comme avant */
+  if (p === "/api/v1/comptes"){
+    const q = Object.fromEntries(u.searchParams.entries()), w = [], a = [];
+    if (q.logins){ const l = String(q.logins).split(",").map(x=>x.trim().toLowerCase()).filter(Boolean).slice(0, 500); if (l.length){ w.push("lower(login) IN ("+l.map(()=>"?").join(",")+")"); a.push(...l); } }
+    if (q.q){ w.push("(lower(login) LIKE ? OR lower(nom) LIKE ?)"); const m = "%"+String(q.q).toLowerCase().slice(0, 60).replace(/[%_]/g, "")+"%"; a.push(m, m); }
+    if (q.actif === "1" || q.actif === "0"){ w.push("actif=?"); a.push(Number(q.actif)); }
+    const lim = q.limite ? Math.min(2000, Math.max(1, Number(q.limite) || 200)) : 0, dec = Math.max(0, Number(q.decalage) || 0);
+    const where = w.length ? " WHERE "+w.join(" AND ") : "";
+    const comptes = await B.all("SELECT login,nom,role,actif,etat,changer,derniere,verrou,a2f_actif FROM comptes"+where+" ORDER BY login"+(lim ? " LIMIT "+lim+" OFFSET "+dec : ""), ...a);
+    return json(res, 200, lim ? {comptes, total:Number(((await B.get("SELECT COUNT(*) AS n FROM comptes"+where, ...a)) || {}).n || 0)} : {comptes});
+  }
   /* v47 : sessions actives, révocation individuelle ou globale */
   if (p === "/api/v1/sessions" && req.method === "GET"){
-    const l = await B.all("SELECT id, login, cree, vu, ip, agent, a2f_ok, persistant FROM sessions ORDER BY vu DESC LIMIT 500");
+    /* correctif 23 : filtre par compte et limite réglable (500 en dur auparavant) */
+    const qs = Object.fromEntries(u.searchParams.entries()), limS = Math.min(5000, Math.max(1, Number(qs.limite) || 500));
+    const l = qs.login ? await B.all("SELECT id, login, cree, vu, ip, agent, a2f_ok, persistant FROM sessions WHERE lower(login)=lower(?) ORDER BY vu DESC LIMIT "+limS, String(qs.login).trim())
+      : await B.all("SELECT id, login, cree, vu, ip, agent, a2f_ok, persistant FROM sessions ORDER BY vu DESC LIMIT "+limS);
     return json(res, 200, {sessions:l.map(s=>({ref:s.id.slice(0,12), login:s.login, cree:new Date(Number(s.cree)).toISOString(), vu:new Date(Number(s.vu)).toISOString(), ip:s.ip, agent:String(s.agent||"").slice(0,80),
       moi:s.id === sess.sid, verifiee:s.a2f_ok === null || Number(s.a2f_ok) === 1, persistante:!!Number(s.persistant)}))});
   }
