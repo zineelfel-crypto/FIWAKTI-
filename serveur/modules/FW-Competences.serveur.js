@@ -43,6 +43,10 @@ function creer(o){
     GEN++; CACHE.clear();
   }
   const maintenant = () => new Date().toISOString();
+  /* correctif 34 : niveau entier de 0 à 4 (2,5 accepté par SQLite et refusé par PostgreSQL ; "" valait 0, true valait 1) */
+  const entier = v => typeof v === "number" ? (Number.isInteger(v) ? v : NaN) : (/^\d+$/.test(String(v == null ? "" : v).trim()) ? +String(v).trim() : NaN);
+  const jourL = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2, "0")+"-"+String(d.getDate()).padStart(2, "0"); };
+  const salarieActif = async mat => { const e = (await D.employes()).find(x=>String(x.mat) === String(mat)); return e && !(e.sortie && e.sortie < jourL()) ? e : null; };
   const fonctionDe = e => String(e.poste || e.fonction || "").trim();
   async function catalogue(){ return B.all("SELECT * FROM comp_catalogue WHERE actif=1 ORDER BY domaine, code"); }
   async function exigences(){ return B.all("SELECT * FROM comp_exigences"); }
@@ -57,7 +61,7 @@ function creer(o){
     return {P, l, ref};
   }
   async function matrice(C, q){
-    const off = Math.max(0, +q.offset||0), lim = Math.min(200, Math.max(1, +q.limit||100));
+    const off = Math.min(1e7, Math.max(0, Math.floor(Number(q.offset)) || 0)), lim = Math.min(200, Math.max(1, Math.floor(Number(q.limit)) || 100));
     const {l} = await salaries(C, q), cat = await catalogue(), ex = await exigences();
     l.sort((a, b)=>String(a.nom).localeCompare(String(b.nom), "fr") || String(a.mat).localeCompare(String(b.mat)));
     const page = l.slice(off, off + lim), mats = page.map(e=>String(e.mat));
@@ -72,7 +76,9 @@ function creer(o){
   }
   /* écarts par compétence sur tout le périmètre : calcul serveur, mis en cache jusqu'à la prochaine écriture */
   async function ecarts(C, q){
-    const cle = C.login+"|"+(q.site||"")+"|"+(q.dept||"")+"|"+GEN, c = CACHE.get(cle);
+    /* correctif 34 : tous les filtres et l'état des salariés dans la clé (un filtre « fonction » empoisonnait le cache ; des
+       salariés supprimés restaient comptés une heure) */
+    const cle = [C.login, q.site||"", q.dept||"", q.fonction||"", q.q||"", GEN, (await D.employes()).length, o.generation ? o.generation() : ""].join("|"), c = CACHE.get(cle);
     if (c && Date.now() - c.t < 3600000) return c.r;
     const {l} = await salaries(C, q), cat = await catalogue(), ex = await exigences();
     const req = {}; ex.forEach(x=>{ (req[x.fonction] = req[x.fonction] || {})[x.competence_id] = x.niveau; });
@@ -106,7 +112,7 @@ function creer(o){
     }
     if (p === "/api/v1/competences/exigence" && req.method === "POST"){
       if (rang < 4) return erreur(res, 403, "Paramétrage des compétences réservé au droit « paramétrage » sur les salariés.");
-      const b = await corpsJson(req), f = String(b.fonction||"").trim(), cid = String(b.competenceId||""), n = Number(b.niveau);
+      const b = await corpsJson(req), f = String(b.fonction||"").trim(), cid = String(b.competenceId||""), n = entier(b.niveau);
       if (!f || !await B.get("SELECT 1 FROM comp_catalogue WHERE id=?", cid) || NIVEAUX.indexOf(n) < 0) return erreur(res, 400, "Fonction, compétence et niveau (0 à 4) obligatoires.");
       if (n === 0) await B.run("DELETE FROM comp_exigences WHERE fonction=? AND competence_id=?", f, cid);
       else await B.run("INSERT INTO comp_exigences(fonction,competence_id,niveau) VALUES(?,?,?) ON CONFLICT(fonction, competence_id) DO UPDATE SET niveau=excluded.niveau", f, cid, n);
@@ -117,10 +123,14 @@ function creer(o){
     if (p === "/api/v1/competences/ecarts" && req.method === "GET") return json(res, 200, await ecarts(C, q));
     if (p === "/api/v1/competences/niveau" && req.method === "POST"){
       if (rang < 2) return erreur(res, 403, "Droit de saisie sur les salariés requis.");
-      const b = await corpsJson(req), mat = String(b.mat||""), cid = String(b.competenceId||""), n = Number(b.niveau);
+      const b = await corpsJson(req), mat = String(b.mat||""), cid = String(b.competenceId||""), n = entier(b.niveau);
       if (!(P.set === null || (P.set && P.set.has(mat))) && !admin) return erreur(res, 404, "Salarié hors périmètre.");
-      if (!await B.get("SELECT 1 FROM comp_catalogue WHERE id=?", cid) || NIVEAUX.indexOf(n) < 0) return erreur(res, 400, "Compétence et niveau (0 à 4) obligatoires.");
+      /* correctif 34 : salarié existant et présent ; jamais son propre niveau */
+      if (!(await salarieActif(mat))) return erreur(res, 404, "Salarié introuvable ou sorti.");
+      if (!admin && P.u && P.u.empId){ const moi = (await D.employes()).find(e=>e.id === P.u.empId); if (moi && String(moi.mat) === mat) return erreur(res, 403, "Vous ne pouvez pas fixer vos propres niveaux de compétence."); }
+      if (!await B.get("SELECT 1 FROM comp_catalogue WHERE id=? AND actif=1", cid) || NIVEAUX.indexOf(n) < 0) return erreur(res, 400, "Compétence et niveau entier (0 à 4) obligatoires.");
       const av = await B.get("SELECT niveau FROM comp_niveaux WHERE mat=? AND competence_id=?", mat, cid);
+      if (av && Number(av.niveau) === n) return json(res, 200, {ok:true, avant:n, apres:n, inchange:true});
       await B.transaction(async ()=>{
         await B.run("INSERT INTO comp_niveaux(mat,competence_id,niveau,d,evaluateur) VALUES(?,?,?,?,?) ON CONFLICT(mat, competence_id) DO UPDATE SET niveau=excluded.niveau, d=excluded.d, evaluateur=excluded.evaluateur", mat, cid, n, maintenant().slice(0, 10), C.login);
         await B.run("INSERT INTO comp_historique(id,mat,competence_id,avant,apres,par,motif,ts) VALUES(?,?,?,?,?,?,?,?)", "ch-"+crypto.randomBytes(8).toString("hex"), mat, cid, av ? av.niveau : null, n, C.login, String(b.motif||"").slice(0, 200), maintenant());
@@ -158,6 +168,7 @@ function creer(o){
     exigencesFonction:(mat, fonction)=>B.all("SELECT e.competence_id, e.niveau requis, c.code, c.nom, (SELECT niveau FROM comp_niveaux n WHERE n.mat=? AND n.competence_id=e.competence_id) actuel FROM comp_exigences e JOIN comp_catalogue c ON c.id=e.competence_id WHERE e.fonction=? AND c.actif=1 ORDER BY c.code", mat, fonction),
     /* niveau écrit (hausse seulement si « hausse »), historisé et annoncé aux modules qui écoutent ; true si modifié */
     async ecrireNiveau(mat, competenceId, niveau, par, motif, d, hausse){
+      niveau = entier(niveau); if (NIVEAUX.indexOf(niveau) < 0 || !(await salarieActif(mat))) return false;
       const av = await B.get("SELECT niveau FROM comp_niveaux WHERE mat=? AND competence_id=?", mat, competenceId);
       if (av && (hausse ? av.niveau >= niveau : av.niveau === niveau)) return false;
       await B.run("INSERT INTO comp_niveaux(mat,competence_id,niveau,d,evaluateur) VALUES(?,?,?,?,?) ON CONFLICT(mat, competence_id) DO UPDATE SET niveau=excluded.niveau, d=excluded.d, evaluateur=excluded.evaluateur", mat, competenceId, niveau, d || new Date().toISOString().slice(0, 10), par);

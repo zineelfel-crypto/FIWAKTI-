@@ -28,11 +28,15 @@ function ajout(k, n){ const p = String(k).split("-").map(Number); const d = new 
 function creer(o){
   const {B, D, audit} = o;
   const existe = async m => (await D.employes()).some(e=>String(e.mat) === String(m));
-  const id = p => p+"-"+crypto.randomBytes(6).toString("hex"), maint = () => new Date().toISOString(), auj = () => maint().slice(0, 10);
+  /* correctif 34 : jour LOCAL (entre minuit et 1 h, l'heure UTC donnait la veille) ; date réelle exigée */
+  const id = p => p+"-"+crypto.randomBytes(6).toString("hex"), maint = () => new Date().toISOString(), auj = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2, "0")+"-"+String(d.getDate()).padStart(2, "0"); };
+  const dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")) && ajout(s, 0) === s && +String(s).slice(0, 4) >= 1990 && +String(s).slice(0, 4) <= 2100;
+  const jj = d => d ? String(d).slice(8, 10)+"/"+String(d).slice(5, 7)+"/"+String(d).slice(0, 4) : "—";
   const dans = (P, m) => P.set === null || (P.set && P.set.has(String(m)));
-  async function modeles(){
+  /* correctif 34 : le modèle standard n'est créé qu'au premier parcours (une simple lecture écrivait en base) */
+  async function modeles(semer){
     let l = await B.all("SELECT * FROM onb_modeles WHERE actif=1 ORDER BY nom");
-    if (!l.length){ await B.run("INSERT INTO onb_modeles(id,nom,fonction,taches,actif,cree) VALUES(?,?,?,?,1,?)", id("om"), "Intégration standard", "", JSON.stringify(STANDARD), maint());
+    if (!l.length && semer){ await B.run("INSERT INTO onb_modeles(id,nom,fonction,taches,actif,cree) VALUES(?,?,?,?,1,?)", id("om"), "Intégration standard", "", JSON.stringify(STANDARD), maint());
       l = await B.all("SELECT * FROM onb_modeles WHERE actif=1 ORDER BY nom"); }
     return l.map(m=>Object.assign(m, {taches:JSON.parse(m.taches)}));
   }
@@ -45,11 +49,13 @@ function creer(o){
   }
   async function aTraiter(x){
     if (x.rang("EMP") < 2) return [];
-    const l = (await B.all("SELECT p.mat, t.id FROM onb_taches t JOIN onb_parcours p ON p.id=t.parcours_id WHERE p.statut='en_cours' AND t.faite_le IS NULL AND t.echeance < ?", auj())).filter(r=>dans(x.P, r.mat));
-    const fe = (await B.all("SELECT mat FROM onb_parcours WHERE statut='en_cours' AND fin_essai >= ? AND fin_essai <= ?", auj(), ajout(auj(), 15))).filter(r=>dans(x.P, r.mat));
+    /* correctif 34 : périmètre et comptage dans la requête (140 000 lignes lues puis filtrées en mémoire à 20 000) */
+    const pm = perimSql(B, x.P, "p.mat"), pm2 = perimSql(B, x.P, "mat");
+    const l = Number((await B.get("SELECT COUNT(*) n FROM onb_taches t JOIN onb_parcours p ON p.id=t.parcours_id WHERE p.statut='en_cours' AND t.faite_le IS NULL AND t.echeance < ?"+pm.sql, auj(), ...pm.a)).n);
+    const fe = Number((await B.get("SELECT COUNT(*) n FROM onb_parcours WHERE statut='en_cours' AND fin_essai >= ? AND fin_essai <= ?"+pm2.sql, auj(), ajout(auj(), 15), ...pm2.a)).n);
     const out = [];
-    if (l.length) out.push({domaine:"talents", cle:"onboarding-retard", nombre:l.length, urgence:1, vue:"onboarding"});
-    if (fe.length) out.push({domaine:"talents", cle:"onboarding-essai", nombre:fe.length, urgence:2, vue:"onboarding"});
+    if (l) out.push({domaine:"talents", cle:"onboarding-retard", nombre:l, urgence:1, vue:"onboarding"});
+    if (fe) out.push({domaine:"talents", cle:"onboarding-essai", nombre:fe, urgence:2, vue:"onboarding"});
     return out;
   }
   async function fiche360(x){
@@ -57,14 +63,19 @@ function creer(o){
     const p = await B.get("SELECT * FROM onb_parcours WHERE mat=? AND statut <> 'annule' ORDER BY debut DESC LIMIT 1", String(x.mat)); if (!p) return null;
     const g = (await progression([p.id]))[p.id] || {total:0, faites:0, retard:0};
     return {cle:"onboarding", vue:"onboarding", lignes:[{k:"onbProgression", v:g.faites+" / "+g.total}, {k:"onbRetard", v:String(g.retard), alerte:g.retard > 0},
-      {k:"onbProchaine", v:g.prochaine || "—"}, {k:"onbFinEssai", v:p.fin_essai || "—"}]};
+      {k:"onbProchaine", v:jj(g.prochaine)}, {k:"onbFinEssai", v:jj(p.fin_essai)}]};
   }
   async function traiter(req, res, x){
     const {p, C, admin, P, u, json, erreur, corpsJson, ip} = x;
     const rang = admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[((P.profil||{}).droits||{}).EMP] || 0);
     if (rang < 1) return erreur(res, 403, "Droit de consultation des salariés requis.");
     const q = Object.fromEntries(u.searchParams.entries());
-    if (p === "/api/v1/onboarding/modeles" && req.method === "GET") return json(res, 200, {modeles:await modeles(), responsables:RESP});
+    if (p === "/api/v1/onboarding/modeles" && req.method === "GET") return json(res, 200, {modeles:await modeles(false), responsables:RESP});
+    /* correctif 34 : un modèle se retire (il restait proposé indéfiniment, même erroné) */
+    const mrm = /^\/api\/v1\/onboarding\/modeles\/([^/]+)\/retirer$/.exec(p);
+    if (mrm && req.method === "POST"){ if (rang < 4) return erreur(res, 403, "Paramétrage réservé.");
+      const m = await B.get("SELECT id, nom FROM onb_modeles WHERE id=? AND actif=1", mrm[1]); if (!m) return erreur(res, 404, "Modèle introuvable.");
+      await B.run("UPDATE onb_modeles SET actif=0 WHERE id=?", m.id); await audit(C.login, "onboarding.modele", "retrait "+m.nom, ip); return json(res, 200, {ok:true}); }
     if (p === "/api/v1/onboarding/modeles" && req.method === "POST"){
       if (rang < 4) return erreur(res, 403, "Paramétrage réservé.");
       const b = await corpsJson(req), nom = String(b.nom||"").trim().slice(0, 80);
@@ -74,24 +85,34 @@ function creer(o){
       await audit(C.login, "onboarding.modele", "ajout "+nom, ip); return json(res, 200, {ok:true, id:i});
     }
     if (p === "/api/v1/onboarding/parcours" && req.method === "GET"){
-      const off = Math.max(0, +q.offset||0), lim = Math.min(200, Math.max(1, +q.limit||50)), st = ["en_cours","termine","annule"].indexOf(q.statut) >= 0 ? q.statut : "en_cours";
+      const off = Math.min(1e7, Math.max(0, Math.floor(+q.offset) || 0)), lim = Math.min(200, Math.max(1, Math.floor(+q.limit) || 50)), st = ["en_cours","termine","annule"].indexOf(q.statut) >= 0 ? q.statut : "en_cours";
       const pm = perimSql(B, P, "mat"), aa = [st].concat(pm.a);
       const total = Number((await B.get("SELECT COUNT(*) n FROM onb_parcours WHERE statut=?"+pm.sql, ...aa)).n);
       const page = await B.all("SELECT id, mat, modele_id, debut, fin_essai, statut FROM onb_parcours WHERE statut=?"+pm.sql+" ORDER BY debut DESC LIMIT "+lim+" OFFSET "+off, ...aa), g = await progression(page.map(r=>r.id));
-      return json(res, 200, {total, lignes:page.map(r=>Object.assign(r, {progression:g[r.id] || {total:0, faites:0, retard:0}}))});
+      const parMat = new Map((await D.employes()).map(e=>[String(e.mat), ((e.nom||"")+" "+(e.prenom||"")).trim()]));
+      return json(res, 200, {total, lignes:page.map(r=>Object.assign(r, {nom:parMat.get(String(r.mat)) || "", progression:g[r.id] || {total:0, faites:0, retard:0}}))});
     }
     if (p === "/api/v1/onboarding/parcours" && req.method === "POST"){
       if (rang < 2) return erreur(res, 403, "Droit de saisie requis.");
-      const b = await corpsJson(req), mat = String(b.mat||"").trim(), debut = /^\d{4}-\d{2}-\d{2}$/.test(b.debut||"") ? b.debut : auj();
-      if (!mat || !dans(P, mat) || !(await existe(mat))) return erreur(res, 404, "Salarié introuvable ou hors périmètre.");
+      const b = await corpsJson(req), mat = String(b.mat||"").trim();
+      /* correctif 34 : dates réelles exigées (31/02 accepté, saisie jj/mm/aaaa remplacée en silence par le jour) */
+      if (b.debut && !dateOk(b.debut)) return erreur(res, 400, "Date de début invalide.");
+      if (b.finEssai && !dateOk(b.finEssai)) return erreur(res, 400, "Date de fin de période d'essai invalide.");
+      const debut = b.debut || auj();
+      if (b.finEssai && b.finEssai < debut) return erreur(res, 400, "La fin de période d'essai précède le début du parcours.");
+      const emp = (await D.employes()).find(e=>String(e.mat) === mat);
+      if (!mat || !dans(P, mat) || !emp) return erreur(res, 404, "Salarié introuvable ou hors périmètre.");
+      if (emp.sortie && emp.sortie <= auj()) return erreur(res, 409, "Salarié sorti le "+jj(emp.sortie)+" : pas de parcours d'intégration.");
       if (await B.get("SELECT 1 FROM onb_parcours WHERE mat=? AND statut='en_cours'", mat)) return erreur(res, 409, "Un parcours est déjà en cours pour ce salarié.");
-      const m = (await modeles()).find(z=>z.id === b.modeleId) || (await modeles())[0];
-      const i = id("op"), essai = /^\d{4}-\d{2}-\d{2}$/.test(b.finEssai||"") ? b.finEssai : ajout(debut, 90);
-      await B.transaction(async ()=>{
+      const ms = await modeles(true), m = b.modeleId ? ms.find(z=>z.id === b.modeleId) : ms[0];
+      if (!m) return erreur(res, 400, "Modèle de parcours introuvable.");
+      const i = id("op"), essai = b.finEssai || ajout(debut, 90);
+      try { await B.transaction(async ()=>{
+        if (await B.get("SELECT 1 FROM onb_parcours WHERE mat=? AND statut='en_cours'", mat)) throw Object.assign(new Error("Un parcours est déjà en cours pour ce salarié."), {code:409});
         await B.run("INSERT INTO onb_parcours(id,mat,modele_id,debut,fin_essai,statut,cree,par) VALUES(?,?,?,?,?,?,?,?)", i, mat, m.id, debut, essai, "en_cours", maint(), C.login);
         let n = 0; for (const t of m.taches) await B.run("INSERT INTO onb_taches(id,parcours_id,ordre,titre,responsable,echeance) VALUES(?,?,?,?,?,?)", id("ot"), i, n++, t.titre, t.responsable, ajout(debut, t.jour));
-      });
-      await audit(C.login, "onboarding.parcours", mat+" — "+m.nom+" à partir du "+debut, ip); return json(res, 200, {ok:true, id:i});
+      }); } catch(e){ if (e.code === 409) return erreur(res, 409, e.message); throw e; }
+      await audit(C.login, "onboarding.parcours", mat+" — "+m.nom+" à partir du "+jj(debut)+", fin d'essai "+jj(essai)+" ("+i+")", ip); return json(res, 200, {ok:true, id:i});
     }
     const mp = /^\/api\/v1\/onboarding\/parcours\/([^/]+)(?:\/(terminer|annuler))?$/.exec(p);
     if (mp){
@@ -102,7 +123,8 @@ function creer(o){
         /* 56.33.11 : seul un parcours en cours se termine ou s'annule (un parcours annulé ne redevient pas « terminé ») */
         if (pc.statut !== "en_cours") return erreur(res, 409, "Parcours clôturé.");
         await B.run("UPDATE onb_parcours SET statut=? WHERE id=? AND statut='en_cours'", mp[2] === "terminer" ? "termine" : "annule", pc.id);
-        await audit(C.login, "onboarding.parcours."+mp[2], pc.mat, ip); return json(res, 200, {ok:true});
+        const nf = Number((await B.get("SELECT COUNT(*) n FROM onb_taches WHERE parcours_id=? AND faite_le IS NULL", pc.id)).n);
+        await audit(C.login, "onboarding.parcours."+mp[2], pc.mat+" ("+pc.id+") en cours → "+(mp[2] === "terminer" ? "terminé" : "annulé")+(nf ? " ; "+nf+" tâche(s) non faite(s)" : ""), ip); return json(res, 200, {ok:true});
       }
     }
     const mt = /^\/api\/v1\/onboarding\/taches\/([^/]+)$/.exec(p);
@@ -111,14 +133,26 @@ function creer(o){
       const t = await B.get("SELECT t.*, p.mat, p.statut FROM onb_taches t JOIN onb_parcours p ON p.id=t.parcours_id WHERE t.id=?", mt[1]);
       if (!t || !dans(P, t.mat)) return erreur(res, 404, "Tâche introuvable.");
       if (t.statut !== "en_cours") return erreur(res, 409, "Parcours clôturé.");
-      const b = await corpsJson(req), faite = !!b.faite;
+      /* correctif 34 : un commentaire seul ne décoche plus la tâche (elle perdait date et signataire) */
+      const b = await corpsJson(req), faite = b.faite === undefined ? !!t.faite_le : !!b.faite;
       /* 56.33.11 : recocher une tâche déjà faite garde sa date et son signataire d'origine */
       const deja = faite && t.faite_le;
       await B.run("UPDATE onb_taches SET faite_le=?, faite_par=?, commentaire=COALESCE(?, commentaire) WHERE id=?", deja ? t.faite_le : faite ? maint() : null, deja ? t.faite_par : faite ? C.login : null, b.commentaire == null ? null : String(b.commentaire).slice(0, 500), t.id);
-      await audit(C.login, "onboarding.tache", t.mat+" — "+t.titre+" : "+(faite ? "faite" : "à refaire"), ip); return json(res, 200, {ok:true});
+      const etatAv = t.faite_le ? "faite" : "à faire", etatAp = faite ? "faite" : "à faire", com = b.commentaire == null ? null : String(b.commentaire).slice(0, 500);
+      if (etatAv !== etatAp || (com !== null && com !== (t.commentaire || "")))
+        await audit(C.login, "onboarding.tache", t.mat+" — "+t.titre+" : "+etatAv+" → "+etatAp+(com !== null && com !== (t.commentaire || "") ? " ; commentaire « "+String(t.commentaire || "").slice(0, 120)+" » → « "+com.slice(0, 120)+" »" : ""), ip);
+      return json(res, 200, {ok:true});
     }
     return erreur(res, 404, "Introuvable.");
   }
+  /* correctif 34 : parcours en cours d'un salarié supprimé ou sorti → annulé (il restait compté « à traiter ») */
+  if (o.planifier) o.planifier("orphelins", {intervalle:3600000, premier:120000, priorite:3, delai:120000, fn:async ()=>{
+    const l = await B.all("SELECT id, mat FROM onb_parcours WHERE statut='en_cours'"); if (!l.length) return "aucun parcours";
+    const parMat = new Map((await D.employes()).map(e=>[String(e.mat), e])), j0 = auj(); let n = 0;
+    for (const r of l){ const e = parMat.get(String(r.mat)); if (e && !(e.sortie && e.sortie < j0)) continue;
+      await B.run("UPDATE onb_parcours SET statut='annule' WHERE id=? AND statut='en_cours'", r.id); n++;
+      await audit("systeme", "onboarding.parcours.annuler", r.mat+" ("+r.id+") en cours → annulé : salarié "+(e ? "sorti le "+jj(e.sortie) : "supprimé")); }
+    return n+" parcours annulé(s)"; }});
   return {traiter, aTraiter, fiche360};
 }
 module.exports = {ddl, tables, creer};

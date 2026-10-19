@@ -2,7 +2,7 @@
   "id": "FW-Evaluation",
   "nom": "Évaluations",
   "categorie": "metier",
-  "version": "1.0",
+  "version": "1.1",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -43,7 +43,7 @@
     "FW-Competences"
   ],
   "integrite": {
-    "js": "sha384-ceCdu42f4LZUpMYIbd0rsoag99H9YIHe5UOMm81/7VijHm+WMQ8k7xaUvY/v7kV5",
+    "js": "sha384-lvMO/ukvMW16lIlSJXj2FwEAwywYA0qwnOFYCJDDUlv2lHfv2k2O69xAh61Xdst0",
     "css": "sha384-iAjwt0+vaJ4ZPa4sLTnNnPIUA0xMHRPCjcCFg3cGVBMZg3IshwmM25CI62+HLpQm"
   }
 }

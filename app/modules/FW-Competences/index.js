@@ -23,6 +23,7 @@ const L = {
     enregistre:"تم حفظ المستوى.", ajoute:"أضيفت الكفاءة.", exigenceOk:"تم حفظ المستوى المطلوب.", legende:"0 غير مقيم · 1 مبادئ · 2 مستقل · 3 متمكن · 4 خبير"}
 };
 const HAUTEUR = 36, PAGE = 100, MARGE = 8;
+Object.assign(L.fr, {reseau:"Serveur injoignable : vérifiez la connexion puis réessayez."}); Object.assign(L.en, {reseau:"Server unreachable: check the connection and try again."}); Object.assign(L.ar, {reseau:"تعذّر الوصول إلى الخادم: تحقّق من الاتصال ثم أعد المحاولة."});
 function T(ctx, k, n){ const s = (L[ctx.lang] || L.fr)[k] || L.fr[k] || k; return n === undefined ? s : s.replace("{n}", n); }
 function charger(ctx){
   const E = ctx.etat;
@@ -41,9 +42,11 @@ function page(ctx, n){
   }).catch(e=>{ E.pages[n] = null; ctx.flash(e.message, "err"); });
 }
 function reinitialiser(ctx){ const E = ctx.etat; E.total = null; E.lignes = {}; E.pages = {}; }
+/* correctif 34 : cellule nommée (salarié, compétence, niveau, requis), inactive en consultation ou pendant l'envoi */
 function cellules(ctx, l){
-  return ctx.etat.comps.map(c=>{ const n = l.niveaux[c.id] || 0, r = l.requis[c.id] || 0;
-    return '<button type="button" class="fwc-n fwc-n'+n+(r && n < r ? ' fwc-ecart' : '')+'" data-act="fwm:niveau" data-mat="'+ctx.esc(l.mat)+'" data-cid="'+ctx.esc(c.id)+'" title="'+ctx.esc(T(ctx, "niveau", n)+(r ? " · "+T(ctx, "requis", r) : ""))+'">'+n+(r ? '<small>/'+r+'</small>' : '')+'</button>'; }).join("");
+  const lecture = ctx.rang("EMP") < 2, occ = ctx.etat.occ || {};
+  return ctx.etat.comps.map(c=>{ const n = l.niveaux[c.id] || 0, r = l.requis[c.id] || 0, lib = l.nom+" — "+c.code+" : "+T(ctx, "niveau", n)+(r ? " · "+T(ctx, "requis", r) : "");
+    return '<button type="button" role="gridcell" class="fwc-n fwc-n'+n+(r && n < r ? ' fwc-ecart' : '')+'" data-act="fwm:niveau" data-mat="'+ctx.esc(l.mat)+'" data-cid="'+ctx.esc(c.id)+'" title="'+ctx.esc(lib)+'" aria-label="'+ctx.esc(lib)+'"'+(lecture || occ[l.mat+"|"+c.id] ? ' disabled' : '')+'>'+n+(r ? '<small>/'+r+'</small>' : '')+'</button>'; }).join("");
 }
 /* dessin des seules lignes visibles (virtualisation) */
 function dessiner(ctx){
@@ -52,7 +55,7 @@ function dessiner(ctx){
   for (let p = Math.floor(debut / PAGE); p <= Math.floor(Math.max(debut, fin - 1) / PAGE); p++) page(ctx, p);
   let h = "";
   for (let i = debut; i < fin; i++){ const l = E.lignes[i];
-    h += '<div class="fwc-l" style="top:'+(i*HAUTEUR)+'px">'+(l ? '<span class="fwc-nom" title="'+ctx.esc(l.mat)+'">'+ctx.esc(l.nom)+'</span><span class="fwc-f">'+ctx.esc(l.fonction||"—")+'</span><span class="fwc-e'+(l.ecarts ? ' fwc-ko' : '')+'">'+l.ecarts+'</span>'+cellules(ctx, l)
+    h += '<div class="fwc-l" role="row" style="top:'+(i*HAUTEUR)+'px">'+(l ? '<span class="fwc-nom" role="rowheader" title="'+ctx.esc(l.mat)+'">'+ctx.esc(l.nom)+'</span><span class="fwc-f">'+ctx.esc(l.fonction||"—")+'</span><span class="fwc-e'+(l.ecarts ? ' fwc-ko' : '')+'">'+l.ecarts+'</span>'+cellules(ctx, l)
       : '<span class="fwc-nom fwc-att">'+ctx.esc(T(ctx, "chargement"))+'</span>')+'</div>'; }
   const z = g.querySelector(".fwc-zone"); if (z){ z.style.height = (E.total*HAUTEUR)+"px"; z.innerHTML = h; }
 }
@@ -64,7 +67,7 @@ function vueMatrice(ctx){
   return '<div class="fw-toolbar"><input type="search" data-fwmc="recherche" value="'+ctx.esc(E.q)+'" placeholder="'+ctx.esc(T(ctx, "recherche"))+'" aria-label="'+ctx.esc(T(ctx, "recherche"))+'">'+
     '<select data-fwmc="fonction" aria-label="'+ctx.esc(T(ctx, "fonction"))+'"><option value="">'+ctx.esc(T(ctx, "toutesFonctions"))+'</option>'+fn.map(f=>'<option'+(E.fonction === f ? ' selected' : '')+'>'+ctx.esc(f)+'</option>').join("")+'</select>'+
     '<span class="fw-hint">'+(E.total === null ? ctx.esc(T(ctx, "chargement")) : ctx.esc(T(ctx, "salaries", E.total)))+' · '+ctx.esc(T(ctx, "legende"))+'</span></div>'+
-    '<div id="fwcGrille" class="fwc-grille" tabindex="0" aria-label="'+ctx.esc(T(ctx, "matrice"))+'" style="--fwc-n:'+Math.max(1, E.comps.length)+'"><div class="fwc-tete"><span class="fwc-nom">'+ctx.esc(T(ctx, "salarie"))+'</span><span class="fwc-f">'+ctx.esc(T(ctx, "fonction"))+'</span><span class="fwc-e">'+ctx.esc(T(ctx, "ecartsN"))+'</span>'+
+    '<div id="fwcGrille" class="fwc-grille" role="grid" tabindex="0" aria-label="'+ctx.esc(T(ctx, "matrice"))+'" style="--fwc-n:'+Math.max(1, E.comps.length)+'"><div class="fwc-tete"><span class="fwc-nom">'+ctx.esc(T(ctx, "salarie"))+'</span><span class="fwc-f">'+ctx.esc(T(ctx, "fonction"))+'</span><span class="fwc-e">'+ctx.esc(T(ctx, "ecartsN"))+'</span>'+
       E.comps.map(c=>'<span class="fwc-c" title="'+ctx.esc(c.nom)+'">'+ctx.esc(c.code)+'</span>').join("")+'</div>'+
     '<div class="fwc-zone"></div></div>';
 }
@@ -110,10 +113,12 @@ FIWAKTI_MODULES.enregistrer({
     if (a === "niveau"){
       if (ctx.rang("EMP") < 2) return;
       const idx = Object.keys(E.lignes).find(i=>E.lignes[i] && E.lignes[i].mat === el.dataset.mat), l = idx !== undefined ? E.lignes[idx] : null; if (!l) return;
+      /* correctif 34 : une seule écriture par cellule à la fois (double clic : deux écritures) */
+      const k = l.mat+"|"+el.dataset.cid; E.occ = E.occ || {}; if (E.occ[k]) return; E.occ[k] = true; el.disabled = true;
       const n = ((l.niveaux[el.dataset.cid] || 0) + 1) % 5;
-      ctx.api("api/v1/competences/niveau", {corps:{mat:l.mat, competenceId:el.dataset.cid, niveau:n}}).then(()=>{
+      ctx.api("api/v1/competences/niveau", {corps:{mat:l.mat, competenceId:el.dataset.cid, niveau:n}}).then(()=>{ delete E.occ[k];
         l.niveaux[el.dataset.cid] = n; l.ecarts = Object.keys(l.requis).filter(c=>(l.niveaux[c]||0) < l.requis[c]).length; E.ecarts = null; dessiner(ctx);
-      }).catch(e=>ctx.flash(e.message, "err"));
+      }).catch(e=>{ delete E.occ[k]; dessiner(ctx); ctx.flash((e && (e.name === "TypeError" || /Failed to fetch/i.test(e.message))) ? T(ctx, "reseau") : e.message, "err"); });
       return;
     }
     if (a === "ajouter"){

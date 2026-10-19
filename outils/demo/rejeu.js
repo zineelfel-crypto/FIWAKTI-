@@ -43,7 +43,8 @@
     rouvrir: () => ({statut:"ouvert"}),
     etape: b => (b.vers ? {etape:b.vers, maj:maint()} : {}),
     terminer: () => ({statut:"terminee"}),
-    valider: () => ({statut:"validee"})
+    valider: () => ({statut:"validee"}),
+    retirer: () => ({actif:0})
   };
   /* met à jour toutes les occurrences d'un élément (listes et fiches) */
   function modifier(id, patch){
@@ -95,9 +96,13 @@
   function ecrire(p, b){
     if (DEFAUTS[p] || chemins().some(k => sansQ(k) === p)) return Object.assign({ok:true, demo:true}, {id:creer(p, b).id});
     const m = /^(.*)\/([^/]+)\/([a-z-]+)$/.exec(p);
+    /* évaluation : campagne supprimée (retirée des listes) */
+    if (m && m[3] === "supprimer"){ (function marcher(o){ if (!o || typeof o !== "object") return;
+      Object.keys(o).forEach(k => { if (Array.isArray(o[k])) o[k] = o[k].filter(x => !(x && x.id === m[2])); marcher(o[k]); }); })(REP); return {ok:true, demo:true}; }
     if (m && ACTIONS[m[3]]){
       if (m[3] === "faite" && /\/hse\/actions$/.test(m[1])){ const I = REP["/api/v1/hse/indicateurs"]; if (I && I.actionsOuvertes > 0) I.actionsOuvertes--; }
       const patch = ACTIONS[m[3]](b || {});
+      if (m[3] === "retirer" && /\/(catalogue|modeles)$/.test(m[1])) chemins().filter(k => sansQ(k) === m[1]).forEach(k => { const v = REP[k], t = tableau(v); if (t) v[t] = v[t].filter(x => x.id !== m[2]); });
       if (m[3] === "clore" && /\/evaluation\//.test(m[1])) patch.statut = "close";
       if (m[3] === "cloturer" && /\/formation\//.test(m[1])) patch.statut = "realisee";
       modifier(m[2], patch);

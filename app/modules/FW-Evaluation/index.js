@@ -25,7 +25,13 @@ const L = {
     valider:"مصادقة", rouvrir:"إعادة الفتح", retour:"رجوع", aucune:"لا تقييمات.", chargement:"جار التحميل…", enregistre:"تم الحفظ.", lance:"أطلقت الحملة: {n} تقييم.", reportes:"تمت المصادقة: نقل {n} مستوى.",
     plage:"{a}–{b} من {n}", sansComp:"لا متطلبات كفاءات لهذه الوظيفة.", campagne:"الحملة", toutes:"كل الحملات"}
 };
+/* correctif 34 : confidentialité, confirmation de la validation, suppression de campagne, erreurs réseau, sens de lecture */
+Object.assign(L.fr, {reseau:"Serveur injoignable : vérifiez la connexion puis réessayez.", confidentiel:"Contenu de l'évaluation confidentiel : réservé à l'évaluateur et aux valideurs ayant accès aux données sensibles.", validerQ:"Valider l'évaluation de {n} ? Elle ne pourra plus être modifiée et les niveaux de compétence seront reportés dans la matrice.", cloreQ:"Clore la campagne « {n} » ? Les évaluations non validées ne pourront plus être saisies.", supprimer:"Supprimer", supprimerQ:"Supprimer la campagne « {n} » ? Aucune évaluation n'a commencé ; cette action est irréversible.", envoi:"Enregistrement…", liste:"Liste"});
+Object.assign(L.en, {reseau:"Server unreachable: check the connection and try again.", confidentiel:"Appraisal content is confidential: reserved for the appraiser and approvers with access to sensitive data.", validerQ:"Approve {n}'s appraisal? It can no longer be changed and skill levels will be recorded in the matrix.", cloreQ:"Close the campaign “{n}”? Appraisals not approved can no longer be entered.", supprimer:"Delete", supprimerQ:"Delete the campaign “{n}”? No appraisal has started; this cannot be undone.", envoi:"Saving…", liste:"List"});
+Object.assign(L.ar, {reseau:"تعذّر الوصول إلى الخادم: تحقّق من الاتصال ثم أعد المحاولة.", confidentiel:"محتوى التقييم سري: مخصص للمقيّم وللمصادقين المخوّل لهم الاطلاع على المعطيات الحساسة.", validerQ:"المصادقة على تقييم {n}؟ لن يمكن تعديله بعد ذلك وستُسجَّل مستويات الكفاءة في المصفوفة.", cloreQ:"إغلاق الحملة «{n}»؟ لن يمكن إدخال التقييمات غير المصادق عليها.", supprimer:"حذف", supprimerQ:"حذف الحملة «{n}»؟ لم يبدأ أي تقييم؛ لا يمكن التراجع عن ذلك.", envoi:"جارٍ الحفظ…", liste:"القائمة"});
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
+const fl = (ctx, g) => ctx.lang === "ar" ? (g === "‹" ? "›" : g === "›" ? "‹" : "→") : g;
+const msgErr = (ctx, e) => (e && (e.name === "TypeError" || /Failed to fetch|NetworkError/i.test(e.message))) ? T(ctx, "reseau") : (e && e.message) || "";
 const val = id => ((document.getElementById(id)||{}).value || "").trim();
 function charger(ctx){
   const E = ctx.etat;
@@ -39,28 +45,28 @@ function vueCampagnes(ctx){
   const E = ctx.etat, C = (E.camp||{}).campagnes, peut = ctx.rang("EMP") >= 4;
   return (peut ? '<div class="fw-card fw-u-p fwe-form">'+champ(ctx, T(ctx,"nom"), '<input id="fweNom">')+champ(ctx, T(ctx,"type"), '<select id="fweType">'+["annuelle","essai","habil"].map(k=>'<option value="'+k+'">'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select>')+
       champ(ctx, T(ctx,"debut"), '<input id="fweDeb" type="date">')+champ(ctx, T(ctx,"fin"), '<input id="fweFin" type="date">')+champ(ctx, T(ctx,"fonction"), '<input id="fweFonc">')+
-      champ(ctx, T(ctx,"objectifs"), '<textarea id="fweObj" rows="3"></textarea>')+'<button class="fw-btn pri" data-act="fwm:lancer">'+ctx.esc(T(ctx,"lancer"))+'</button></div>' : '')+
+      champ(ctx, T(ctx,"objectifs"), '<textarea id="fweObj" rows="3"></textarea>')+'<button class="fw-btn pri" data-act="fwm:lancer"'+(E.envoi ? ' disabled aria-busy="true"' : '')+'>'+ctx.esc(T(ctx, E.envoi ? "envoi" : "lancer"))+'</button></div>' : '')+
     (!C ? '<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>' : !C.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
     '<table class="fw-tbl"><thead><tr><th>'+ctx.esc(T(ctx,"nom"))+'</th><th>'+ctx.esc(T(ctx,"type"))+'</th><th>'+ctx.esc(T(ctx,"debut"))+'</th><th>'+ctx.esc(T(ctx,"fin"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"total"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"validees"))+'</th><th>'+ctx.esc(T(ctx,"statut"))+'</th><th></th></tr></thead><tbody>'+
       C.map(c=>'<tr><td><button class="fw-link" data-act="fwm:voir-camp" data-id="'+ctx.esc(c.id)+'">'+ctx.esc(c.nom)+'</button></td><td>'+ctx.esc(T(ctx,c.type))+'</td><td>'+ctx.esc(ctx.dateAff(c.debut))+'</td><td>'+ctx.esc(ctx.dateAff(c.fin))+'</td><td class="fw-num">'+c.total+'</td><td class="fw-num">'+c.validees+'</td><td>'+ctx.esc(T(ctx,c.statut))+'</td><td>'+
-        (peut && c.statut === "ouverte" ? '<button class="fw-btn sm" data-act="fwm:clore" data-id="'+ctx.esc(c.id)+'">'+ctx.esc(T(ctx,"clore"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table>');
+        (peut && c.statut === "ouverte" ? '<button class="fw-btn sm" data-act="fwm:clore" data-id="'+ctx.esc(c.id)+'" data-nom="'+ctx.esc(c.nom)+'" aria-label="'+ctx.esc(T(ctx,"clore")+" : "+c.nom)+'">'+ctx.esc(T(ctx,"clore"))+'</button> <button class="fw-btn sm dgr" data-act="fwm:supprimer" data-id="'+ctx.esc(c.id)+'" data-nom="'+ctx.esc(c.nom)+'" aria-label="'+ctx.esc(T(ctx,"supprimer")+" : "+c.nom)+'">'+ctx.esc(T(ctx,"supprimer"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table>');
 }
 function vueListe(ctx){
   const E = ctx.etat, Lx = E.liste, C = (E.camp||{}).campagnes || [];
   return '<div class="fw-toolbar"><select data-fwmc="f" data-k="mes"><option value="1"'+(E.f.mes === "1" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"mes"))+'</option><option value=""'+(E.f.mes === "" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"evaluations"))+'</option></select>'+
     '<select data-fwmc="f" data-k="campagne"><option value="">'+ctx.esc(T(ctx,"toutes"))+'</option>'+C.map(c=>'<option value="'+ctx.esc(c.id)+'"'+(E.f.campagne === c.id ? ' selected' : '')+'>'+ctx.esc(c.nom)+'</option>').join("")+'</select>'+
     '<select data-fwmc="f" data-k="statut"><option value="">'+ctx.esc(T(ctx,"tous"))+'</option>'+["a_faire","en_cours","terminee","validee"].map(s=>'<option value="'+s+'"'+(E.f.statut === s ? ' selected' : '')+'>'+ctx.esc(T(ctx,"s_"+s))+'</option>').join("")+'</select>'+
-    (Lx ? '<span class="fw-hint">'+ctx.esc(T(ctx,"plage").replace("{a}", Lx.total ? E.off+1 : 0).replace("{b}", Math.min(E.off+50, Lx.total)).replace("{n}", Lx.total))+'</span><button class="fw-btn sm" data-act="fwm:prec"'+(E.off ? '' : ' disabled')+'>‹</button><button class="fw-btn sm" data-act="fwm:suiv"'+(E.off+50 < Lx.total ? '' : ' disabled')+'>›</button>' : '')+'</div>'+
+    (Lx ? '<span class="fw-hint">'+ctx.esc(T(ctx,"plage").replace("{a}", Lx.total ? E.off+1 : 0).replace("{b}", Math.min(E.off+50, Lx.total)).replace("{n}", Lx.total))+'</span><button class="fw-btn sm" data-act="fwm:prec"'+(E.off ? '' : ' disabled')+' aria-label="‹">'+fl(ctx, "‹")+'</button><button class="fw-btn sm" data-act="fwm:suiv"'+(E.off+50 < Lx.total ? '' : ' disabled')+' aria-label="›">'+fl(ctx, "›")+'</button>' : '')+'</div>'+
     (!Lx ? '<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>' : !Lx.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
     '<table class="fw-tbl"><thead><tr><th>'+ctx.esc(T(ctx,"salarie"))+'</th><th>'+ctx.esc(T(ctx,"campagne"))+'</th><th>'+ctx.esc(T(ctx,"evaluateur"))+'</th><th>'+ctx.esc(T(ctx,"statut"))+'</th><th class="fw-numh">'+ctx.esc(T(ctx,"note"))+'</th></tr></thead><tbody>'+
       Lx.lignes.map(r=>'<tr><td><button class="fw-link" data-act="fwm:voir" data-id="'+ctx.esc(r.id)+'">'+ctx.esc((r.nom || r.mat)+" · "+r.mat)+'</button><div class="fw-hint">'+ctx.esc(r.fonction||"")+'</div></td><td>'+ctx.esc(r.campagne)+'</td><td>'+ctx.esc(r.evaluateur||"—")+'</td>'+
         '<td><span class="fwe-s fwe-'+r.statut+'">'+ctx.esc(T(ctx,"s_"+r.statut))+'</span></td><td class="fw-num">'+(r.note == null ? "—" : r.note)+'</td></tr>').join("")+'</tbody></table>');
 }
 function vueDetail(ctx){
-  const E = ctx.etat, D = E.detail, ev = D.evaluation, ferme = ev.statut === "validee" || ev.cstatut !== "ouverte", val3 = ctx.rang("EMP") >= 3;
+  const E = ctx.etat, D = E.detail, ev = D.evaluation, ferme = ev.statut === "validee" || ev.cstatut !== "ouverte" || !!ev.confidentiel, val3 = ctx.rang("EMP") >= 3;
   const cp = {}; (ev.competences||[]).forEach(z=>{ cp[z.competence_id] = z.niveau; });
-  return '<div class="fw-toolbar"><button class="fw-btn sm" data-act="fwm:retour">← '+ctx.esc(T(ctx,"retour"))+'</button><strong>'+ctx.esc(D.salarie.nom+" · "+D.salarie.mat)+'</strong><span class="fw-hint">'+ctx.esc(ev.campagne+" · "+(D.salarie.fonction||""))+'</span>'+
-      '<span class="fwe-s fwe-'+ev.statut+'">'+ctx.esc(T(ctx,"s_"+ev.statut))+'</span></div>'+
+  return '<div class="fw-toolbar"><button class="fw-btn sm" data-act="fwm:retour">'+fl(ctx, "←")+' '+ctx.esc(T(ctx,"retour"))+'</button><strong>'+ctx.esc(D.salarie.nom+" · "+D.salarie.mat)+'</strong><span class="fw-hint">'+ctx.esc(ev.campagne+" · "+(D.salarie.fonction||""))+'</span>'+
+      '<span class="fwe-s fwe-'+ev.statut+'">'+ctx.esc(T(ctx,"s_"+ev.statut))+'</span></div>'+(ev.confidentiel ? '<div class="fw-note" role="status">'+ctx.esc(T(ctx,"confidentiel"))+'</div>' : '')+
     '<fieldset class="fwe-bloc"'+(ferme ? ' disabled' : '')+'><legend>'+ctx.esc(T(ctx,"objectifs").replace(/ \(.*\)$/, ""))+'</legend>'+
       ((ev.objectifs||[]).length ? ev.objectifs.map((o, k)=>'<div class="fwe-l"><span>'+ctx.esc(o.libelle)+'</span>'+champ(ctx, T(ctx,"atteinte"), '<input type="number" min="0" max="100" class="fwe-obj" data-k="'+k+'" value="'+(o.atteinte == null ? "" : o.atteinte)+'">')+'</div>').join("") : '<div class="fw-hint">—</div>')+'</fieldset>'+
     '<fieldset class="fwe-bloc"'+(ferme ? ' disabled' : '')+'><legend>'+ctx.esc(T(ctx,"competences"))+'</legend>'+
@@ -68,7 +74,7 @@ function vueDetail(ctx){
         '<select class="fwe-cp" data-id="'+ctx.esc(x.competence_id)+'" aria-label="'+ctx.esc(x.nom)+'">'+[0,1,2,3,4].map(n=>'<option value="'+n+'"'+((cp[x.competence_id] != null ? cp[x.competence_id] : (x.actuel||0)) === n ? ' selected' : '')+'>'+n+'</option>').join("")+'</select></div>').join("") : '<div class="fw-hint">'+ctx.esc(T(ctx,"sansComp"))+'</div>')+'</fieldset>'+
     '<fieldset class="fwe-bloc"'+(ferme ? ' disabled' : '')+'><div class="fwe-form">'+champ(ctx, T(ctx,"note"), '<input id="fweNote" type="number" min="1" max="5" value="'+(ev.note == null ? "" : ev.note)+'">')+
       champ(ctx, T(ctx,"commentaire"), '<textarea id="fweCom" rows="3">'+ctx.esc(ev.commentaire||"")+'</textarea>')+'</div></fieldset>'+
-    '<div class="fw-toolbar">'+(!ferme ? '<button class="fw-btn" data-act="fwm:enreg">'+ctx.esc(T(ctx,"enregistrer"))+'</button><button class="fw-btn pri" data-act="fwm:terminer">'+ctx.esc(T(ctx,"terminer"))+'</button>' : '')+
+    '<div class="fw-toolbar">'+(!ferme ? '<button class="fw-btn" data-act="fwm:enreg"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx,"enregistrer"))+'</button><button class="fw-btn pri" data-act="fwm:terminer"'+(E.envoi ? ' disabled' : '')+'>'+ctx.esc(T(ctx,"terminer"))+'</button>' : '')+
       (val3 && ev.statut === "terminee" && ev.cstatut === "ouverte" ? '<button class="fw-btn pri" data-act="fwm:valider">'+ctx.esc(T(ctx,"valider"))+'</button><button class="fw-btn" data-act="fwm:rouvrir">'+ctx.esc(T(ctx,"rouvrir"))+'</button>' : '')+'</div>';
 }
 function saisie(ctx, terminer){
@@ -86,20 +92,25 @@ FIWAKTI_MODULES.enregistrer({
     charger(ctx); const E = ctx.etat;
     return '<div class="fw-module fwe"><div class="fw-hero fw-hero-mod"><div class="fw-hero-main"><div class="fw-hero-kicker">'+ctx.esc(window.HERO_KICKER || "FIWAKTI")+'</div><h1>'+ctx.esc(T(ctx,"titre"))+'</h1><p class="fw-hero-lede">'+ctx.esc(T(ctx,"lede"))+'</p></div></div>'+
       '<div class="fw-stabs" role="tablist">'+[["evaluations","evaluations"],["campagnes","campagnes"]].map(([k, l], i)=>'<button type="button" role="tab" class="'+k+(E.onglet === k ? ' on' : '')+'" aria-selected="'+(E.onglet === k)+'" data-act="fwm:onglet" data-o="'+k+'">'+ctx.esc(T(ctx,l))+'</button>').join("")+'</div>'+
-      '<div style="margin-top:12px">'+(E.onglet === "campagnes" ? vueCampagnes(ctx) : E.detail ? vueDetail(ctx) : vueListe(ctx))+'</div></div>';
+      '<div style="margin-top:12px" id="fweP" role="tabpanel">'+(E.onglet === "campagnes" ? vueCampagnes(ctx) : E.detail ? vueDetail(ctx) : vueListe(ctx))+'</div></div>';
   },
   action(a, el, ctx){
-    const E = ctx.etat, ko = e => ctx.flash(e.message, "err");
+    /* correctif 34 : un seul envoi à la fois (double clic : deux campagnes) ; validation et clôture confirmées */
+    const E = ctx.etat, ko = e => ctx.flash(msgErr(ctx, e), "err");
+    const verrou = f => { if (E.envoi) return; E.envoi = true; ctx.rendre(); return Promise.resolve().then(f).finally(()=>{ E.envoi = false; ctx.rendre(); }); };
+    if (a === "supprimer") return ctx.confirmer({titre:T(ctx,"supprimer"), message:T(ctx,"supprimerQ").replace("{n}", el.dataset.nom || ""), danger:true}).then(r=>{ if (!r.ok) return;
+      return verrou(()=>ctx.api("api/v1/evaluation/campagnes/"+encodeURIComponent(el.dataset.id)+"/supprimer", {corps:{}}).then(()=>{ E.camp = null; }).catch(ko)); });
     if (a === "onglet"){ E.onglet = el.dataset.o; E.detail = null; E.liste = null; return ctx.rendre(); }
     if (a === "prec" || a === "suiv"){ E.off = Math.max(0, E.off + (a === "suiv" ? 50 : -50)); E.liste = null; return ctx.rendre(); }
     if (a === "voir") return ouvrir(ctx, el.dataset.id).catch(ko);
     if (a === "voir-camp"){ E.onglet = "evaluations"; E.f = {campagne:el.dataset.id, statut:"", mes:""}; E.off = 0; E.liste = null; E.detail = null; return ctx.rendre(); }
     if (a === "retour"){ E.detail = null; E.liste = null; return ctx.rendre(); }
-    if (a === "lancer") return ctx.api("api/v1/evaluation/campagnes", {corps:{nom:val("fweNom"), type:val("fweType"), debut:val("fweDeb"), fin:val("fweFin"), fonction:val("fweFonc"), objectifs:val("fweObj").split("\n").map(s=>s.trim()).filter(Boolean)}})
-      .then(j=>{ ctx.flash(T(ctx,"lance").replace("{n}", j.evaluations), "ok"); E.camp = null; ctx.rendre(); }).catch(ko);
-    if (a === "clore") return ctx.confirmer({titre:T(ctx,"clore"), message:T(ctx,"clore")+" ?"}).then(r=>{ if (r.ok) ctx.api("api/v1/evaluation/campagnes/"+encodeURIComponent(el.dataset.id)+"/clore", {corps:{}}).then(()=>{ E.camp = null; ctx.rendre(); }).catch(ko); });
-    if (a === "enreg" || a === "terminer") return saisie(ctx, a === "terminer").then(()=>{ ctx.flash(T(ctx,"enregistre"), "ok"); return ouvrir(ctx, E.detail.evaluation.id); }).catch(ko);
-    if (a === "valider") return ctx.api("api/v1/evaluation/evaluations/"+encodeURIComponent(E.detail.evaluation.id)+"/valider", {corps:{}}).then(j=>{ ctx.flash(T(ctx,"reportes").replace("{n}", j.reportes), "ok"); E.camp = null; return ouvrir(ctx, E.detail.evaluation.id); }).catch(ko);
+    if (a === "lancer") return verrou(()=>ctx.api("api/v1/evaluation/campagnes", {corps:{nom:val("fweNom"), type:val("fweType"), debut:val("fweDeb"), fin:val("fweFin"), fonction:val("fweFonc"), objectifs:val("fweObj").split("\n").map(s=>s.trim()).filter(Boolean)}})
+      .then(j=>{ ctx.flash(T(ctx,"lance").replace("{n}", j.evaluations), "ok"); E.camp = null; }).catch(ko));
+    if (a === "clore") return ctx.confirmer({titre:T(ctx,"clore"), message:T(ctx,"cloreQ").replace("{n}", el.dataset.nom || "")}).then(r=>{ if (r.ok) return verrou(()=>ctx.api("api/v1/evaluation/campagnes/"+encodeURIComponent(el.dataset.id)+"/clore", {corps:{}}).then(()=>{ E.camp = null; }).catch(ko)); });
+    if (a === "enreg" || a === "terminer") return verrou(()=>saisie(ctx, a === "terminer").then(()=>{ ctx.flash(T(ctx,"enregistre"), "ok"); return ouvrir(ctx, E.detail.evaluation.id); }).catch(ko));
+    if (a === "valider") return ctx.confirmer({titre:T(ctx,"valider"), message:T(ctx,"validerQ").replace("{n}", E.detail.salarie.nom || E.detail.salarie.mat)}).then(r=>{ if (!r.ok) return;
+      return verrou(()=>ctx.api("api/v1/evaluation/evaluations/"+encodeURIComponent(E.detail.evaluation.id)+"/valider", {corps:{}}).then(j=>{ ctx.flash(T(ctx,"reportes").replace("{n}", j.reportes || 0), "ok"); E.camp = null; return ouvrir(ctx, E.detail.evaluation.id); }).catch(ko)); });
     if (a === "rouvrir") return ctx.api("api/v1/evaluation/evaluations/"+encodeURIComponent(E.detail.evaluation.id)+"/rouvrir", {corps:{}}).then(()=>ouvrir(ctx, E.detail.evaluation.id)).catch(ko);
   },
   change(k, el, ctx){
