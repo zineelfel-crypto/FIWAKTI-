@@ -2110,3 +2110,30 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-34.zip (cumulatif : correctifs 2 à 33 inclus).
+
+## Correctif 35 — Talents › Recrutement (seconde analyse approfondie)
+
+Nouvelle analyse de l'écran après le correctif 34, sur le serveur réel en SQLite puis en PostgreSQL 16, avec des comptes limités par site, par service, en saisie, en lecture et à menu masqué, et dans Chromium (fr / en / ar) et la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| R9 | Un compte écrivait sur le candidat d'un autre périmètre : « doublon accepté » sans poste → identifiant étranger renvoyé et CV remplacé ; le 409 de doublon révélait l'existence d'un courriel ailleurs | **critique** | doublons recherchés parmi les seuls candidats visibles ; rattachement proposé en réponse normale ; un candidat existant ne voit jamais son CV remplacé par une création (route « CV » dédiée) |
+| R10 | Désistement impossible après « retenu » : poste bloqué (quota atteint, candidat non effaçable, nombre de postes non modifiable) | **critique** | retenu → refusé (validation et motif) tant qu'aucune embauche n'est enregistrée ; retenu sans embauche effaçable ; modification du poste (nombre ≥ retenus) |
+| R11 | PostgreSQL : six « retenu » simultanés → trois retenus pour un poste ; trois créations simultanées → trois fiches ; `COUNT(*)` en texte → bouton CV partout, clic → sortie de l'application | **critique** | poste verrouillé (`FOR UPDATE`) et doublon contrôlé sous verrou dans la transaction ; compteurs convertis en nombres (vérifié : `200,409×5`, une seule fiche) |
+| R12 | Embauche reliée à n'importe quelle fiche ; échec de liaison → fiche orpheline puis second salarié | haute | nom et prénom de la fiche comparés (sans casse ni accents) ; « Relier une fiche existante » avec le matricule gardé après un échec |
+| R13 | Effacement RGPD incomplet (motifs libres conservés : santé, téléphone…) ; candidat effacé encore modifiable et embauchable ; retenu jamais embauché conservé sans limite | haute | motifs mis à NULL (déclencheurs : historique toujours immuable, seule cette mise à NULL est admise) ; étapes, entretiens et embauche refusés ; purge du retenu non embauché une fois le poste clos |
+| R14 | Fonctions absentes : modifier un poste, rectifier un candidat, remplacer / supprimer le CV, fiche du candidat, rattachement à un autre poste depuis l'écran, export | moyenne | routes et écran correspondants ; audit sans valeurs personnelles ; export CSV protégé contre les formules, droit d'export de la matrice |
+| R15 | Messages du serveur en français dans les écrans en / ar ; saisie perdue après une erreur ; liste des postes vide avec le filtre « Clos » et limitée à la page courante | moyenne | messages trilingues selon la langue du compte ; formulaires conservés ; liste autonome des postes ouverts |
+| R16 | Démonstration : nouveau poste montrant les candidats d'un autre, candidat ajouté absent du tableau, « undefined candidat(s) effacé(s) », effacement et recherche sans effet | moyenne | rejeu propre au recrutement (tableau par poste, candidature créée avec le candidat, fiche, rectification, effacement, réglages, embauche, recherche) |
+| R17 | Compte « service » ouvrant un poste sur un site où le service n'a personne ; recherche par courriel sans droit de saisie ; notes « », `true`, « 0x3 » et dates 1900 / 9999 acceptées ; objet enregistré « [object Object] » ; JSON invalide en 500 ; CV > 6 Mo coupant la connexion ; `.pdf` déclaré PNG accepté ; nom de fichier arabe perdu | basse | site du service exigé ; recherche sur le nom seul ; note `^[0-5]$`, dates 2000–2100 ; champs texte uniquement ; 400 ; taille contrôlée avant l'envoi ; extension cohérente ; `filename*` UTF-8 |
+| R18 | Accessibilité et affichage : boutons sans le nom du candidat, pagination « ‹ », focus perdu, flèche « → » en arabe, textes arabes tronqués, « → Retenu » proposé quota atteint, entretien proposé sur une candidature décidée, description sur une ligne, pas de site ni de statut | basse | `aria-label` complets, focus rétabli, flèches selon le sens, textes complétés, actions masquées, zone de texte, colonnes Site et Statut |
+
+Non traité : rôle « alerte » des messages d'erreur et libellé du motif dans la boîte de confirmation (communs à l'application) ; motifs de refus codifiés ; candidat sans candidature visible du seul compte qui l'a saisi ; « À traiter » n'ouvre pas directement le poste concerné.
+
+Vérifié :
+- **SQLite.** Banc du correctif 34 rejoué ; doublon caché sans écriture ni fuite ; désistement puis second retenu ; fiche d'une autre personne refusée, bonne fiche acceptée (casse et accents) ; désistement et effacement après embauche refusés ; motifs effacés, historique toujours immuable (mise à jour et suppression refusées) ; modification de poste, rectification, CV, fiche, rattachement, export (formule neutralisée, export refusé en consultation) ; contrôles bas niveau ; messages en anglais.
+- **PostgreSQL 16.** Six retenus simultanés : `200,409,409,409,409,409` ; trois créations simultanées : une fiche ; compteurs numériques ; recherche `%` ; désistement, effacement, purge, export, CV au nom arabe.
+- **Chromium.** Saisie conservée après erreur, colonnes, modification d'un poste, liste de postes indépendante du filtre, export, `aria-label`, focus, fiche du candidat (rectification, rattachement), arabe ; démonstration : tableau vide pour un nouveau poste, candidat ajouté visible, fiche, recherche ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-35.zip (cumulatif : correctifs 2 à 34 inclus).

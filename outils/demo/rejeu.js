@@ -113,13 +113,52 @@
     if (t){ modifier(t[1], b && b.faite ? {faite_le:maint(), faite_par:"admin"} : {faite_le:null, faite_par:null}); return {ok:true, demo:true}; }
     return {ok:true, demo:true, id:nouvelId("demo")};
   }
+  /* correctif 35 : recrutement — tableau propre à chaque poste (un nouveau poste montrait les candidats d'un autre),
+     candidature créée avec le candidat, recherche, fiche, rectification, effacement, réglages, embauche */
+  const SUIV = {recue:["preselection","refuse"], preselection:["entretien","refuse"], entretien:["decision","refuse"], decision:["retenu","refuse"], retenu:["refuse"], refuse:["recue"]};
+  const qp = c => { try { return new URLSearchParams(c.split("?")[1] || ""); } catch(e){ return new URLSearchParams(""); } };
+  const postes = () => { const l = []; chemins().filter(k => sansQ(k) === "/api/v1/recrutement/postes").forEach(k => (REP[k].lignes || []).forEach(x => { if (!l.some(y => y.id === x.id)) l.push(x); })); return l; };
+  const candidats = () => { const l = []; chemins().filter(k => sansQ(k) === "/api/v1/recrutement/candidats").forEach(k => (REP[k].lignes || []).forEach(x => { if (!l.some(y => y.id === x.id)) l.push(x); })); return l; };
+  function pipe(pid){
+    let k = chemins().find(x => sansQ(x) === "/api/v1/recrutement/candidatures" && qp(x).get("poste") === pid);
+    if (!k){ k = "/api/v1/recrutement/candidatures?poste="+pid; REP[k] = {etapes:["recue","preselection","entretien","decision","retenu","refuse"], suivantes:SUIV, comptes:{}, lignes:[]}; }
+    const v = REP[k]; v.suivantes = SUIV; const po = postes().find(x => x.id === pid); if (po) v.poste = {id:po.id, intitule:po.intitule, fonction:po.fonction, statut:po.statut, nb:po.nb || 1, site_id:po.site_id || null, dept_id:po.dept_id || null, description:po.description || ""};
+    return v;
+  }
+  function ajouterCandidature(pid, c){
+    const v = pipe(pid), ligne = {id:nouvelId("ra"), etape:"recue", note:null, maj:maint(), candidat_id:c.id, nom:c.nom, prenom:c.prenom || "", email:c.email || "", tel:c.tel || "", salarie:null, cv:0};
+    v.lignes.unshift(ligne); v.comptes.recue = (v.comptes.recue || 0) + 1;
+    modifier(pid, {candidatures:(((postes().find(x => x.id === pid)) || {}).candidatures || 0) + 1});
+  }
+  function recrut(methode, c, b){
+    const p = sansQ(c); if (p.indexOf("/api/v1/recrutement/") !== 0) return undefined; b = b || {};
+    let m;
+    if (methode === "GET"){
+      if (p === "/api/v1/recrutement/candidatures"){ const v = copie(pipe(qp(c).get("poste") || "")), et = qp(c).get("etape"), off = +qp(c).get("offset") || 0; v.comptes = {}; v.lignes.forEach(x => { v.comptes[x.etape] = (v.comptes[x.etape] || 0) + 1; });
+        if (et) v.lignes = v.lignes.filter(x => x.etape === et); if (off) v.lignes = v.lignes.slice(off); return v; }
+      if (p === "/api/v1/recrutement/candidats"){ const q = String(qp(c).get("q") || "").toLowerCase(), l = candidats().filter(x => !q || ((x.nom||"")+" "+(x.prenom||"")+" "+(x.email||"")).toLowerCase().indexOf(q) >= 0); return {total:l.length, lignes:copie(l.slice(+qp(c).get("offset") || 0, (+qp(c).get("offset") || 0) + 50))}; }
+      if ((m = /^\/api\/v1\/recrutement\/candidats\/([^/]+)$/.exec(p))){ const x = candidats().find(z => z.id === m[1]); if (!x) return undefined;
+        const l = []; chemins().filter(k => sansQ(k) === "/api/v1/recrutement/candidatures").forEach(k => { const v = REP[k], po = postes().find(z => z.id === qp(k).get("poste")) || {}; (v.lignes || []).filter(z => z.candidat_id === x.id).forEach(z => l.push({id:z.id, etape:z.etape, maj:z.maj, poste_id:po.id, intitule:po.intitule || "", poste_statut:po.statut || "ouvert"})); });
+        return {candidat:copie(x), candidatures:l, autres:0}; }
+      return undefined;
+    }
+    if (p === "/api/v1/recrutement/parametres") return {ok:true, demo:true, conservationMois:+b.conservationMois || 24, effaces:0};
+    if (p === "/api/v1/recrutement/candidats"){ const r = {ok:true, demo:true, id:creer(p, b).id}; const x = candidats().find(z => z.id === r.id); if (x && b.posteId) ajouterCandidature(String(b.posteId), x); return r; }
+    if (p === "/api/v1/recrutement/candidatures"){ const x = candidats().find(z => z.id === b.candidatId); if (x && b.posteId) ajouterCandidature(String(b.posteId), x); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/recrutement\/candidats\/([^/]+)\/effacer$/.exec(p))){ const z = {nom:"—", prenom:"", email:"", tel:"", source:""}; modifier(m[1], z); chemins().filter(k => sansQ(k) === "/api/v1/recrutement/candidatures").forEach(k => (REP[k].lignes || []).filter(y => y.candidat_id === m[1]).forEach(y => Object.assign(y, z))); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/recrutement\/candidats\/([^/]+)$/.exec(p))){ const z = {}; ["nom","prenom","email","tel","source"].forEach(k => { if (b[k] !== undefined) z[k] = b[k]; }); modifier(m[1], z); chemins().filter(k => sansQ(k) === "/api/v1/recrutement/candidatures").forEach(k => (REP[k].lignes || []).filter(y => y.candidat_id === m[1]).forEach(y => Object.assign(y, z))); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/recrutement\/postes\/([^/]+)$/.exec(p))){ modifier(m[1], {intitule:b.intitule, fonction:b.fonction, nb:b.nb, description:b.description, site_id:b.siteId || null, dept_id:b.deptId || null}); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/recrutement\/candidatures\/([^/]+)\/embauche$/.exec(p))){ modifier(m[1], {salarie:b.mat}); return {ok:true, demo:true, mat:b.mat}; }
+    return undefined;
+  }
   return function(chemin, o){
     const c = "/"+String(chemin || "").replace(/^\.?\//, "");
     const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
     if (methode !== "GET"){
-      let r; try { r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
+      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
       return new Promise(ok => setTimeout(() => ok(r), 150));
     }
+    const rr = recrut("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
     const p = sansQ(c), parent = p.replace(/\/[^/]+$/, "/"), cles = chemins();
     let k = REP[c] !== undefined ? c : cles.find(x => sansQ(x) === p);
     if (!k) k = cles.find(x => { const y = sansQ(x); return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });
