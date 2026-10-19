@@ -360,6 +360,11 @@ function creer(B, PERIM){
         if (COLLS.indexOf(k) >= 0 || k.indexOf("__") === 0) continue;
         const fusion = (k === "users" && !admin) || (k === "anoDec" && !admin);
         if (!fusion && basesRef[k] !== undefined && Number(basesRef[k]) !== Number(vers[k]||0)){ conflits.push({type:"ref", cle:k}); continue; }
+        /* correctif 20 : une décision d'anomalie d'une journée clôturée ne se pose ni ne se retire, même par un
+           administrateur (elle changeait le sceau de la clôture : « Vérifier » échouait) */
+        if (k === "anoDec" && r.anoDec && typeof r.anoDec === "object" && !Array.isArray(r.anoDec)){ const clA = clotDe(ref); if (clA){ const n0 = Object.assign({}, r.anoDec); let nI = 0;
+          new Set(Object.keys(n0).concat(admin ? Object.keys(avantDec) : [])).forEach(id=>{ const d = String(id.split("|")[2] || ""); if (!d || d > clA) return; const a = avantDec[id], b = n0[id]; if (JSON.stringify(a) === JSON.stringify(b)) return; nI++; if (a === undefined) delete n0[id]; else n0[id] = a; });
+          if (nI) ignores.push("anoDec ("+nI+" décision(s) en période clôturée ignorée(s) : ajustement de période antérieure requis)"); r.anoDec = n0; } }
         if (k === "users" && !admin){
           const moi = (r.users||[]).find(x=>x && x.id === P.u.id);
           if (moi){ ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, pick(moi, ["ntfVus","derniereConx","langue","prefs","homeLayout"]))); refModifie = true; }
@@ -384,10 +389,11 @@ function creer(B, PERIM){
           const parId = new Map(ap.map(x=>[x && x.id, x]));
           const retiree = av.find(x=>!parId.has(x.id)), modifiee = av.find(x=>parId.has(x.id) && JSON.stringify(parId.get(x.id)) !== JSON.stringify(x));
           if (retiree || modifiee){ ignores.push("clotures (une clôture ne se modifie ni ne se rouvre : utilisez un ajustement de période antérieure)"); continue; }
-          const nouvelles = ap.filter(x=>x && !av.some(y=>y.id === x.id));
-          let motifC = "";
-          for (const c of nouvelles){ if (API.verifierCloture){ motifC = await API.verifierCloture(c); if (motifC) break; } }
-          if (motifC){ ignores.push("clotures ("+motifC+")"); continue; }
+          /* correctif 20 : une clôture se crée uniquement par le serveur (POST /api/v1/clotures : bornes, droits, contrôles
+             complets, sceau et auteur établis par le serveur) ; auparavant le navigateur fournissait début, fin, auteur
+             et empreinte, et une clôture future ou sans contrôle était acceptée */
+          const nouvelles = ap.filter(x=>!x || !x.id || !av.some(y=>y.id === x.id));
+          if (nouvelles.length){ ignores.push("clotures (une clôture se fait par l'écran Clôture de période)"); continue; }
         }
         /* v51 : une version de règle publiée est immuable (invariant protégé par le serveur, même pour un administrateur) */
         if (k === "reglesV"){ const motif = controleReglesV(ref.reglesV || [], r.reglesV || [], ref); if (motif){ ignores.push("reglesV ("+motif+")"); continue; } }
@@ -402,8 +408,9 @@ function creer(B, PERIM){
           const motif = controleTerms(ref.terms || [], r.terms || [], Array.isArray(r.sites) ? r.sites : (ref.sites || []), sitesP, admin); if (motif){ ignores.push("terms ("+motif+")"); continue; } }
         if (k === "aplans"){ const motif = controleAplans(ref.aplans || [], r.aplans || [], Array.isArray(r.aplages) ? r.aplages : (ref.aplages || []), await employes()); if (motif){ ignores.push("aplans ("+motif+")"); continue; } }
         if (k === "aplages"){ const motif = controleAplages(ref.aplages || [], r.aplages || [], Array.isArray(r.aplans) ? r.aplans : (ref.aplans || [])); if (motif){ ignores.push("aplages ("+motif+")"); continue; } }
-        if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
-        if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
+        if (k === "cals"){ const motif = controleCals(ref.cals || [], r.cals || [], ref) || controleSupprClos("cals", ref.cals || [], r.cals || [], ref, await employes()); if (motif){ ignores.push("cals ("+motif+")"); continue; } }
+        if (k === "jours"){ const motif = controleJours(ref.jours || [], r.jours || [], ref) || controleSupprClos("jours", ref.jours || [], r.jours || [], ref); if (motif){ ignores.push("jours ("+motif+")"); continue; } }
+        if (k === "feries"){ const motif = controleFeriesClos(ref.feries || [], r.feries, clotDe(ref)); if (motif){ ignores.push("feries ("+motif+")"); continue; } }
         if (k === "tt"){ const motif = await controleTt(B, ref.tt || [], r.tt || [], ref); if (motif){ ignores.push("tt ("+motif+")"); continue; } }
         /* correctif 14 : les états servant au contrôle des compteurs sont ceux qui seront réellement retenus (ceux du
            paramétrage si l'envoi d'états n'est pas permis ou refusé) — auparavant ceux envoyés par le navigateur, même
@@ -423,7 +430,7 @@ function creer(B, PERIM){
         if (k === "circuits"){ const motif = await controleCircuits(ref, r.circuits, peutK("profils") ? r.profils : ref.profils, peutK("users") ? r.users : ref.users); if (motif){ ignores.push("circuits ("+motif+")"); continue; } }
         if (k === "regles"){ const motif = controleRegles(ref.regles || [], r.regles); if (motif){ ignores.push("regles ("+motif+")"); continue; } }
         if (k === "sites"){ const motif = await controleSites(ref, r.sites, peutK("convs") ? r.convs : ref.convs); if (motif){ ignores.push("sites ("+motif+")"); continue; } }
-        if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, peutK("sites") ? r.sites : ref.sites); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
+        if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, peutK("sites") ? r.sites : ref.sites) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
         if (!(opts || {}).recette && Array.isArray(r[k]) && r[k].some(z=>z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || ""))) && !(ref[k] || []).some(y=>y && y.id === z.id))){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
         if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
@@ -501,7 +508,7 @@ function creer(B, PERIM){
             if (!okA){ const ue = (await employes()).find(e=>e.id === (P.u || {}).empId); okA = (RANG[((P.profil || {}).droits || {}).ABS] || 0) >= 3 && !(ue && String(ue.mat) === String(x.mat)); }
             if (!okA){ refus++; ignores.push("abs (absence sans demande acceptée)"); continue; } }
           /* correctif 18 : fiche salarié — dates, adresse électronique et rattachements contrôlés */
-          if (c === "emps"){ const m = controleEmp(x, ref, avant, await matsLot()); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
+          if (c === "emps"){ const m = controleEmp(x, ref, avant, await matsLot()) || controleEmpClos(x, avant, clotC); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
           /* modification d'une fiche refusée par la matrice ; les droits d'accès aux zones (écran Droits d'accès) restent
              modifiables par leur propre écran */
           if (!admin && avant && c === "emps" && acteRefuse(c, "modifier")){ const sans = o => { const y = Object.assign({}, o); ["acces", "__v"].forEach(k=>delete y[k]); return JSON.stringify(y); };
@@ -545,6 +552,9 @@ function creer(B, PERIM){
           const avant = JSON.parse(av.data);
           if (!admin && avant.mat && !dansPerim(avant.mat)){ refus++; continue; }
           if (fermee(avant)){ refus++; clotRefus = true; continue; }
+          /* correctif 20 : un salarié présent dans une période clôturée ne se supprime plus (ses journées closes
+             disparaissaient des états) : saisir une date de sortie */
+          if (c === "emps" && clotC && ((avant.entree && avant.entree <= clotC) || await B.get("SELECT 1 x FROM enreg WHERE coll IN ('ptg','abs') AND mat=? AND d<=? LIMIT 1", String(avant.mat || ""), clotC))){ refus++; ignores.push("emps ("+(avant.mat || id)+" : présent dans une période clôturée — saisissez une date de sortie au lieu de supprimer)"); continue; }
           const bv = (colls[c].delv || {})[String(id)];
           if (bv !== undefined && Number(bv) !== Number(avant.__v||0)){ conflits.push({type:"enreg", coll:c, id:String(id), mat:avant.mat||"", suppression:true}); continue; }
           await B.run("DELETE FROM enreg WHERE coll=? AND id=?", c, String(id)); nbEcrits++; (parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]})).suppr++;
@@ -722,6 +732,48 @@ function controleConvs(avant, apres, sites){
 /* correctif 18 : fiche salarié — dates réelles, entrée avant sortie, adresse électronique, site et service existants */
 /* correctif 19 : date réelle aaaa-mm-jj (« 2026-13-45 » levait une exception : erreur 500 au lieu d'un refus) */
 function jourReel(j){ j = String(j == null ? "" : j); if (!/^\d{4}-\d{2}-\d{2}$/.test(j)) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j; }
+/* ===== correctif 20 : période clôturée — les données sources d'une journée close ne changent plus ===== */
+function jjD(j){ return String(j || "").replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1"); }
+function clotDe(ref){ return ((ref && ref.clotures) || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, ""); }
+/* fiche salarié : entrée, sortie, historique du calendrier et des champs datés ne se modifient pas avant la clôture */
+function controleEmpClos(x, avant, clot){
+  if (!clot || !avant) return "";
+  const touche = k => { const a = avant[k] || "", n = x[k] || ""; return a !== n && ((a && a <= clot) || (n && n <= clot)); };
+  if (touche("entree")) return "date d'entrée en période clôturée (jusqu'au "+jjD(clot)+")";
+  if (touche("sortie")) return "date de sortie en période clôturée (jusqu'au "+jjD(clot)+")";
+  const dt = h => String(h.from || h.d || h.du || ""), clos = l => JSON.stringify((Array.isArray(l) ? l : []).filter(h=>h && dt(h) <= clot).map(h=>[dt(h), h.calId || h.id || "", h.v === undefined ? "" : h.v]).sort());
+  /* fiche ancienne sans historique : l'historique créé ensuite par l'application n'est pas une modification */
+  if (Array.isArray(avant.calHist) && avant.calHist.length && clos(avant.calHist) !== clos(x.calHist)) return "calendrier modifié en période clôturée (date d'effet requise après le "+jjD(clot)+")";
+  const ha = avant.hist || {}, hx = x.hist || {};
+  for (const k of Object.keys(ha)) if (Array.isArray(ha[k]) && ha[k].length && clos(ha[k]) !== clos(hx[k])) return "historique « "+k+" » modifié en période clôturée (date d'effet requise après le "+jjD(clot)+")";
+  return "";
+}
+/* type de journée ou calendrier utilisé, supprimé alors qu'une période est clôturée */
+function controleSupprClos(type, avant, apres, ref, emps){
+  if (!clotDe(ref) || !Array.isArray(apres)) return "";
+  const restent = new Set(apres.map(x=>x && x.id)), partis = avant.filter(x=>x && !restent.has(x.id));
+  for (const a of partis){
+    const txt = type === "jours" ? JSON.stringify(ref.cals || []) : JSON.stringify((emps || []).map(e=>[e.calId, e.calHist]));
+    if (txt.indexOf('"'+a.id+'"') >= 0) return "« "+(a.nom || a.id)+" » est utilisé et une période est clôturée : il ne se supprime plus";
+  }
+  return "";
+}
+function controleFeriesClos(avant, apres, clot){
+  if (!clot || !Array.isArray(apres)) return "";
+  const clos = l => JSON.stringify((l || []).filter(f=>f && String(f.d || "") <= clot).map(f=>JSON.stringify(f)).sort());
+  return clos(avant) !== clos(apres) ? "jour férié modifié en période clôturée (jusqu'au "+jjD(clot)+")" : "";
+}
+/* convention : ses paramètres de calcul (sans date d'effet) s'appliquent à toutes les journées ; une fois une période
+   clôturée, ils ne se modifient plus — créer une nouvelle convention ou une version de règle datée (Règles de calcul) */
+const CONV_CALC = ["hebdo","seuil","r1","r2","h1","baseJour","evMode","evStart","cutWeek","cutThresh"];
+function controleConvsClos(avant, apres, clot){
+  if (!clot || !Array.isArray(apres)) return "";
+  const parId = new Map(apres.map(c=>[c && c.id, c]));
+  for (const a of avant){ if (!a || !(a.siteIds || []).length) continue; const n = parId.get(a.id);
+    if (!n) return "convention « "+(a.nom || a.id)+" » utilisée en période clôturée : elle ne se supprime plus";
+    if (CONV_CALC.some(k=>JSON.stringify(a[k]) !== JSON.stringify(n[k]))) return "paramètres de calcul de « "+(a.nom || a.id)+" » figés depuis la clôture du "+jjD(clot)+" : créez une version de règle datée (Règles de calcul)"; }
+  return "";
+}
 function controleEmp(x, ref, avant, mats){
   /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
   const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
@@ -870,7 +922,7 @@ function controleCals(avant, apres, ref){
     const cles = new Set(Object.keys(a.exc||{}).concat(Object.keys(n.exc||{})).filter(k=>k <= clot));
     for (const k of cles) if (JSON.stringify(jour(a, k)) !== JSON.stringify(jour(n, k))) return "exception du "+k+" en période clôturée";
     const bornes = new Set([clot].concat((a.hebdoHist||[]).concat(n.hebdoHist||[]).map(x=>x && x.jusqu).filter(x=>x && x <= clot)));
-    for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+clot+")";
+    for (const k of bornes) if (JSON.stringify(trame(a, k)) !== JSON.stringify(trame(n, k))) return "trame hebdomadaire modifiée en période clôturée (date d'effet requise après le "+jjD(clot)+")";
   }
   return "";
 }

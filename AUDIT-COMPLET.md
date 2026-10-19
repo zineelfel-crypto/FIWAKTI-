@@ -1529,3 +1529,45 @@ Vérifié : sur une copie neuve du serveur et dans Chromium :
 - démonstration (import et annulation sans serveur) et 56 écrans sans erreur JavaScript ; compteurs inchangés (seul 10188 diffère, attendu).
 
 Livraison : FIWAKTI-56.33.11-correctif-19.zip (cumulatif : correctifs 2 à 18 inclus).
+
+## Correctif 20 — Administration › Clôture de période (analyse approfondie)
+
+Trois analyses (déroulement et contrôles ; effets et réouverture ; dossier, écran et droits) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| L1 | La clôture était écrite par le navigateur : début, fin, auteur, date et empreinte acceptés tels quels ; clôture future (jusqu'en 2027) ou sur un seul jour acceptée, irréversible (badgeages des pointeuses ensuite rejetés) ; date invalide acceptée | **critique** | route `POST /api/v1/clotures` : début imposé (lendemain de la dernière clôture ; première clôture : date choisie, avec confirmation si des données antérieures existent), fin réelle antérieure à aujourd'hui, une clôture à la fois ; clôture par synchronisation refusée |
+| L2 | Compte limité à un site, sans drapeau « clôture » ou avec l'écran masqué, clôturant toute l'entreprise | **critique** | administrateur, ou drapeau « clôture » + Pointages « configuration » + périmètre entreprise + matrice de l'écran ; même règle à l'écran |
+| L3 | Seules les journées en anomalie bloquaient : demandes, corrections, badgeages en file ou en revue enfermés (badgeages rejetés, dossiers bloqués à jamais) ; journées non calculées | **haute** | contrôles complets sur toute la période et toute l'entreprise (journées, demandes, corrections, file d'intégration, revue, journées non calculées — calcul lancé, nouvel essai) avec motif détaillé |
+| L4 | Sceau sans valeur : fourni par le navigateur, modifié par une décision d'anomalie ou une fin de validité de règle future ; dossier téléchargé non vérifiable | **haute** | sceau v3 calculé par le serveur (salariés et historique de calendrier, badgeages, absences, décisions, règles hors fin de validité), en flux sans bloquer le serveur ; vérification par le serveur ; dossier exporté par le serveur, vérifiable par un tiers (SHA-256 du texte après la 1re ligne = sceau) |
+| L5 | Résultats d'une période close recalculés : sortie ou entrée antidatée, historique de calendrier, suppression d'un salarié, calendrier ou type de journée, convention, jour férié, décision d'anomalie | **haute** | ces modifications sont refusées en période close (y compris pour l'administrateur pour les décisions) ; résultats calculés des journées closes figés (ni effacés ni recalculés après un changement de paramétrage) |
+| L6 | Écran annonçant une clôture refusée ; aucune trace serveur ; bouton de clôture rapide de la barre Pointage sans contrôle ni sceau ; « réouverture » morte laissant une trace fausse | **haute** | succès annoncé après la réponse du serveur ; audit `cloture.creee`, `cloture.verifiee`, `cloture.dossier`, `cloture.contenu_lu` ; barre Pointage = lien vers l'écran ; réouverture supprimée |
+| L7 | Ajustements de période antérieure : imputation figée à la proposition (jour devenu clos), ajustement perdu un jour sans valeur, compteur inexistant ou écart de 99 999 acceptés | **haute** | imputation recalculée à la validation ; ajustement appliqué même sur un compteur vide ; compteur existant, écart borné |
+| L8 | Contenu détaillé de la période lisible hors périmètre ; restauration d'une sauvegarde rouvrant la période sans le dire | moyenne | contenu détaillé réservé à l'administrateur et tracé ; `cloture.annulee_par_restauration` dans l'audit |
+| L9 | Première clôture limitée au mois en cours (le mois écoulé ne pouvait pas être clôturé) ; « Du » ignoré ; historique tronqué à 6 lignes ; export vide ; dates aaaa-mm-jj ; motifs du serveur en français | moyenne / basse | début = date choisie (défaut : 1er du mois précédent), « Du » figé ensuite ; historique complet ; export de l'historique (CSV) ; dates jj/mm/aaaa ; motifs de blocage traduits |
+
+Non traité (à planifier) :
+- **Paramètres sans date d'effet.** La mutation de site et les formules de compteurs n'ont pas de date d'effet. Elles restent modifiables, et les états d'une période close sont recalculés avec ces valeurs ; les résultats affichés pour les journées closes restent figés.
+- **Résultats purgés.** Les résultats purgés par la conservation (plus de 400 jours) sont recalculés.
+- **PostgreSQL.** Le fonctionnement sous PostgreSQL n'a pas été testé.
+
+Vérifié (copie neuve du serveur, Chromium) :
+- **Refus.**
+  - Clôture par synchronisation, clôture future, du jour même, avec une date invalide ou une première clôture sans début : refusées.
+  - chef.s1, tech.s1 et rh.s1 : refusés (périmètre limité).
+  - Une anomalie dans la période bloque la clôture, avec le motif.
+- **Clôture.**
+  - Clôture admin par l'écran (pré-audit, scellement par le serveur) ; vérification intacte.
+  - Dossier : SHA-256 identique au sceau ; export de l'historique.
+  - La clôture tient après rechargement ; la clôture suivante débute au lendemain.
+- **Après clôture :** décision d'anomalie, entrée antidatée, suppression d'un salarié, convention et jour férié refusés. Contenu détaillé : 403 pour rh.s1. Audit complet.
+- **Gel des résultats.** La journée close garde son résultat (même horodatage de calcul) après un changement global de paramétrage et une mutation de site ; les journées ouvertes sont recalculées ; le sceau reste intact.
+- **20 000 salariés, 880 000 badgeages en septembre.**
+  - Les 600 000 journées manquantes sont calculées en ~2 min 30 ; la clôture répond « en cours de calcul », puis refuse avec les vraies anomalies.
+  - Sceau en 5,8 s et dossier de 42 Mo en 7 s (contre 7 min 30 avant l'optimisation) ; le serveur répond en 1,9 s au plus pendant ce temps ; mémoire 0,6 Go.
+- **Démonstration.**
+  - La clôture fonctionne sans serveur.
+  - Les 56 écrans s'affichent sans erreur.
+  - Compteurs inchangés : seul le salarié 10188 diffère, ce qui était attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-20.zip (cumulatif : correctifs 2 à 19 inclus).

@@ -164,6 +164,9 @@ function creer(o){
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw Object.assign(new Error("Date d'origine invalide."), {code:400});
     if (!clot || d > clot) throw Object.assign(new Error("Cette journée n'est pas clôturée : corrigez-la normalement (l'ajustement est réservé aux périodes clôturées)."), {code:409});
     if (!/^[A-Z0-9_]{1,40}$/.test(comp) || !Number.isFinite(delta) || delta === 0) throw Object.assign(new Error("Compteur et écart (dans l'unité du compteur, non nul) obligatoires."), {code:400});
+    /* correctif 20 : compteur existant et écart borné (un compteur inconnu ou un écart de 99 999 étaient acceptés) */
+    { const ref = await D.referentielLecture() || {}; if (!(ref.arits || []).some(x=>x && String(x.code || "").toUpperCase() === comp)) throw Object.assign(new Error("Compteur inconnu : "+comp+"."), {code:400}); }
+    if (Math.abs(delta) > 744) throw Object.assign(new Error("Écart hors limites (744 au plus, soit un mois entier en heures)."), {code:400});
     if (!String(a.motif||"").trim()) throw Object.assign(new Error("Motif obligatoire."), {code:400});
     /* 56.33.11 : salarié existant et en poste à la date d'origine (un matricule inconnu était accepté) */
     const emp = (await D.employes()).find(e=>String(e.mat) === mat);
@@ -184,6 +187,9 @@ function creer(o){
     if (x.statut !== "propose") throw Object.assign(new Error("Ajustement déjà "+x.statut+"."), {code:409});
     if (x.auteur === login) throw Object.assign(new Error("L'auteur d'un ajustement ne peut pas le valider lui-même."), {code:403});
     const st = decision === "refus" ? "refuse" : "valide";
+    /* correctif 20 : imputation au lendemain de la clôture en vigueur AU MOMENT DE LA VALIDATION (une clôture faite
+       entre la proposition et la validation enfermait l'imputation dans une journée close) */
+    if (st === "valide"){ const cl = await clotureJusqu(); if (cl && x.d_imputation <= cl){ x.d_imputation = plus1(cl); await B.run("UPDATE adjustments SET d_imputation=? WHERE id=?", x.d_imputation, id); } }
     await B.run("UPDATE adjustments SET statut=?, valide_par=?, valide_le=? WHERE id=?", st, login, maintenant(), id);
     if (st === "valide") await D.ecrire("ajust", {id:x.id, mat:x.mat, d:x.d_imputation, compteur:x.compteur, delta:Number(x.delta), origine:x.d_origine, motif:x.motif});
     await audit(login, "ajustement."+st, x.mat+" "+x.d_origine+" "+x.compteur+" "+x.delta+" (imputé au "+x.d_imputation+")");

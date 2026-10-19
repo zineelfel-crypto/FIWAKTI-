@@ -75,6 +75,84 @@ process.on("uncaughtException", e=>{ journal("exception non rattrapée, arrêt :
 const maintenant = () => new Date().toISOString();
 function aujourdhui(){ const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); }
 function ajoutJours(k, j){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+j); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+/* ---- correctif 20 : clôture de période (outils) ---- */
+let CLOTURE_EN_COURS = false;
+function jourValideSrv(j){ if (!/^\d{4}-\d{2}-\d{2}$/.test(String(j || ""))) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j && j >= "2000-01-01"; }
+function jjmmaaaa(j){ return String(j || "").replace(/^(\d{4})-(\d{2})-(\d{2})/, "$3/$2/$1"); }
+function clotDerniere(ref){ return ((ref && ref.clotures) || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, ""); }
+/* droit de clôturer (ou, en lecture, de vérifier / exporter un dossier) : administrateur, ou drapeau « clôture » du
+   profil + Pointages « configuration » + périmètre entreprise + écran Clôture non masqué et acte permis */
+async function droitCloture(ref, C, admin, lecture, acte){
+  if (admin) return {ok:true};
+  const {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {}, RG = {lecture:1, saisie:2, validation:3, config:4};
+  const m = (pr.menus || {}).cloture, a = ((pr.actions || {}).cloture || {})[acte || (lecture ? "lire" : "valider")];
+  if (!pr.cloture && !(lecture && pr.reouverture)) return {ok:false, motif:"Votre profil n'est pas autorisé à clôturer (drapeau « clôture »)."};
+  if (!lecture && !(RG[(pr.droits || {}).PTG] >= 4)) return {ok:false, motif:"Clôturer demande le droit Pointages « configuration »."};
+  if (P.set !== null) return {ok:false, motif:"Une clôture porte sur toute l'entreprise : réservée à un compte sans limite de périmètre."};
+  if (m === "masque" || (!lecture && m === "lecture") || a === false) return {ok:false, motif:"Action non permise par la matrice de l'écran Clôture."};
+  return {ok:true};
+}
+/* tout ce qui empêche de clôturer, sur toute l'entreprise et toute la période */
+async function bloquantsComplets(du, au){
+  const o = Object.assign({}, await WF.bloquantsCloture(du, au));
+  const att = async (coll, champ) => { let n = 0; for (const r of await B.all("SELECT data FROM enreg WHERE coll=? AND data LIKE ?", coll, '%"'+champ+'":"attente"%')){ try { const x = JSON.parse(r.data), d0 = String(x.du || x.d || ""), d1 = String(x.au || x.du || x.d || ""); if (x[champ] === "attente" && d0 && d0 <= au && d1 >= du) n++; } catch(e){} } return n; };
+  o.DEMANDES = await att("dmd", "etat");
+  o.CORRECTIONS = (await att("corrections", "statut")) + (await att("corrections", "etat"));
+  o.FILE = Number(((await B.get("SELECT COALESCE(SUM(nb),0) n FROM ingestion_queue WHERE statut IN ('attente','erreur','en_cours')")) || {}).n || 0);
+  try { o.REVUE = Number(((await B.get("SELECT COUNT(*) n FROM normalized_events WHERE statut='PENDING_REVIEW' AND employee_mat IS NOT NULL AND substr(ts_local,1,10)>=? AND substr(ts_local,1,10)<=?", du, au)) || {}).n || 0);
+    o.inconnus = Number(((await B.get("SELECT COUNT(*) n FROM normalized_events WHERE statut='PENDING_REVIEW' AND employee_mat IS NULL AND substr(ts_local,1,10)>=? AND substr(ts_local,1,10)<=?", du, au)) || {}).n || 0); } catch(e){ o.REVUE = 0; }
+  /* journées non encore calculées : calculées maintenant (ou lancées en arrière-plan), puis recomptées */
+  const emps = await D.employes(), nbJ = (a, b) => Math.round((Date.parse(b+"T00:00:00Z") - Date.parse(a+"T00:00:00Z")) / 86400000) + 1;
+  const attendus = () => emps.reduce((s, e)=>{ const a = e.entree && e.entree > du ? e.entree : du, b = e.sortie && e.sortie < au ? e.sortie : au; return s + (a <= b ? nbJ(a, b) : 0); }, 0);
+  const faits = async () => Number(((await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d>=? AND d<=?", du, au)) || {}).n || 0);
+  if (await faits() < attendus()){ try { await K.assurer(emps.map(e=>String(e.mat)), du, au); } catch(e){} }
+  const manque = attendus() - await faits(); o.NON_CALCULEES = manque > 0 ? manque : 0;
+  if (!o.NON_CALCULEES){ const o2 = await WF.bloquantsCloture(du, au); ["ANOMALIE","CORRIGEE","APPROUVEE_MANAGER"].forEach(k=>{ o[k] = o2[k] || 0; }); }
+  return o;
+}
+function libBloquants(b){
+  const L = {ANOMALIE:"journée(s) en anomalie", CORRIGEE:"journée(s) à valider par le responsable", APPROUVEE_MANAGER:"journée(s) à valider par les RH", DEMANDES:"demande(s) en attente",
+    CORRECTIONS:"correction(s) en attente", FILE:"badgeage(s) en file d'intégration", REVUE:"badgeage(s) en attente de revue (horloge, rattachement)", NON_CALCULEES:"journée(s) en cours de calcul (réessayez dans quelques minutes)"};
+  return Object.keys(L).filter(k=>b[k]).map(k=>b[k]+" "+L[k]).join(", ");
+}
+/* sceau v3 : texte canonique produit par lots ordonnés (matricule, date, identifiant), haché au fil de l'eau ; la
+   boucle rend la main entre deux lots (les autres requêtes, y compris celles des pointeuses, restent servies) */
+async function sceauV3(du, au, sortie){
+  const h = crypto.createHash("sha256"), nb = {ptg:0, absences:0, decisions:0, regles:0, salaries:0};
+  let tampon = "";
+  const ecr = txt => { h.update(txt, "utf8"); if (sortie){ tampon += txt; if (tampon.length > 262144){ sortie(tampon); tampon = ""; } } };
+  const pause = () => new Promise(r=>setImmediate(r));
+  ecr("FIWAKTI-CLOTURE-v3|"+du+"|"+au+"\n");
+  const ref = await D.referentielLecture() || {};
+  ecr("#salaries\n");
+  for (const e of (await D.employes()).slice().sort((a, b)=>String(a.mat) < String(b.mat) ? -1 : String(a.mat) > String(b.mat) ? 1 : 0)){
+    if ((e.entree && e.entree > au) || (e.sortie && e.sortie < du)) continue;
+    const ch = (Array.isArray(e.calHist) ? e.calHist : []).filter(x=>x && String(x.from || "") <= au).map(x=>[String(x.from || ""), String(x.calId || "")]).sort();
+    ecr(JSON.stringify([String(e.mat), e.entree || "", e.sortie || "", ch])+"\n"); nb.salaries++; }
+  /* lecture par lots de 200 matricules (index enreg(coll, mat, d)), tri fait ici (ordre identique sous SQLite et
+     PostgreSQL : comparaison de chaînes JavaScript) ; la boucle rend la main entre deux lots */
+  const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+  const parcourir = async (coll, ligne) => {
+    const mats = (await B.all("SELECT DISTINCT mat FROM enreg WHERE coll=? AND d>=? AND d<=?", coll, du, au)).map(r=>r.mat == null ? "" : String(r.mat)).sort(cmp);
+    for (let i = 0; i < mats.length; i += 200){
+      const part = mats.slice(i, i + 200), vides = part.indexOf("") >= 0, nv = part.filter(m=>m !== "");
+      const rows = (nv.length ? await B.all("SELECT mat, d, id, data FROM enreg WHERE coll=? AND mat IN ("+nv.map(()=>"?").join(",")+") AND d>=? AND d<=?", coll, ...nv, du, au) : [])
+        .concat(vides ? await B.all("SELECT mat, d, id, data FROM enreg WHERE coll=? AND (mat IS NULL OR mat='') AND d>=? AND d<=?", coll, du, au) : []);
+      rows.sort((a, b)=>cmp(String(a.mat == null ? "" : a.mat), String(b.mat == null ? "" : b.mat)) || cmp(String(a.d), String(b.d)) || cmp(String(a.id), String(b.id)));
+      let txt = ""; for (const r of rows){ try { txt += JSON.stringify(ligne(JSON.parse(r.data)))+"\n"; nb[coll === "ptg" ? "ptg" : "absences"]++; } catch(e){} }
+      ecr(txt); await pause();
+    }
+  };
+  ecr("#ptg\n"); await parcourir("ptg", m=>[m.mat || "", String(m.ts || ""), m.sens || "", m.dev || "", m.src || "", m.corr ? 1 : 0]);
+  ecr("#absences\n"); await parcourir("abs", a=>[a.mat || "", a.d || a.du || "", a.au || "", a.tt || ""]);
+  ecr("#decisions\n"); const dec = ref.anoDec || {};
+  Object.keys(dec).filter(id=>{ const d = String(id.split("|")[2] || ""); return d >= du && d <= au; }).sort().forEach(id=>{ ecr(JSON.stringify([id, (dec[id] || {}).dec || "", (dec[id] || {}).min || 0])+"\n"); nb.decisions++; });
+  ecr("#regles\n");
+  (ref.reglesV || []).filter(x=>x && x.statut === "publiee" && x.valid_from <= au && (!x.valid_to || x.valid_to >= du)).map(x=>[x.id, x.code, x.niveau, String(x.cible), JSON.stringify(x.valeur), x.valid_from])
+    .sort((a, b)=>a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).forEach(x=>{ ecr(JSON.stringify(x)+"\n"); nb.regles++; });
+  if (sortie && tampon) sortie(tampon);
+  return {hash:h.digest("hex"), nb};
+}
 
 /* ---------------- configuration ---------------- */
 function lireConfig(){ try { return JSON.parse(fs.readFileSync(F_CONFIG, "utf8").replace(/^\uFEFF/, "")); } catch(e){ return {}; } }   /* 56.33.9 : config.json retouché à la main (BOM) */
@@ -705,6 +783,8 @@ async function restaurerInterne(fichier, par){
   const v = await verifierFichier(f, man);
   if (!v.ok) throw new Error("Cette sauvegarde ne se relit pas correctement ("+v.motif+") : restauration refusée.");
   const securite = await sauvegarder(par, "avant restauration de "+man.fichier);
+  /* correctif 20 : clôtures présentes avant la restauration, pour signaler celles que la sauvegarde ne contient pas */
+  const clotAvant = ((await D.referentielLecture() || {}).clotures || []).filter(Boolean).map(c=>({id:c.id, du:c.du, jusqu:c.jusqu}));
   /* correctif 13 : les entrées d'audit postérieures à la sauvegarde restaurée ne sont plus effacées en silence. Elles sont
      copiées dans un fichier (journaux/audit-avant-restauration-*.jsonl), puis remises dans la base restaurée avec leurs
      sceaux si la chaîne continue (même installation) ; sinon elles restent dans ce fichier et la restauration le dit. */
@@ -723,6 +803,8 @@ async function restaurerInterne(fichier, par){
   initPointeuses(); await chargerModules();
   const reprise = await reprendreAudit(fAud);
   await audit(par, "restauration", man.fichier+" (sauvegarde de sécurité : "+securite.fichier+") — "+reprise.texte);
+  { const ids = new Set(((await D.referentielLecture() || {}).clotures || []).filter(Boolean).map(c=>c.id)), perdues = clotAvant.filter(c=>!ids.has(c.id));
+    if (perdues.length) await audit(par, "cloture.annulee_par_restauration", perdues.map(c=>"du "+jjmmaaaa(c.du || c.jusqu)+" au "+jjmmaaaa(c.jusqu)).join(" ; ")+" — période(s) de nouveau ouverte(s) par la restauration de "+man.fichier); }
   try { const v = await verifierAudit(); fs.appendFileSync(path.join(D_JOURN, "ancrages-audit.log"), maintenant()+" "+(v.ok ? v.dernier+" "+v.n : "RESTAURATION "+JSON.stringify(v.rupture)+" REPRISE")+"\n"); } catch(e){}
   return {restauree:man.fichier, securite:securite.fichier, audit:reprise};
 }
@@ -1155,7 +1237,7 @@ const METRIQUES_ROBUSTESSE = {refus429:0, delais503:0};
 function delaiMax(m, p){
   const c = CONFIG.delais || {}, essai = Number(process.env.FIWAKTI_DELAI_API_MS) || 0;
   if (!p.startsWith("/api/") && !p.startsWith("/iclock")) return 0;
-  if (/^\/api\/(v1\/)?(mise-a-jour|sauvegardes|installation|systeme\/partitionnement|systeme\/postgresql|pointeuses|travaux|exports?)/.test(p) || /\/restaurer$/.test(p)) return 0;
+  if (/^\/api\/(v1\/)?(mise-a-jour|sauvegardes|installation|systeme\/partitionnement|systeme\/postgresql|pointeuses|travaux|exports?|clotures)/.test(p) || /\/restaurer$/.test(p)) return 0;
   if (p === "/api/v1/connexion" || p.startsWith("/api/v1/a2f")) return c.connexion || 15000;
   /* v56.31 : assistant de migration — lecture de gros fichiers ou de bases et imports par lots (au plus 15 min) */
   if (p.startsWith("/api/v1/migration/")) return 900000;
@@ -1798,6 +1880,80 @@ async function traiter(req, res){
     return json(res, 200, {anniversaire:ok, prenom:ok && e ? (e.prenom || "") : ""});
   }
   /* ---- v56.14 : journal des badgeages servi par page (grand effectif) ---- */
+  /* ---- correctif 20 : clôture de période établie par le serveur. Auparavant le navigateur écrivait la rubrique
+     « clotures » avec son propre début, sa fin, son auteur, sa date et son empreinte : une clôture future ou sur un seul
+     jour était acceptée (irréversible), un compte limité à un site clôturait l'entreprise sans le drapeau « clôture »,
+     les demandes, corrections et badgeages en attente étaient enfermés, et aucune trace serveur n'était écrite.
+     Ici : droits (administrateur, ou drapeau « clôture » + Pointages « configuration » + périmètre entreprise + matrice),
+     début imposé (lendemain de la dernière clôture ; première clôture : date choisie), fin antérieure à aujourd'hui,
+     contrôles complets sur toute la période et toute l'entreprise, sceau calculé par le serveur (v3, en flux, sans
+     bloquer les autres requêtes), auteur et date du serveur, audit. Une seule clôture à la fois. ---- */
+  if (p === "/api/v1/clotures" && req.method === "POST"){
+    const ref0 = await D.referentielLecture() || {}, dr = await droitCloture(ref0, C, admin);
+    if (!dr.ok) return erreur(res, 403, dr.motif);
+    const b = await corpsJson(req, 1e5), jusqu = String(b.jusqu || ""), der = clotDerniere(ref0);
+    if (!jourValideSrv(jusqu)) return erreur(res, 400, "Date de fin de clôture invalide.");
+    if (jusqu >= aujourdhui()) return erreur(res, 400, "Une clôture porte sur des journées terminées : au plus tard la veille.");
+    if (der && jusqu <= der) return erreur(res, 409, "La période est déjà clôturée jusqu'au "+jjmmaaaa(der)+".");
+    let du = der ? ajoutJours(der, 1) : String(b.du || "");
+    if (!der && !jourValideSrv(du)) return erreur(res, 400, "Première clôture : date de début requise.");
+    if (du > jusqu) return erreur(res, 400, "La date de début dépasse la date de fin.");
+    if (!der){ const avant = await B.get("SELECT MIN(d) d FROM enreg WHERE coll IN ('ptg','abs','corrections') AND d IS NOT NULL AND d < ?", du);
+      if (avant && avant.d && b.confirmerAnterieur !== true) return json(res, 409, {erreur:"anterieur", message:"Des données existent avant le "+jjmmaaaa(du)+" (depuis le "+jjmmaaaa(avant.d)+") : elles seront aussi fermées. Choisissez le "+jjmmaaaa(avant.d)+" comme début, ou confirmez.", depuis:avant.d}); }
+    if (CLOTURE_EN_COURS) return erreur(res, 409, "Une clôture est déjà en cours.");
+    CLOTURE_EN_COURS = true;
+    try {
+      const bl = await bloquantsComplets(du, jusqu);
+      const nb = Object.keys(bl).filter(k=>k !== "inconnus").reduce((x, k)=>x + (bl[k] || 0), 0);
+      if (nb) return json(res, 409, {erreur:"bloquants", message:"Clôture impossible : "+libBloquants(bl)+" entre le "+jjmmaaaa(du)+" et le "+jjmmaaaa(jusqu)+".", bloquants:bl, du, jusqu});
+      const t0 = Date.now(), sc = await sceauV3(du, jusqu, null);
+      const u = (ref0.users || []).find(x=>x && String(x.login).toLowerCase() === C.login.toLowerCase()) || {};
+      const n = new Date(), z = v => String(v).padStart(2, "0");
+      const rec = {id:"clot_"+crypto.randomBytes(8).toString("hex"), du, jusqu, par:u.nom || C.login, login:C.login, le:aujourdhui()+" "+z(n.getHours())+":"+z(n.getMinutes()), empreinte:sc.hash, algo:"SHA-256", sceau:3,
+        nbPtg:sc.nb.ptg, nbDec:sc.nb.decisions, nbAbs:sc.nb.absences, nbRegles:sc.nb.regles, nbEmps:sc.nb.salaries, serveur:true, inconnus:bl.inconnus || 0};
+      if (b.resume && typeof b.resume === "object"){ const r = {}; ["pct","retards","absences","hsDet","hsVal","hsAtt"].forEach(k=>{ if (Number.isFinite(Number(b.resume[k]))) r[k] = Number(b.resume[k]); }); rec.resume = r; }
+      let version = 0;
+      await B.transaction(async ()=>{
+        const row = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP), ref = JSON.parse(row.valeur);
+        if (clotDerniere(ref) !== der) throw Object.assign(new Error("Une autre clôture vient d'être enregistrée : rechargez."), {code:409});
+        ref.clotures = (ref.clotures || []).concat([rec]); ref.__versions = ref.__versions || {}; version = ref.__versions.clotures = Number(ref.__versions.clotures || 0) + 1;
+        await B.run("UPDATE kv SET valeur=?, version=version+1, maj=?, par=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), C.login, CLE_APP);
+      });
+      try { await K.invalider([], ["clotures"]); } catch(e){ journal("invalidation : "+e.message); }
+      await audit(C.login, "cloture.creee", "du "+jjmmaaaa(du)+" au "+jjmmaaaa(jusqu)+" — sceau v3 SHA-256 "+sc.hash+" — "+sc.nb.ptg+" badgeage(s), "+sc.nb.absences+" absence(s), "+sc.nb.decisions+" décision(s), "+sc.nb.salaries+" salarié(s) ("+(Date.now() - t0)+" ms)"+(bl.inconnus ? " — "+bl.inconnus+" badgeage(s) d'identifiant inconnu non rattaché(s)" : ""), ip);
+      return json(res, 200, {ok:true, cloture:rec, version, clotures:((await D.referentielLecture() || {}).clotures || [])});
+    } catch(e){ return erreur(res, e.code === 409 ? 409 : 500, e.message); }
+    finally { CLOTURE_EN_COURS = false; }
+  }
+  /* vérification d'une clôture : le sceau est recalculé par le serveur sur les données actuelles */
+  if (p === "/api/v1/clotures/verifier" && req.method === "GET"){
+    const ref = await D.referentielLecture() || {}, dr = await droitCloture(ref, C, admin, true);
+    if (!dr.ok) return erreur(res, 403, dr.motif);
+    const rec = (ref.clotures || []).find(x=>x && x.id === String(u.searchParams.get("id") || ""));
+    if (!rec || !rec.empreinte) return erreur(res, 404, "Clôture introuvable ou sans sceau.");
+    let hash;
+    if (rec.sceau === 3) hash = (await sceauV3(rec.du, rec.jusqu, null)).hash;
+    else { const c = await K.contenuPeriode(rec.du || rec.jusqu, rec.jusqu);
+      if (rec.sceau === 2){ c.regles = (ref.reglesV||[]).filter(x=>x && x.statut === "publiee" && x.valid_from <= rec.jusqu && (!x.valid_to || x.valid_to >= (rec.du || rec.jusqu))).map(x=>[x.id, x.code, x.niveau, String(x.cible), JSON.stringify(x.valeur), x.valid_from, x.valid_to||""]).sort((a, b)=>a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0); c.perimetre = "entreprise"; c.version = 2; }
+      hash = crypto.createHash("sha256").update(JSON.stringify(c), "utf8").digest("hex"); }
+    await audit(C.login, "cloture.verifiee", "du "+jjmmaaaa(rec.du || rec.jusqu)+" au "+jjmmaaaa(rec.jusqu)+" — "+(hash === rec.empreinte ? "intacte" : "ÉCART : sceau "+rec.empreinte.slice(0, 16)+"…, recalculé "+hash.slice(0, 16)+"…"), ip);
+    return json(res, 200, {ok:hash === rec.empreinte, attendu:rec.empreinte, calcule:hash, sceau:rec.sceau || 1});
+  }
+  /* dossier de clôture vérifiable par un tiers : 1re ligne = description (JSON), puis le texte exact scellé —
+     SHA-256 de tout ce qui suit la première ligne = empreinte de la clôture. Envoyé en flux (pas de copie en mémoire). */
+  if (p === "/api/v1/clotures/dossier" && req.method === "GET"){
+    const ref = await D.referentielLecture() || {}, dr = await droitCloture(ref, C, admin, true, "exporter");
+    if (!dr.ok) return erreur(res, 403, dr.motif);
+    const rec = (ref.clotures || []).find(x=>x && x.id === String(u.searchParams.get("id") || ""));
+    if (!rec || rec.sceau !== 3) return erreur(res, 404, "Dossier disponible pour les clôtures scellées par le serveur (v3).");
+    res.writeHead(200, {"Content-Type":"application/x-ndjson; charset=utf-8", "Content-Disposition":'attachment; filename="FIWAKTI-cloture-'+rec.du+'_'+rec.jusqu+'.ndjson"', "Cache-Control":"no-store"});
+    res.write(JSON.stringify({application:"FIWAKTI", entreprise:CONFIG.entreprise || "", genere:new Date().toISOString(), par:C.login, cloture:rec,
+      algorithme:"SHA-256 (hexadécimal) du texte UTF-8 qui suit cette première ligne, retours à la ligne compris ; sections #salaries [mat, entrée, sortie, historique du calendrier], #ptg [mat, horodatage, sens, terminal, origine, corrigé], #absences [mat, date, fin, type], #decisions [clé, décision, minutes], #regles [id, code, niveau, cible, valeur, effet] ; lignes triées par matricule, date et identifiant"})+"\n");
+    const sc = await sceauV3(rec.du, rec.jusqu, txt=>res.write(txt));
+    res.end();
+    await audit(C.login, "cloture.dossier", "du "+jjmmaaaa(rec.du)+" au "+jjmmaaaa(rec.jusqu)+" — "+(sc.hash === rec.empreinte ? "conforme au sceau" : "ÉCART avec le sceau"), ip);
+    return;
+  }
   /* ---- correctif 19 : import de badgeages par le serveur, par lots (5 000 lignes au plus par appel). Auparavant tout le
      fichier partait dans un seul enregistrement global : 100 000 lignes bloquaient le serveur 15 min, une réponse 503
      arrivait alors que tout était écrit (conflits au renvoi), un badgeage du terminal à la même minute était supprimé ou
@@ -2324,7 +2480,11 @@ async function traiter(req, res){
     else if (p === "/api/v1/calcul/contenu"){
       /* empreinte de clôture : sur toute l'entreprise, jamais sur un périmètre */
       const ref = await D.referentielLecture() || {}; const pr = (ref.profils||[]).find(x=>x.id === ((ref.users||[]).find(u=>String(u.login).toLowerCase() === C.login.toLowerCase())||{}).profilId);
-      if (!admin && !(pr && (pr.cloture || pr.reouverture))) return erreur(res, 403, "Réservé aux profils autorisés à clôturer.");
+      /* correctif 20 : même droit que la clôture (périmètre entreprise) ; contenu détaillé réservé à l'administrateur et tracé */
+      { const dr = await droitCloture(ref, C, admin, true); if (!dr.ok) return erreur(res, 403, dr.motif); }
+      if (q.complet && !admin) return erreur(res, 403, "Le contenu détaillé de la période est réservé à l'administrateur (dossier de clôture : écran Clôture).");
+      if (!jourValideSrv(q.du) || !jourValideSrv(q.au) || q.du > q.au) return erreur(res, 400, "Période invalide.");
+      if (q.complet) await audit(C.login, "cloture.contenu_lu", "du "+jjmmaaaa(q.du)+" au "+jjmmaaaa(q.au), ip);
       const c = await K.contenuPeriode(q.du, q.au);
       /* v52 : sceau v2 — la période scellée inclut aussi les versions de règles applicables et le périmètre */
       if (q.v === "2"){ const refS = await D.referentielLecture() || {};

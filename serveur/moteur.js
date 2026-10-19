@@ -169,11 +169,20 @@ async function calculer(mats, du, au, horodatage, source){
      ensuite — dans la transaction, puis une seconde fois après validation (sous PostgreSQL, une invalidation validée
      pendant la transaction ne voit pas encore ces lignes) */
   const f = filtre(mats);
+  /* correctif 20 : journées d'une période clôturée déjà calculées = résultats figés (un paramétrage modifié ensuite ne
+     les recalcule plus) ; seules les journées closes manquantes sont écrites */
+  const clot = (doc.clotures || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+  let horsClos = "", hcA = [];
+  if (clot && du <= clot){
+    const fig = new Set((await B.all("SELECT mat, d FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql, du, au < clot ? au : clot, ...f.a)).map(r=>r.mat+"|"+r.d));
+    if (fig.size){ for (let i = lignes.length - 1; i >= 0; i--) if (fig.has(lignes[i][0]+"|"+lignes[i][1])) lignes.splice(i, 1); }
+    horsClos = " AND d > ?"; hcA = [clot];
+  }
   const perimes = async () => { if (!horodatage) return; try {
-    await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql+" AND calc=? AND EXISTS (SELECT 1 FROM calc_invalidations i WHERE (i.mat=calc_jour.mat OR i.mat='*') AND (i.d=calc_jour.d OR i.d='*') AND i.ts > ?)", du, au, ...f.a, horodatage, horodatage);
+    await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql+horsClos+" AND calc=? AND EXISTS (SELECT 1 FROM calc_invalidations i WHERE (i.mat=calc_jour.mat OR i.mat='*') AND (i.d=calc_jour.d OR i.d='*') AND i.ts > ?)", du, au, ...f.a, ...hcA, horodatage, horodatage);
   } catch(e){ /* table créée à la première invalidation */ } };
   await B.transaction(async ()=>{
-    await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql, du, au, ...f.a);
+    await B.run("DELETE FROM calc_jour WHERE d>=? AND d<=? AND "+f.sql+horsClos, du, au, ...f.a, ...hcA);
     for (let i = 0; i < lignes.length; i += 400){
       const lot = lignes.slice(i, i+400);
       const ph = lot.map(()=>"(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(",");

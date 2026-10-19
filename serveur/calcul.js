@@ -182,7 +182,9 @@ function creer(B, D, opts){
     if ((refCles||[]).length || !(opts && opts.pointeuse)) GENERATION++; else GEN_P++;
     try { const paires = (refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0) ? [["*", "*"]] : Array.from(new Set(touches||[])).map(t=>t.split("|")).filter(x=>x[0] && x[1]);
       if (paires.length) await noterInvalidations(paires); } catch(e){ if (opts && opts.journal) opts.journal("invalidations : "+e.message); }
-    if ((refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0)){ await B.run("DELETE FROM calc_jour"); return; }
+    /* correctif 20 : résultats des journées clôturées conservés (figés) */
+    const clotI = ((await D.referentielLecture() || {}).clotures || []).reduce((x, c)=>c && c.jusqu > x ? c.jusqu : x, "");
+    if ((refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0)){ if (clotI) await B.run("DELETE FROM calc_jour WHERE d > ?", clotI); else await B.run("DELETE FROM calc_jour"); return; }
     /* 56.33.11 : badgeage reçu d'une pointeuse pour hier ou aujourd'hui → journée marquée « à rafraîchir » (date de
        calcul vidée) au lieu d'être effacée : les écrans servent la valeur précédente quelques secondes et le recalcul
        part en tâche de fond (rafraîchissement d'hier et d'aujourd'hui), au lieu de faire attendre chaque écran à l'heure
@@ -195,8 +197,9 @@ function creer(B, D, opts){
       if (!parJour.has(d)) parJour.set(d, []); parJour.get(d).push(mat);
     }
     const lots = (l, n) => { const r = []; for (let i = 0; i < l.length; i += n) r.push(l.slice(i, i + n)); return r; };
-    for (const p of lots(tous, 500)) await B.run("DELETE FROM calc_jour WHERE mat IN ("+p.map(()=>"?").join(",")+")", ...p);
+    for (const p of lots(tous, 500)) await B.run("DELETE FROM calc_jour WHERE mat IN ("+p.map(()=>"?").join(",")+")"+(clotI ? " AND d > ?" : ""), ...p, ...(clotI ? [clotI] : []));
     for (const [d, mats] of parJour) for (const p of lots(mats, 500)){
+      if (clotI && d <= clotI) continue;
       const dans = "mat IN ("+p.map(()=>"?").join(",")+")";
       if (recent && d >= recent) await B.run("UPDATE calc_jour SET calc='' WHERE d=? AND "+dans, d, ...p);
       else await B.run("DELETE FROM calc_jour WHERE d=? AND "+dans, d, ...p);
