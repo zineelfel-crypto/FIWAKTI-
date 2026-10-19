@@ -221,6 +221,8 @@ function creer(B, PERIM){
     const ref = await referentielLecture() || {};
     const {P, emps} = await perimetreDe(ref, login);
     const vue = PERIM.vue(Object.assign({}, ref, {emps}), login).doc;
+    /* correctif 24 : réglages d'envoi d'e-mails (serveur, identifiant, expéditeur) réservés à l'administrateur */
+    if (!opts.admin && !(P.profil && PERIM.niveauProfil(P.profil) === "admin") && vue.secu && vue.secu.smtp) vue.secu = Object.assign({}, vue.secu, {smtp:{}});
     const nb = P.set === null ? emps.length : P.set.size;
     const grand = nb > (opts.seuil || 1000);
     /* grand effectif : le navigateur ne garde que les deux derniers jours ; le reste est calculé par le serveur */

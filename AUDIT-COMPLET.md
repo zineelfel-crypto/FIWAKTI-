@@ -1684,3 +1684,47 @@ Vérifié :
 - **Démonstration et non-régression.** Écran inchangé en démonstration ; 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-23.zip (cumulatif : correctifs 2 à 22 inclus).
+
+## Correctif 24 — Administration › Sécurité (analyse approfondie)
+
+Deux analyses (serveur et application réelle de la politique ; écran et usages) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| S1 | Mot de passe du compte d'envoi des e-mails envoyé à n'importe quel serveur : par un test avec d'autres réglages (en clair avec « sécurité : aucune » ou une valeur inconnue), ou en enregistrant d'abord un nouvel hôte | **haute** | jamais joint à des réglages d'essai différents (ressaisie exigée) ; effacé dès que le serveur, le port, la sécurité ou l'identifiant changent ; sécurité en liste fermée ; pas d'authentification en clair hors du poste |
+| S2 | Aucune validation de la politique : `tentatives -1` (plus de verrouillage), `verrouillageMin 1e7` (compte bloqué jusqu'en 2045), `minLen 10000` (plus aucun changement de mot de passe possible), session de 416 jours, codes temporaires éternels, rubrique remplacée par une chaîne, champ de 3 Mo | **haute** | `controleSecu` (bornes de l'écran, types, clés connues, envoi d'e-mails) ; politique bornée aussi à la lecture (`secuDe`) ; saisie bornée à l'écran |
+| S3 | Valeurs mal typées lues à l'envers (`exigerMix "false"` = vrai, `historique "abc"` = désactivé, `expirationJours "30j"` = désactivé) | moyenne | booléens stricts et entiers bornés |
+| S4 | Comptes du portail impossibles à générer avec 20 000 salariés (« 0 » à l'écran) ; création automatique uniquement dans le navigateur | **haute** | génération par le serveur (`/api/v1/comptes/portail`, `/generer`) et création automatique à l'enregistrement d'un salarié |
+| S5 | Test d'envoi servant à sonder le réseau interne (ports quelconques, 169.254.169.254) ; audit sans destination | moyenne | ports 25, 465, 587, 2525 ; adresses lien local et métadonnées refusées après résolution ; serveur et destinataire tracés ; identité TLS vérifiée sur le nom saisi (STARTTLS) |
+| S6 | Tout enregistrement de la politique (même du seul envoi d'e-mails) fermait toutes les sessions ; aucun détail dans l'audit | moyenne | sessions fermées seulement si les règles de session se durcissent ; `securite.politique` (avant → après, sans secret) |
+| S7 | « 0 = sans limite » du portail traité comme 30 jours ; option « majuscule et chiffre » ignorée ; date du mot de passe initial fournie par le navigateur | moyenne | appliqués par le serveur ; date jamais future |
+| S8 | Mot de passe temporaire réutilisable (« usage unique » annoncé) | basse | une seule session ouverte avec lui |
+| S9 | « Rester connecté » sans effet au-delà de l'inactivité | moyenne | session mémorisée soumise à la seule durée maximale |
+| S10 | Page de connexion en français seulement ; règles affichées incomplètes (mots courants, nom de l'entreprise, historique) ; aide « matricule » toujours affichée | moyenne | page trilingue (fr, en, ar en RTL), messages fréquents traduits, règles identiques au serveur, aide selon le réglage du portail |
+| S11 | Écran : compteurs faux en mode serveur (double authentification du compte ignorée, première connexion, expirés), bandeau « Démonstration » sur le serveur réel, textes décrivant un lien par e-mail inexistant, sessions plafonnées à 500 sans total ni recherche, règles de l'écran interne différentes du serveur | basse / moyenne | compteurs du serveur, bandeau en démonstration seulement, textes réécrits dans les trois langues, total et recherche par compte, règles alignées |
+| S12 | Réglages d'envoi (serveur, identifiant, expéditeur) servis à tous les comptes ; message de verrouillage sans date ; table des tentatives par adresse jamais purgée | basse | réservés à l'administrateur ; date jj/mm/aaaa ; purge |
+
+Non traité : double authentification imposée globalement (elle se règle par profil ou par compte) ; envoi vers des relais d'adresses privées (10/8, 192.168/16) conservé, car c'est le cas habituel d'un relais d'entreprise ; messages du serveur rédigés en français (les plus fréquents sont traduits sur la page de connexion).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - 11 politiques piégées refusées.
+  - Mot de passe d'envoi : non transmis à un faux serveur pour des réglages d'essai, et effacé au changement d'hôte.
+  - Adresses 169.254.x et port 22 refusés.
+  - Sessions conservées après une modification de l'envoi d'e-mails, fermées quand la durée maximale baisse.
+  - Mot de passe temporaire refusé à la deuxième session.
+  - Comptes du portail générés par le serveur, puis connexion au matricule et changement de mot de passe.
+  - Création automatique à l'enregistrement d'un salarié.
+  - Réglages d'envoi masqués au portail.
+  - Audit détaillé.
+- **Chromium.**
+  - Compteurs du serveur ; génération : 12 comptes, puis 0 restant.
+  - Saisie hors bornes refusée avec message.
+  - Connexion en arabe (RTL) et en anglais, message d'erreur traduit.
+  - Aucune erreur JavaScript.
+- **Démonstration et non-régression.**
+  - Écran inchangé en démonstration.
+  - 56 écrans sans erreur JavaScript.
+  - Seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-24.zip (cumulatif : correctifs 2 à 23 inclus).

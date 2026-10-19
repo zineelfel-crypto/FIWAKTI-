@@ -5,54 +5,54 @@
 <div class="cnx-cadre">
 <aside class="vitrine" aria-hidden="true">
   <p class="vit-sur">FIWAKTI</p>
-  <h2>Temps, RH et sécurité,<br>au même endroit.</h2>
+  <h2 data-i="vitT">Temps, RH et sécurité,<br>au même endroit.</h2>
   <ul>
-    <li><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span><b>Pointage fiable</b>Badgeages, anomalies et validations en temps réel.</span></li>
-    <li><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span><b>Accès maîtrisés</b>Zones, droits et pointeuses synchronisés.</span></li>
-    <li><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.6c1.4.6 2.3 1.9 2.7 4.4"/></svg><span><b>Équipes suivies</b>Absences, compétences, formation et santé.</span></li>
+    <li><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i="vit1"><b>Pointage fiable</b>Badgeages, anomalies et validations en temps réel.</span></li>
+    <li><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span data-i="vit2"><b>Accès maîtrisés</b>Zones, droits et pointeuses synchronisés.</span></li>
+    <li><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.6c1.4.6 2.3 1.9 2.7 4.4"/></svg><span data-i="vit3"><b>Équipes suivies</b>Absences, compétences, formation et santé.</span></li>
   </ul>
-  <p class="vit-pied">Vos données restent sur votre serveur, chiffrées et sauvegardées chaque nuit.</p>
+  <p class="vit-pied" data-i="vitPied">Vos données restent sur votre serveur, chiffrées et sauvegardées chaque nuit.</p>
 </aside>
 <main class="boite etroite">
-  <div class="tete"><svg class="mono" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#047857"/><path d="M13 29V11h13M13 20h9" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="28.5" cy="26.5" r="5.2" fill="none" stroke="#A7F3D0" stroke-width="2"/></svg><div><div class="logo">FIWAKTI</div><div class="sous" id="entreprise">Temps · RH · Sécurité</div></div></div>
+  <div class="tete"><svg class="mono" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#047857"/><path d="M13 29V11h13M13 20h9" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="28.5" cy="26.5" r="5.2" fill="none" stroke="#A7F3D0" stroke-width="2"/></svg><div><div class="logo">FIWAKTI</div><div class="sous" id="entreprise">Temps · RH · Sécurité</div></div><select id="langue" aria-label="Langue / Language / اللغة" style="margin-inline-start:auto;width:auto"><option value="fr">Français</option><option value="en">English</option><option value="ar">العربية</option></select></div>
   <div class="corps">
     <form id="fConnexion" autocomplete="on">
-      <h1>Connexion</h1>
-      <label for="login">Identifiant ou matricule</label><input id="login" autocomplete="username" required>
-      <label for="mdp">Mot de passe</label><div class="mdp-z"><input id="mdp" type="password" autocomplete="current-password" required><button type="button" class="voir" id="voirMdp" aria-pressed="false" aria-controls="mdp">Afficher</button></div>
-      <div class="aide">Première connexion : identifiant et mot de passe = votre matricule.</div>
-      <label id="memoriserBloc" hidden style="font-weight:400;display:flex;gap:8px;align-items:center"><input type="checkbox" id="memoriser" style="width:auto"> Rester connecté sur ce poste</label>
+      <h1 data-i="cnxT">Connexion</h1>
+      <label for="login" data-i="login">Identifiant ou matricule</label><input id="login" autocomplete="username" required>
+      <label for="mdp" data-i="mdp">Mot de passe</label><div class="mdp-z"><input id="mdp" type="password" autocomplete="current-password" required><button type="button" class="voir" id="voirMdp" aria-pressed="false" aria-controls="mdp" data-i="afficher">Afficher</button></div>
+      <div class="aide" id="aidePortail" data-i="aidePortail">Première connexion : identifiant et mot de passe = votre matricule.</div>
+      <label id="memoriserBloc" hidden style="font-weight:400;display:flex;gap:8px;align-items:center"><input type="checkbox" id="memoriser" style="width:auto"> <span data-i="memoriser">Rester connecté sur ce poste</span></label>
       <div id="msg"></div>
-      <div class="actions"><span class="aide">Mot de passe oublié ? Adressez-vous au service RH.</span><button class="pri" type="submit">Se connecter</button></div>
-      <p class="aide" style="margin-top:14px"><a href="#" id="lienJeton">Intervention du fournisseur</a></p>
+      <div class="actions"><span class="aide" data-i="oubli">Mot de passe oublié ? Adressez-vous au service RH.</span><button class="pri" type="submit" data-i="seConnecter">Se connecter</button></div>
+      <p class="aide" style="margin-top:14px"><a href="#" id="lienJeton" data-i="fournisseur">Intervention du fournisseur</a></p>
     </form>
     <form id="fJeton" hidden>
-      <p>Collez le jeton d'intervention remis par votre fournisseur. Valable une heure, pour ce serveur seulement, il n'ouvre que l'écran de licence.</p>
-      <label for="jetonF">Jeton d'intervention</label><textarea id="jetonF" rows="4" spellcheck="false" autocomplete="off" style="width:100%;box-sizing:border-box;font-family:monospace"></textarea>
+      <p data-i="jetonH">Collez le jeton d'intervention remis par votre fournisseur. Valable une heure, pour ce serveur seulement, il n'ouvre que l'écran de licence.</p>
+      <label for="jetonF" data-i="jeton">Jeton d'intervention</label><textarea id="jetonF" rows="4" spellcheck="false" autocomplete="off" style="width:100%;box-sizing:border-box;font-family:monospace"></textarea>
       <div id="msg4"></div>
-      <div class="actions"><button type="button" id="jetonAnnuler">Retour</button><button class="pri" type="submit">Ouvrir l'écran de licence</button></div>
+      <div class="actions"><button type="button" id="jetonAnnuler" data-i="retour">Retour</button><button class="pri" type="submit" data-i="ouvrirLic">Ouvrir l'écran de licence</button></div>
     </form>
     <form id="fA2f" hidden>
-      <h1>Vérification en deux étapes</h1>
+      <h1 data-i="a2fT">Vérification en deux étapes</h1>
       <div id="a2fEnrol" hidden>
-        <p>Votre profil exige un code de vérification. Dans votre application d'authentification (Google Authenticator, Microsoft Authenticator, FreeOTP…), ajoutez un compte avec cette clé :</p>
+        <p data-i="a2fH">Votre profil exige un code de vérification. Dans votre application d'authentification (Google Authenticator, Microsoft Authenticator, FreeOTP…), ajoutez un compte avec cette clé :</p>
         <p class="mono" id="a2fCle" style="font-size:18px;letter-spacing:1px;word-break:break-all"></p>
-        <p class="aide">Ou ouvrez ce lien sur le téléphone : <a id="a2fUri" href="#">ajouter à l'application</a>. Gardez cette clé confidentielle.</p>
+        <p class="aide"><span data-i="a2fLien">Ou ouvrez ce lien sur le téléphone :</span> <a id="a2fUri" href="#" data-i="a2fAjout">ajouter à l'application</a>. <span data-i="a2fConf">Gardez cette clé confidentielle.</span></p>
       </div>
-      <label for="a2fCode">Code à 6 chiffres affiché par l'application</label><input id="a2fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+      <label for="a2fCode" data-i="a2fCode">Code à 6 chiffres affiché par l'application</label><input id="a2fCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
       <div id="msg3"></div>
-      <div class="actions"><button type="button" id="a2fAnnuler">Annuler</button><button class="pri" type="submit">Vérifier</button></div>
+      <div class="actions"><button type="button" id="a2fAnnuler" data-i="annuler">Annuler</button><button class="pri" type="submit" data-i="verifier">Vérifier</button></div>
     </form>
     <form id="fChanger" hidden>
-      <h1>Changement de mot de passe</h1>
+      <h1 data-i="chgT">Changement de mot de passe</h1>
       <p id="raison">Première connexion : choisissez votre mot de passe personnel. L'accès à l'application s'ouvre ensuite.</p>
-      <label for="actuel">Mot de passe actuel</label><input id="actuel" type="password" autocomplete="current-password">
-      <div class="aide">À la première connexion, c'est votre matricule.</div>
-      <label for="nouveau">Nouveau mot de passe</label><input id="nouveau" type="password" autocomplete="new-password">
-      <label for="conf">Confirmation</label><input id="conf" type="password" autocomplete="new-password">
+      <label for="actuel" data-i="actuel">Mot de passe actuel</label><input id="actuel" type="password" autocomplete="current-password">
+      <div class="aide" id="aideActuel" data-i="aideActuel">À la première connexion, c'est votre matricule.</div>
+      <label for="nouveau" data-i="nouveau">Nouveau mot de passe</label><input id="nouveau" type="password" autocomplete="new-password">
+      <label for="conf" data-i="conf">Confirmation</label><input id="conf" type="password" autocomplete="new-password">
       <ul class="regles" id="regles"></ul>
       <div id="msg2"></div>
-      <div class="actions"><button type="button" id="annuler">Annuler</button><button class="pri" type="submit" id="valider" disabled>Valider et accéder</button></div>
+      <div class="actions"><button type="button" id="annuler" data-i="annuler">Annuler</button><button class="pri" type="submit" id="valider" disabled data-i="valider">Valider et accéder</button></div>
     </form>
   </div>
 </main>

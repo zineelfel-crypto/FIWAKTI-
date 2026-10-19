@@ -580,6 +580,33 @@ async function synchroniserComptes(doc, par, empIds){
   }
 }
 
+/* correctif 24 : comptes du portail salarié générés par le serveur — l'écran ne voyait que les salariés chargés dans le
+   navigateur (aucun avec 20 000 salariés : « Générer les comptes manquants (0) ») et la création automatique ne tournait
+   que dans le navigateur. ids (facultatif) : salariés à examiner. */
+function portailProfil(ref){ const pr = secuDe(ref).premiere, L = (ref.profils || []).filter(p=>p && PERIM.niveauProfil(p) === "simple");
+  return L.find(p=>p.id === pr.profilId) || L.find(p=>p.id === "prEmp") || L[0] || null; }
+async function portailEligibles(ref, ids){
+  const pr = secuDe(ref).premiere, j = aujourdhui(), users = (ref.users || []).filter(Boolean);
+  const aCompte = new Set(users.map(u=>u.empId).filter(Boolean));
+  return (await D.employes()).filter(e=>e && e.mat && !(e.sortie && e.sortie <= j) && (!pr.portailSeul || e.portail) && !aCompte.has(e.id) && (!ids || ids.has(String(e.id))));
+}
+async function portailGenerer(par, ids, ip){
+  const ref = await D.referentiel(); if (!ref) return {crees:0, conflits:[]};
+  const prof = portailProfil(ref); if (!prof) return {crees:0, conflits:[], motif:"aucun profil de niveau « simple » pour le portail"};
+  const elig = await portailEligibles(ref, ids); if (!elig.length) return {crees:0, conflits:[]};
+  const logins = new Set((ref.users || []).filter(Boolean).map(u=>String(u.login).trim().toLowerCase())), j = aujourdhui(), crees = [], conflits = [];
+  for (const e of elig){ const login = String(e.mat).trim(); if (logins.has(login.toLowerCase())){ conflits.push(login); continue; } logins.add(login.toLowerCase());
+    crees.push({id:"u"+crypto.randomBytes(8).toString("hex"), login, nom:((e.prenom || "")+" "+(e.nom || "")).trim() || login, empId:e.id, profilId:prof.id, langue:"fr", actif:true, deleg:[], delegPerim:[], perim:{},
+      mdpTemp:true, mdpTempLe:j, mdpChangeRaison:"premiere", mustChangePassword:true, mdpDefini:false}); }
+  if (crees.length){
+    ref.users = (ref.users || []).concat(crees); const v = ref.__versions || (ref.__versions = {}); v.users = (Number(v.users) || 0) + 1;
+    await synchroniserComptes({users:ref.users, profils:ref.profils, emps:await D.employes(), secu:ref.secu}, par, new Set(crees.map(u=>String(u.empId))));
+    await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), maintenant(), CLE_APP);
+    await audit(par, "comptes.portail_generes", crees.length+" compte(s) du portail créé(s) — profil « "+String(prof.nom || prof.id).slice(0, 60)+" »"+(conflits.length ? " ; identifiant déjà pris : "+conflits.slice(0, 20).join(", ")+(conflits.length > 20 ? "…" : "") : ""), ip);
+  }
+  return {crees:crees.length, conflits};
+}
+
 /* ---------------- licence (signature ECDSA P-256 de l'éditeur) ---------------- */
 function empreinteMachine(){
   const macs = Object.values(os.networkInterfaces()).flat().filter(i=>i && !i.internal && i.mac && i.mac !== "00:00:00:00:00:00").map(i=>i.mac).sort();
@@ -684,7 +711,9 @@ async function sessionDe(req){
   if (!s.csrf){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
   const secu = secuDe(await D.referentielLecture());
   const n = Date.now(), inactif = Math.max(1, Number(secu.sessionInactivite)||30)*60000, max = Math.max(1, Number(secu.sessionMax)||12)*3600000;
-  if (n - Number(s.vu) > inactif || n - Number(s.cree) > max){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
+  /* correctif 24 : « rester connecté » — la session mémorisée n'expire pas par inactivité (seule la durée maximale
+     s'applique), sinon l'option était sans effet au-delà de l'inactivité */
+  if ((!Number(s.persistant) && n - Number(s.vu) > inactif) || n - Number(s.cree) > max){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
   if (n - Number(s.vu) > 15000) await B.run("UPDATE sessions SET vu=? WHERE id=?", n, s.id);
   const c = await compteDe(s.login);
   if (!c || !Number(c.actif) || await salarieSorti(c)){ await B.run("DELETE FROM sessions WHERE id=?", s.id); return null; }
@@ -1478,7 +1507,9 @@ async function traiter(req, res){
 
   /* ---- connexion ---- */
   if (p === "/connexion" || p === "/connexion.html") return fichierStatique(res, PUBLIC, "connexion.html");
-  if (p === "/api/v1/connexion/options"){ const s = secuDe(await D.referentielLecture()); return json(res, 200, {memoriser:!!s.memoriser, minLen:Math.max(8, Number(s.minLen)||12), exigerMix:!!s.exigerMix, entreprise:CONFIG.entreprise||""}); }
+  if (p === "/api/v1/connexion/options"){ const s = secuDe(await D.referentielLecture()); return json(res, 200, {memoriser:!!s.memoriser, minLen:Math.max(8, Number(s.minLen)||12), exigerMix:!!s.exigerMix, entreprise:CONFIG.entreprise||"",
+    /* correctif 24 : règles affichées = règles appliquées (mots courants, historique) ; aide « matricule » selon le réglage du portail */
+    interdireCourants:s.interdireCourants !== false, courants:s.interdireCourants !== false ? COURANTS : [], historique:s.historique, aideConnexion:s.premiere.aideConnexion !== false}); }
   if (p === "/api/v1/connexion" && req.method === "POST"){
     /* correctif 24 : entrées périmées purgées (la table grossissait sans fin derrière un proxy ou un balayage d'adresses) */
     if (ESSAIS_IP.size > 5000){ const lim = Date.now() - 15*60000; for (const [k, v] of ESSAIS_IP) if (v.t < lim) ESSAIS_IP.delete(k); if (ESSAIS_IP.size > 50000) ESSAIS_IP.clear(); }
@@ -1765,6 +1796,9 @@ async function traiter(req, res){
       await synchroniserComptes(docC, C.login, ids || undefined);
       if (JSON.stringify(vus) !== avant){ r.ref.users = docC.users; await B.run("UPDATE kv SET valeur=?, version=version+1 WHERE cle=?", JSON.stringify(r.ref), CLE_APP); }
     }
+    /* correctif 24 : création automatique des comptes du portail pour les salariés enregistrés (réglage « auto ») */
+    if (paquet.colls && paquet.colls.emps && (paquet.colls.emps.put || []).length && secuDe(r.ref).premiere.auto === true){
+      try { await portailGenerer(C.login, new Set((paquet.colls.emps.put || []).map(x=>x && String(x.id)).filter(Boolean)), ip); } catch(e){ journal("comptes du portail : "+e.message); } }
     try { await K.invalider(r.touches, r.refCles); } catch(e){ journal("invalidation : "+e.message); }
     if ((r.nouvellesNotifs || []).length) notifierParCourriel(r.nouvellesNotifs, C.login).catch(e=>journal("notifications par e-mail : "+e.message));
     if ((r.refCles||[]).indexOf("terms") >= 0) try { await GERER_PUSH(); } catch(e){}
@@ -1775,6 +1809,11 @@ async function traiter(req, res){
       const fa = plat(secuAvant, ""), fb = plat(ap, "");
       new Set(Object.keys(fa).concat(Object.keys(fb))).forEach(k=>{ if (JSON.stringify(fa[k]) !== JSON.stringify(fb[k])) ch.push(k+" "+String(fa[k] === undefined ? "—" : fa[k]).slice(0, 60)+" → "+String(fb[k] === undefined ? "—" : fb[k]).slice(0, 60)); });
       if (ch.length) await audit(C.login, "securite.politique", ch.join(" ; ").slice(0, 1500), ip);
+      /* correctif 24 : serveur d'envoi, port, sécurité ou identifiant changés → mot de passe enregistré effacé (il partait
+         vers le nouveau serveur, choisi par celui qui modifie les réglages) : il doit être ressaisi */
+      const sa = secuAvant.smtp || {}, sb = ap.smtp || {};
+      if (["hote", "port", "securite", "user"].some(k=>String(sa[k] == null ? "" : sa[k]) !== String(sb[k] == null ? "" : sb[k])) && await meta("smtp_mdp")){
+        await meta("smtp_mdp", ""); await audit(C.login, "courriel.mot_de_passe", "effacé : serveur d'envoi modifié (à ressaisir)", ip); }
       if (ap.sessionMax < secuAvant.sessionMax || ap.sessionInactivite < secuAvant.sessionInactivite || (secuAvant.memoriser && !ap.memoriser)){
         const n = (await B.run("DELETE FROM sessions WHERE id<>?", sess.sid)).n;
         if (n) await audit(C.login, "sessions.revoquees", "règles de session durcies : "+n+" session(s) fermée(s)", ip); }
@@ -2864,6 +2903,10 @@ async function traiter(req, res){
      la connexion restait refusée) */
   /* correctif 23 : changement de mot de passe imposé à la prochaine connexion (le bouton de l'écran ne changeait que le
      paramétrage : la connexion répondait « changer: false ») */
+  if (p === "/api/v1/comptes/portail" && req.method === "GET"){ const ref = await D.referentielLecture() || {}, pr = portailProfil(ref);
+    return json(res, 200, {eligibles:(await portailEligibles(ref)).length, profil:pr ? {id:pr.id, nom:pr.nom} : null}); }
+  if (p === "/api/v1/comptes/portail/generer" && req.method === "POST"){ const r = await portailGenerer(C.login, null, ip);
+    if (r.motif) return erreur(res, 400, "Comptes du portail : "+r.motif+"."); return json(res, 200, Object.assign({ok:true}, r)); }
   if (p === "/api/v1/comptes/forcer" && req.method === "POST"){
     const b = await corpsJson(req), c = await compteDe(b.login);
     if (!c) return erreur(res, 404, "Compte inconnu du serveur.");
@@ -2890,7 +2933,11 @@ async function traiter(req, res){
     const lim = q.limite ? Math.min(2000, Math.max(1, Number(q.limite) || 200)) : 0, dec = Math.max(0, Number(q.decalage) || 0);
     const where = w.length ? " WHERE "+w.join(" AND ") : "";
     if (q.resume === "1"){ const n = async sql=>Number(((await B.get(sql, maintenant())) || {}).n || 0);
-      return json(res, 200, {resume:{invite:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND etat='sans_mdp' AND ?<>''"), verrouille:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND verrou IS NOT NULL AND verrou>?")}}); }
+      const sq = secuDe(await D.referentielLecture()), vj = sq.premiere.validiteJours, lim = Date.now() - sq.resetValiditeMin*60000; let prem = 0, exp = 0;
+      for (const c of await B.all("SELECT etat, temp_le FROM comptes WHERE actif=1 AND etat IN ('temp_matricule','temp_code','temp_code_utilise')")){
+        const perime = c.etat === "temp_matricule" ? vj > 0 && c.temp_le && new Date(c.temp_le).getTime() + vj*86400000 < Date.now() : c.etat === "temp_code_utilise" || (c.temp_le && new Date(c.temp_le).getTime() < lim);
+        if (perime) exp++; else prem++; }
+      return json(res, 200, {resume:{invite:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND etat='sans_mdp' AND ?<>''"), verrouille:await n("SELECT COUNT(*) AS n FROM comptes WHERE actif=1 AND verrou IS NOT NULL AND verrou>?"), premiere:prem, expires:exp}}); }
     const comptes = await B.all("SELECT login,nom,role,actif,etat,changer,derniere,verrou,a2f_actif FROM comptes"+where+" ORDER BY login"+(lim ? " LIMIT "+lim+" OFFSET "+dec : ""), ...a);
     return json(res, 200, lim ? {comptes, total:Number(((await B.get("SELECT COUNT(*) AS n FROM comptes"+where, ...a)) || {}).n || 0)} : {comptes});
   }
@@ -2900,7 +2947,8 @@ async function traiter(req, res){
     const qs = Object.fromEntries(u.searchParams.entries()), limS = Math.min(5000, Math.max(1, Number(qs.limite) || 500));
     const l = qs.login ? await B.all("SELECT id, login, cree, vu, ip, agent, a2f_ok, persistant FROM sessions WHERE lower(login)=lower(?) ORDER BY vu DESC LIMIT "+limS, String(qs.login).trim())
       : await B.all("SELECT id, login, cree, vu, ip, agent, a2f_ok, persistant FROM sessions ORDER BY vu DESC LIMIT "+limS);
-    return json(res, 200, {sessions:l.map(s=>({ref:s.id.slice(0,12), login:s.login, cree:new Date(Number(s.cree)).toISOString(), vu:new Date(Number(s.vu)).toISOString(), ip:s.ip, agent:String(s.agent||"").slice(0,80),
+    const totalS = Number(((qs.login ? await B.get("SELECT COUNT(*) AS n FROM sessions WHERE lower(login)=lower(?)", String(qs.login).trim()) : await B.get("SELECT COUNT(*) AS n FROM sessions")) || {}).n || 0);
+    return json(res, 200, {total:totalS, sessions:l.map(s=>({ref:s.id.slice(0,12), login:s.login, cree:new Date(Number(s.cree)).toISOString(), vu:new Date(Number(s.vu)).toISOString(), ip:s.ip, agent:String(s.agent||"").slice(0,80),
       moi:s.id === sess.sid, verifiee:s.a2f_ok === null || Number(s.a2f_ok) === 1, persistante:!!Number(s.persistant)}))});
   }
   if (p === "/api/v1/sessions/revoquer" && req.method === "POST"){
