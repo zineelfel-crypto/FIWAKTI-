@@ -75,12 +75,14 @@ function valAt(e, code, d){
   let v = ""; h.slice().sort((a,b)=>String(a.d).localeCompare(String(b.d))).forEach(x=>{ if (x.d <= d) v = x.v; }); return v;
 }
 function scopeEmps(C, pr){
-  const inclus = pr.inclus || [], exclus = pr.exclus || [];
+  /* correctif 22 : ensembles (recherche en temps constant) — 15 000 inclus × 20 000 salariés prenaient 646 ms à
+     chaque calcul de périmètre */
+  const inclus = new Set(pr.inclus || []), exclus = new Set(pr.exclus || []), sites = new Set(pr.sites || []);
   return C.emps.filter(e=>{
-    if (exclus.indexOf(e.id) >= 0) return false;
-    if (inclus.indexOf(e.id) >= 0) return true;
+    if (exclus.has(e.id)) return false;
+    if (inclus.has(e.id)) return true;
     if (pr.mode === "liste") return false;
-    if ((pr.sites||[]).length && pr.sites.indexOf(e.siteId) < 0) return false;
+    if (sites.size && !sites.has(e.siteId)) return false;
     if ((pr.depts||[]).length && !pr.depts.some(id=>sousArbreSet(C, id).has(e.deptId))) return false;
     const f = pr.filtres || {};
     for (const code in f){ if (f[code] && valAt(e, code, C.jour) !== f[code]) return false; }
@@ -112,9 +114,9 @@ function perimDirect(C, u){
   } else {
     const depts = new Set();
     p.depts.forEach(id=>(p.sousDepts ? sousArbre(C, id) : [id]).forEach(x=>depts.add(x)));
-    const sitesAjout = p.sites.length && !p.sitesFiltre;
+    const sitesAjout = p.sites.length && !p.sitesFiltre, matsS = new Set(p.mats.map(String)), sitesS = new Set(p.sites), termsS = new Set(p.terms);
     C.emps.forEach(e=>{
-      if (depts.has(e.deptId) || p.mats.indexOf(e.mat) >= 0 || (sitesAjout && p.sites.indexOf(e.siteId) >= 0) || (e.rds||[]).some(r=>p.terms.indexOf(r) >= 0)) crit.add(e.mat);
+      if (depts.has(e.deptId) || matsS.has(String(e.mat)) || (sitesAjout && sitesS.has(e.siteId)) || (e.rds||[]).some(r=>termsS.has(r))) crit.add(e.mat);
     });
     if (me && p.equipe) equipeDe(C, me.mat, p.equipe === "directe").forEach(m=>crit.add(m));
     if (p.sitesFiltre && p.sites.length){
@@ -123,8 +125,11 @@ function perimDirect(C, u){
       else { const siteDe = new Map(C.emps.map(e=>[e.mat, e.siteId])); Array.from(crit).forEach(m=>{ if (p.sites.indexOf(siteDe.get(m)) < 0 && p.mats.indexOf(m) < 0) crit.delete(m); }); }
     }
   }
-  p.exclus.forEach(m=>crit.delete(m));
+  /* correctif 22 : l'équipe directe est ajoutée AVANT les exclusions (une exclusion explicite l'emportait pas :
+     un salarié exclu de son périmètre restait visible parce qu'il faisait partie de l'équipe directe) */
   if (me) equipeDe(C, me.mat, true).forEach(m=>crit.add(m));
+  p.exclus.forEach(m=>crit.delete(m));
+  if (pr && (pr.exclus || []).length){ const ex = new Set(pr.exclus); C.emps.forEach(e=>{ if (ex.has(e.id)) crit.delete(e.mat); }); }
   crit.forEach(m=>set.add(m));
   return set;
 }
@@ -164,10 +169,14 @@ function termsVus(doc, P){
   const garder = r >= 1 ? TERMS_LECTURE : TERMS_AUCUN;
   return Object.assign({}, doc, {terms:doc.terms.map(T=>{ const o = {}; garder.forEach(k=>{ if (T && k in T) o[k] = T[k]; }); return o; })});
 }
+/* correctif 22 : données personnelles masquées pour un profil sans le drapeau « Accès aux données sensibles » (le
+   drapeau n'avait aucun effet : CIN, téléphone, adresse étaient envoyés en clair) ou marqué « masqué » ; jamais pour un
+   administrateur ; jamais pour sa propre fiche */
+function masquePerso(P){ return !!(P && P.profil) && !(P.u && P.u.role === "admin") && niveauProfil(P.profil) !== "admin" && (P.profil.persoMasque === true || P.profil.sensibles !== true); }
 function vue(doc, login){
   const P = perimetre(doc, login);
   doc = termsVus(doc, P);
-  if (P.u && P.set === null && !(P.profil && P.profil.persoMasque)) return {doc, P};   /* accès global */
+  if (P.u && P.set === null && !masquePerso(P)) return {doc, P};   /* accès global */
   const o = Object.assign({}, doc);
   const ok = m => P.set !== null && P.set !== undefined ? P.set.has(m) : true;
   if (P.set){
@@ -175,8 +184,8 @@ function vue(doc, login){
     PAR_MAT.forEach(k=>{ if (Array.isArray(doc[k])) o[k] = doc[k].filter(x=>!x || !x.mat || ok(x.mat)); });
     if (Array.isArray(doc.journal)) o.journal = doc.journal.filter(x=>!x || !x.mat || ok(x.mat));
   }
-  if (P.profil && P.profil.persoMasque)
-    o.emps = (o.emps||doc.emps||[]).map(e=>{ const c = Object.assign({}, e); CHAMPS_PERSO.forEach(k=>{ if (c[k]) c[k] = MASQUE; }); return c; });
+  if (masquePerso(P))
+    o.emps = (o.emps||doc.emps||[]).map(e=>{ if (e && P.u && e.id === P.u.empId) return e; const c = Object.assign({}, e); CHAMPS_PERSO.forEach(k=>{ if (c[k]) c[k] = MASQUE; }); return c; });
   /* comptes des autres : identité seulement, jamais leur périmètre détaillé */
   /* 56.33.11 : avec un périmètre limité, les comptes du portail salarié (niveau « simple ») des salariés hors
      périmètre ne sont plus envoyés (6,9 Mo à chaque ouverture pour un chef de site avec 50 000 comptes) : restent son
@@ -238,7 +247,7 @@ function fusionner(courant, recu, login, baseVue){
       if (immuable && (avant || actuel)){ refus++; continue; }
       if (!permis(actuel || avant, x)){ refus++; continue; }
       let v = x;
-      if (cle === "emps" && P.profil && P.profil.persoMasque && actuel){ v = Object.assign({}, x); CHAMPS_PERSO.forEach(k=>{ if (v[k] === MASQUE) v[k] = actuel[k]; }); }
+      if (cle === "emps" && masquePerso(P) && actuel){ v = Object.assign({}, x); CHAMPS_PERSO.forEach(k=>{ if (v[k] === MASQUE) v[k] = actuel[k]; }); }
       if (i !== undefined) cur[i] = v; else { pos.set(id, cur.length); cur.push(v); }
     }
     /* suppressions */
@@ -260,4 +269,4 @@ function fusionUsers(stockes, recus, moi){
     const c = Object.assign({}, u); USER_SOI.forEach(k=>{ if (k in r) c[k] = r[k]; }); return c;
   });
 }
-module.exports = {perimetre, vue, fusionner, niveauProfil, peutEcrire, CHAMPS_PERSO, MASQUE};
+module.exports = {perimetre, vue, fusionner, niveauProfil, peutEcrire, masquePerso, CHAMPS_PERSO, MASQUE};

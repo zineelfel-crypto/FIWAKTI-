@@ -75,6 +75,17 @@ process.on("uncaughtException", e=>{ journal("exception non rattrapée, arrêt :
 const maintenant = () => new Date().toISOString();
 function aujourdhui(){ const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); }
 function ajoutJours(k, j){ const d = new Date(+k.slice(0,4), +k.slice(5,7)-1, +k.slice(8,10)+j); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+/* correctif 22 : droit de lecture d'un module (profil EN VIGUEUR, délégation comprise) et écran non masqué — les routes
+   de lecture des salariés, des badgeages et des journées calculées ne vérifiaient que le périmètre : un profil « aucun
+   droit » obtenait fiches (CIN, téléphone), badgeages et journées */
+async function droitLire(C, admin, mods, ecrans){
+  if (admin) return true;
+  const ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login), pr = P.profil || {};
+  if (PERIM.niveauProfil(pr) === "admin") return true;
+  const RG = {lecture:1, saisie:2, validation:3, config:4};
+  if (!mods.some(m=>(RG[(pr.droits || {})[m]] || 0) >= 1)) return false;
+  return !(ecrans && ecrans.length && ecrans.every(v=>(pr.menus || {})[v] === "masque"));
+}
 /* ---- correctif 20 : clôture de période (outils) ---- */
 let CLOTURE_EN_COURS = false;
 function jourValideSrv(j){ if (!/^\d{4}-\d{2}-\d{2}$/.test(String(j || ""))) return false; const d = new Date(j+"T00:00:00Z"); return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === j && j >= "2000-01-01"; }
@@ -458,8 +469,9 @@ async function a2fRequise(login){
   if (!u) return false;
   const j = new Date().toISOString().slice(0,10);
   const dl = (u.deleg||[]).find(x=>x.du <= j && j <= x.au && x.profilId);
-  const pr = (ref.profils||[]).find(x=>x.id === (dl ? dl.profilId : u.profilId));
-  return !!((pr && pr.a2f) || u.a2fForce);
+  /* correctif 22 : exigée si le profil propre OU le profil délégué l'exige (une délégation d'un profil sans double
+     authentification l'annulait) */
+  return [u.profilId, dl && dl.profilId].filter(Boolean).some(id=>((ref.profils||[]).find(x=>x && x.id === id) || {}).a2f === true) || !!u.a2fForce;
 }
 const compteDe = login => B.get("SELECT * FROM comptes WHERE lower(login)=lower(?)", String(login||"").trim());
 /* 56.33.11 : compte rattaché à un salarié sorti (date de sortie passée) — refusé à la connexion et à chaque requête,
@@ -1684,8 +1696,11 @@ async function traiter(req, res){
     }
     /* correctif 21 : sites avant l'envoi, pour tracer précisément ce qui change (fuseau compris) */
     const sitesAvant = paquet.ref && Array.isArray(paquet.ref.sites) ? (((await D.referentielLecture()) || {}).sites || []) : null;
+    const profilsAvant = paquet.ref && Array.isArray(paquet.ref.profils) ? (((await D.referentielLecture()) || {}).profils || []) : null;
     const r = await D.synchroniser(C.login, paquet, {admin, recette:!!CONFIG.recette});
     if (!r.ok) return erreur(res, 403, (r.ignores||[]).join(", "));
+    /* correctif 22 : un profil modifié change le rôle des comptes qui le portent (administrateur promu ou rétrogradé) */
+    if ((r.refCles || []).indexOf("profils") >= 0 && !(paquet.ref && paquet.ref.users)){ try { await synchroniserComptes({users:r.ref.users, profils:r.ref.profils, emps:await D.employes(), secu:r.ref.secu}, C.login); } catch(e){ journal("comptes : "+e.message); } }
     if ((paquet.ref && paquet.ref.users) || (paquet.colls && paquet.colls.emps)){
       /* 56.33.11 : enregistrement de salariés seul → comptes de ces salariés seulement (50 000 comptes examinés et deux
          copies de 8 Mo comparées à chaque fiche modifiée auparavant) */
@@ -1708,6 +1723,21 @@ async function traiter(req, res){
     /* correctif 21 : paramétrage modifié tracé par le serveur (rubriques), détail des sites créés, modifiés, supprimés */
     { const cles = (r.refCles || []).filter(k=>["anoDec","corbeille","journal","notifs"].indexOf(k) < 0);
       if (cles.length) await audit(C.login, "parametrage.modifie", cles.join(", ").slice(0, 300), ip);
+      /* correctif 22 : profils — détail tracé (droits, niveau, drapeaux, périmètre) ; double authentification nouvellement
+         exigée : les sessions ouvertes des comptes concernés doivent la passer */
+      if (profilsAvant && (r.refCles || []).indexOf("profils") >= 0){ const av = new Map(profilsAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).profils || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [], a2fOn = [];
+        const res = x => JSON.stringify({sites:x.sites || [], depts:x.depts || [], filtres:x.filtres || {}, mode:x.mode || "regle", inclus:(x.inclus || []).length, exclus:(x.exclus || []).length});
+        ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé « "+String(x.nom || id).slice(0, 60)+" » "+JSON.stringify(x.droits || {})+" niveau "+(x.niveauMenu || "")); if (x.a2f === true) a2fOn.push(id); return; }
+          if (JSON.stringify(a) === JSON.stringify(x)) return; const ch = [];
+          Object.keys(Object.assign({}, a.droits, x.droits)).forEach(m=>{ if ((a.droits || {})[m] !== (x.droits || {})[m]) ch.push(m+" "+((a.droits || {})[m] || "—")+"→"+((x.droits || {})[m] || "—")); });
+          ["niveauMenu","a2f","sensibles","persoMasque","cloture","reouverture"].forEach(k=>{ if (a[k] !== x[k]) ch.push(k+" "+String(a[k])+"→"+String(x[k])); });
+          if (res(a) !== res(x)) ch.push("périmètre "+res(x).slice(0, 200)); if (JSON.stringify(a.menus || {}) !== JSON.stringify(x.menus || {})) ch.push("écrans"); if (JSON.stringify(a.actions || {}) !== JSON.stringify(x.actions || {})) ch.push("matrice des actions");
+          l.push("modifié « "+String(x.nom || id).slice(0, 60)+" » — "+ch.join(" ; ")); if (x.a2f === true && a.a2f !== true) a2fOn.push(id); });
+        av.forEach((a, id)=>{ if (!ap.has(id)) l.push("supprimé « "+String(a.nom || id).slice(0, 60)+" »"); });
+        if (l.length) await audit(C.login, "profils.modifies", l.join(" | ").slice(0, 2000), ip);
+        if (a2fOn.length){ const j0 = aujourdhui(), log = ((r.ref || {}).users || []).filter(u=>u && (a2fOn.indexOf(u.profilId) >= 0 || (u.deleg || []).some(d=>d && a2fOn.indexOf(d.profilId) >= 0 && d.du <= j0 && j0 <= d.au))).map(u=>String(u.login));
+          for (const lg of log) await B.run("UPDATE sessions SET a2f_ok=0 WHERE lower(login)=lower(?) AND id<>?", lg, sess.sid);
+          if (log.length) await audit(C.login, "a2f.exigee", log.length+" compte(s) : sessions ouvertes soumises à la double authentification", ip); } }
       if (sitesAvant && (r.refCles || []).indexOf("sites") >= 0){ const av = new Map(sitesAvant.filter(x=>x && x.id).map(x=>[x.id, x])), ap = new Map(((r.ref || {}).sites || []).filter(x=>x && x.id).map(x=>[x.id, x])), l = [];
         ap.forEach((x, id)=>{ const a = av.get(id); if (!a){ l.push("créé "+(x.code || id)+" « "+String(x.nom || "").slice(0, 60)+" » ("+(x.tz || "")+")"); return; }
           const ch = ["code","nom","ville","tz","actif"].filter(k=>JSON.stringify(a[k]) !== JSON.stringify(x[k])).map(k=>k+" : "+String(a[k] === undefined ? "" : a[k]).slice(0, 60)+" → "+String(x[k] === undefined ? "" : x[k]).slice(0, 60));
@@ -1899,6 +1929,25 @@ async function traiter(req, res){
      début imposé (lendemain de la dernière clôture ; première clôture : date choisie), fin antérieure à aujourd'hui,
      contrôles complets sur toute la période et toute l'entreprise, sceau calculé par le serveur (v3, en flux, sans
      bloquer les autres requêtes), auteur et date du serveur, audit. Une seule clôture à la fois. ---- */
+  /* ---- correctif 22 : aperçu du périmètre d'un profil calculé par le SERVEUR (règle réellement appliquée) — l'aperçu de
+     l'écran était calculé dans le navigateur avec une autre règle (niveau administrateur ou simple, profil sans règle,
+     périmètre propre du compte) et sur les seules fiches chargées (faux en grand effectif) ---- */
+  if (p === "/api/v1/profils/apercu" && req.method === "POST"){
+    if (!admin) return erreur(res, 403, "Réservé aux administrateurs.");
+    const b = await corpsJson(req, 2e6), pr = b.profil && typeof b.profil === "object" && !Array.isArray(b.profil) ? b.profil : null;
+    if (!pr || !/^[A-Za-z0-9_.:-]{1,80}$/.test(String(pr.id))) return erreur(res, 400, "Profil attendu.");
+    const ref = await D.referentielLecture() || {}, emps = await D.employes(), ID = "__apercu__";
+    const comptes = (ref.users || []).filter(x=>x && (x.profilId === pr.id || (x.deleg || []).some(d=>d && d.profilId === pr.id)));
+    const cible = b.login ? (ref.users || []).find(x=>x && String(x.login).toLowerCase() === String(b.login).toLowerCase()) : null;
+    const u = cible ? Object.assign({}, cible, {login:ID, profilId:pr.id, deleg:[]}) : {id:ID, login:ID, profilId:pr.id, empId:"", perim:{}, actif:true};
+    const doc = Object.assign({}, ref, {emps, profils:(ref.profils || []).filter(x=>x && x.id !== pr.id).concat([pr]), users:(ref.users || []).concat([u])});
+    let P; try { P = PERIM.perimetre(doc, ID); } catch(e){ return erreur(res, 400, "Profil invalide : "+e.message); }
+    const niv = PERIM.niveauProfil(pr), q = (cible && cible.perim) || {}, perimPropre = !!(q.tout || (q.depts||[]).length || (q.mats||[]).length || (q.sites||[]).length || (q.terms||[]).length || q.equipe);
+    const regle = pr.mode === "liste" || (pr.sites||[]).length || (pr.depts||[]).length || (pr.inclus||[]).length || Object.keys(pr.filtres||{}).some(k=>pr.filtres[k]);
+    const mats = P.set === null ? null : Array.from(P.set), parMat = new Map(emps.map(e=>[String(e.mat), e]));
+    const ex = (mats === null ? emps : mats.map(m=>parMat.get(String(m))).filter(Boolean)).slice(0, 12).map(e=>({mat:e.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), siteId:e.siteId || ""}));
+    return json(res, 200, {n:mats === null ? emps.length : mats.length, tous:mats === null, total:emps.length, regle:niv === "admin" ? "admin" : niv === "simple" ? "simple" : perimPropre ? "compte" : regle ? "profil" : "equipe", exemples:ex, comptes:comptes.length, login:cible ? cible.login : null});
+  }
   if (p === "/api/v1/clotures" && req.method === "POST"){
     const ref0 = await D.referentielLecture() || {}, dr = await droitCloture(ref0, C, admin);
     if (!dr.ok) return erreur(res, 403, dr.motif);
@@ -2074,6 +2123,7 @@ async function traiter(req, res){
     await audit(C.login, "import.annule", "badgeages — "+supprimes+" supprimé(s), "+conservesIds.length+" conservé(s)"+(modifies ? " dont "+modifies+" modifié(s) depuis l'import" : ""), ip);
     return json(res, 200, {ok:true, demandes:l.length, supprimes, conserves:conservesIds.length, conservesIds, conflits:modifies});
   }
+  if (p === "/api/v1/pointages" && req.method === "GET" && !(await droitLire(C, admin, ["PTG"], ["ptg","mvts","suivi"]))) return erreur(res, 403, "Droit de consultation des pointages requis.");
   if (p === "/api/v1/pointages" && req.method === "GET"){
     const q = Object.fromEntries(u.searchParams.entries()), ref = await D.referentielLecture() || {}, {P} = await D.perimetreDe(ref, C.login);
     const au = /^\d{4}-\d{2}-\d{2}$/.test(q.au||"") ? q.au : aujourdhui(), du = /^\d{4}-\d{2}-\d{2}$/.test(q.du||"") ? q.du : ajoutJours(au, -1);
@@ -2159,6 +2209,7 @@ async function traiter(req, res){
     return json(res, 200, {ok:true, effaces:n});
   }
   /* ---- v56.3 : annuaire paginé (liste, fiche, lot de matricules, valeurs des filtres), périmètre appliqué ---- */
+  if ((p === "/api/v1/employes" || p.startsWith("/api/v1/employes/")) && p !== "/api/v1/employes/lot" && !(await droitLire(C, admin, ["EMP"], ["emp","org"]))) return erreur(res, 403, "Droit de consultation des salariés requis.");
   if (p === "/api/v1/employes" || p.startsWith("/api/v1/employes/")){
     /* 56.33.11 : annuaire conservé tant que la couche de données est la même (ordres de tri préparés réutilisés) */
     if (!AN_I || AN_I.D !== D) AN_I = {D, an:ANNUAIRE.creer({D})};
@@ -2473,6 +2524,7 @@ async function traiter(req, res){
   if (p === "/api/v1/metriques"){ if (!admin) return erreur(res, 403, "Réservé aux administrateurs."); return json(res, 200, await metriques()); }
 
   /* ---- calculs du serveur (grands effectifs) ---- */
+  if (/^\/api\/v1\/calcul\/(journees|anomalies|synthese|presences|preaudit)$/.test(p) && !(await droitLire(C, admin, ["PTG","ETA"], ["ptg","anomalies","dash","suivi","etats","cloture"]))) return erreur(res, 403, "Droit de consultation des pointages ou des états requis.");
   if (p.startsWith("/api/v1/calcul/")){
     const q = Object.fromEntries(u.searchParams.entries());
     const a = aujourdhui();

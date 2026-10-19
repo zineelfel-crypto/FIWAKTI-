@@ -57,7 +57,7 @@ function creer(o){
   const masquer = e => { const c = Object.assign({}, e); PERIM.CHAMPS_PERSO.forEach(k=>{ if (c[k]) c[k] = PERIM.MASQUE; }); return c; };
   async function perimetre(login){ const ref = await (D.referentielLecture || D.referentiel)() || {}; const {P, emps} = await D.perimetreDe(ref, login);
     const l = emps.filter(e=>P.set === null || P.set.has(String(e.mat)));
-    return {P, emps:P.profil && P.profil.persoMasque ? l.map(masquer) : l}; }
+    return {P, emps:PERIM.masquePerso(P) ? l.map(e=>P.u && e.id === P.u.empId ? e : masquer(e)) : l}; }
   function filtrer(l, q, tous){
     if (q.site) l = l.filter(e=>e.siteId === q.site);
     if (q.dept) l = l.filter(e=>e.deptId === q.dept);
@@ -100,8 +100,12 @@ function creer(o){
     const cle = JSON.stringify([String(login).toLowerCase(), q.site||"", q.dept||"", q.fonction||"", q.statut||"", String(q.q||""), q.chef||"", q.contrat||"", q.tri === "mat" ? "mat" : "", auj()]);
     let m = LISTES.get(cle);
     if (!m || m.tous !== tous || m.P !== P){ m = {tous, P, l:filtrerRapide(tous, P.set, q)}; if (LISTES.size > 500) LISTES.clear(); LISTES.set(cle, m); }
-    const masque = !!(P.profil && P.profil.persoMasque);
-    return {total:m.l.length, offset:off, lignes:m.l.slice(off, off + lim).map(e=>LIGNE(e, masque))};
+    const masque = PERIM.masquePerso(P);
+    /* correctif 22 : profil masqué — recherche limitée au nom, au prénom et au matricule (le CIN, l'e-mail ou le
+       téléphone se reconstituaient chiffre par chiffre par la recherche) */
+    let lm = m.l; const s0 = String(q.q || "").trim().toLowerCase();
+    if (masque && s0){ const mots = s0.split(/\s+/).filter(Boolean); lm = lm.filter(e=>{ const t = ((e.nom||"")+" "+(e.prenom||"")+" "+(e.mat||"")).toLowerCase(); return t.indexOf(s0) >= 0 || mots.every(w=>t.indexOf(w) >= 0); }); }
+    return {total:lm.length, offset:off, lignes:lm.slice(off, off + lim).map(e=>LIGNE(e, masque && !(P.u && e.id === P.u.empId)))};
   }
   async function fiche(login, mat){ const {emps} = await perimetre(login); return emps.find(e=>String(e.mat) === String(mat)) || null; }
   async function lot(login, mats, ids){ const {emps} = await perimetre(login), s = new Set((mats||[]).slice(0, 500).map(String)), si = new Set((ids||[]).slice(0, 500).map(String));

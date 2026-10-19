@@ -238,6 +238,12 @@ function creer(B, PERIM){
        son équipe directe (le reste à la demande par /api/v1/employes) */
     const pagine = grand && opts.annuairePagine !== false;
     let empsVue = vue.emps || [];
+    /* correctif 22 : sans droit sur un module, seules ses propres données de ce module sont envoyées (un profil
+       « aucun droit » recevait tous les badgeages, demandes et fiches de son périmètre) */
+    const RGm = m => opts.admin || !P.profil || PERIM.niveauProfil(P.profil) === "admin" ? 4 : (RANG[(P.profil.droits || {})[m]] || 0);
+    const uMoi = (ref.users || []).find(x=>x && String(x.login).toLowerCase() === String(login).toLowerCase()), eMoi = uMoi && uMoi.empId ? emps.find(e=>e.id === uMoi.empId) : null;
+    const fMoi = filtreMat(new Set(eMoi ? [String(eMoi.mat)] : [])), MODC = {ptg:"PTG", corrections:"PTG", ajust:"PTG", bio:"PTG", dmd:"ABS", abs:"ABS"};
+    if (RGm("EMP") === 0 && PERIM.niveauProfil(P.profil) !== "simple") empsVue = empsVue.filter(e=>(eMoi && String(e.mat) === String(eMoi.mat)) || (eMoi && String(e.chefMat || "") === String(eMoi.mat)));
     if (pagine){ const u = (ref.users||[]).find(x=>x.login === login), moi = u && emps.find(e=>e.id === u.empId);
       empsVue = moi ? empsVue.filter(e=>String(e.mat) === String(moi.mat) || String(e.chefMat||"") === String(moi.mat)) : []; }
     for (const c of COLLS){
@@ -258,7 +264,8 @@ function creer(B, PERIM){
         const mats = Array.from(new Set(empsVue.map(e=>String(e.mat))));
         if (!mats.length){ parties.push('"'+c+'":[]'); continue; }
         sql += " AND mat IN ("+mats.map(()=>"?").join(",")+")"; a.push(...mats);
-      } else { sql += f.sql; a.push(...f.a); }
+      } else if (MODC[c] && RGm(MODC[c]) === 0){ sql += fMoi.sql.replace("mat IS NULL OR mat='' OR ", ""); a.push(...fMoi.a); }
+      else { sql += f.sql; a.push(...f.a); }
       if (c === "audit" && !sysLu) sql += " AND mat IS NOT NULL AND mat<>'' AND mat<>'—'";
       /* correctif 16 : journal des événements (écran réservé au droit Système) non envoyé aux autres comptes */
       if (c === "journal" && !sysLu){ parties.push('"journal":[]'); continue; }
@@ -326,7 +333,9 @@ function creer(B, PERIM){
     const ref = refL ? Object.assign({}, refL, {__versions:Object.assign({}, refL.__versions || {})}) : await referentiel() || {};
     const {P} = await perimetreDe(refL || ref, login);
     /* 56.33.11 : administrateur = compte administrateur (rôle tenu par le serveur) ou profil de niveau admin existant */
-    const admin = !!P.u && ((opts && opts.admin === true) || (!!P.profil && PERIM.niveauProfil(P.profil) === "admin"));
+    /* correctif 22 : administrateur = rôle du compte vérifié par le serveur (opts.admin), jamais le profil reçu en
+       DÉLÉGATION : un compte délégué « Admin » pour une journée se réécrivait administrateur pour de bon */
+    const admin = !!P.u && !!opts && opts.admin === true;
     if (!P.u) return {ok:false, ignores:["compte inconnu"]};
     const dansPerim = m => admin || P.set === null || (P.set && P.set.has(String(m)));
     /* correctif 18 : un nouveau salarié est dans le périmètre si la règle du compte l'y place (site, service, équipe) —
@@ -337,7 +346,7 @@ function creer(B, PERIM){
     const corbSrv = [];
     /* correctif 18 : matrice des droits par écran appliquée par le serveur pour la création et la suppression des
        salariés et des badgeages (auparavant seulement masquée dans le navigateur) */
-    const ECRAN_COLL = {emps:"emp", ptg:"ptg", corrections:"ptg"};
+    const ECRAN_COLL = {emps:"emp", ptg:"ptg", corrections:"ptg", dmd:"dmd", abs:"dmd"};
     const acteEcran = (v, acte) => { const m = (P.profil.menus || {})[v], a = ((P.profil.actions || {})[v] || {})[acte]; return m === "masque" || m === "lecture" || a === false; };
     /* correctif 19 : un envoi de l'écran Import (marqueur paquet.import) respecte AUSSI la matrice de l'écran Import */
     const acteRefuse = (c, acte) => { const v = ECRAN_COLL[c]; if (!v || !P.profil) return false;
@@ -372,6 +381,11 @@ function creer(B, PERIM){
         if (k === "anoDec" && r.anoDec && typeof r.anoDec === "object" && !Array.isArray(r.anoDec)){ const clA = clotDe(ref); if (clA){ const n0 = Object.assign({}, r.anoDec); let nI = 0;
           new Set(Object.keys(n0).concat(admin ? Object.keys(avantDec) : [])).forEach(id=>{ const d = String(id.split("|")[2] || ""); if (!d || d > clA) return; const a = avantDec[id], b = n0[id]; if (JSON.stringify(a) === JSON.stringify(b)) return; nI++; if (a === undefined) delete n0[id]; else n0[id] = a; });
           if (nI) ignores.push("anoDec ("+nI+" décision(s) en période clôturée ignorée(s) : ajustement de période antérieure requis)"); r.anoDec = n0; } }
+        /* correctif 22 : un compte ne peut porter (ni recevoir en délégation) qu'un profil existant — un profil inconnu
+           donnait à l'écran tous les menus d'administration */
+        if (k === "users" && admin && Array.isArray(r.users)){ const pids = new Set((Array.isArray(r.profils) && peutK("profils") ? r.profils : (ref.profils || [])).map(p=>p && p.id));
+          const x = r.users.find(u=>u && ((u.profilId && !pids.has(u.profilId)) || (u.deleg || []).some(d=>d && d.profilId && !pids.has(d.profilId))));
+          if (x){ ignores.push("users (compte "+String(x.login || x.id).slice(0, 40)+" : profil inconnu)"); continue; } }
         if (k === "users" && !admin){
           const moi = (r.users||[]).find(x=>x && x.id === P.u.id);
           if (moi){ ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, pick(moi, ["ntfVus","derniereConx","langue","prefs","homeLayout"]))); refModifie = true; }
@@ -439,7 +453,10 @@ function creer(B, PERIM){
         if (k === "convs"){ const motif = controleConvs(ref.convs || [], r.convs, await sitesRetenus()) || controleConvsClos(ref.convs || [], r.convs, clotDe(ref)) || controleConvsPerim(ref.convs || [], r.convs, await sitesP()); if (motif){ ignores.push("convs ("+motif+")"); continue; } }
         /* correctif 18 : outils de recette (jeu d'essai) réservés à une installation de recette */
         if (!(opts || {}).recette && Array.isArray(r[k]) && r[k].some(z=>z && typeof z === "object" && (z.recette === true || z.src === "recette" || /^rec_/.test(String(z.id || ""))) && !(ref[k] || []).some(y=>y && y.id === z.id))){ ignores.push(k+" (outils de recette réservés à une installation de recette)"); continue; }
-        if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
+        /* correctif 22 : les profils ne se modifient que par un administrateur (comme l'écran) — un compte « Système
+           configuration » de niveau RH élargissait par l'API un profil attribué (périmètre, écrans, matrice) */
+        if (k === "profils" && !admin){ ignores.push("profils (réservé à un administrateur)"); continue; }
+        if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil) || validerProfils(ref.profils || [], r.profils, ref) || (admin ? "" : controleProfilsFins(ref.profils || [], r.profils, P, await sitesP(), ref)); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){ ref[k] = r[k]; refModifie = true; refCles.push(k); }
         else ignores.push(k);
       }
@@ -517,6 +534,7 @@ function creer(B, PERIM){
           if (c === "emps"){ const m = controleEmp(x, ref, avant, await matsLot()) || controleEmpClos(x, avant, clotC); if (m){ refus++; ignores.push("emps ("+(x.mat || x.id)+" : "+m+")"); continue; } }
           /* modification d'une fiche refusée par la matrice ; les droits d'accès aux zones (écran Droits d'accès) restent
              modifiables par leur propre écran */
+          if (!admin && avant && c !== "emps" && ECRAN_COLL[c] && acteRefuse(c, "modifier") && JSON.stringify(Object.assign({}, avant, {__v:0})) !== JSON.stringify(Object.assign({}, x, {__v:0}))){ refus++; ignores.push(c+" (modification non permise par la matrice de l'écran)"); continue; }
           if (!admin && avant && c === "emps" && acteRefuse(c, "modifier")){ const sans = o => { const y = Object.assign({}, o); ["acces", "__v"].forEach(k=>delete y[k]); return JSON.stringify(y); };
             if (sans(avant) !== sans(x)){ refus++; continue; } }
           if (!admin){
@@ -527,6 +545,7 @@ function creer(B, PERIM){
           }
           /* correctif 15 : décisions sur les demandes — transitions d'état contrôlées, date et auteur de la décision imposés
              par le serveur (auparavant ceux du navigateur : « acceptée le 01/01/2019 par Directeur général » acceptés) */
+          if (c === "dmd" && !admin && avant && avant.etat !== x.etat && /^(acceptee|refusee)$/.test(String(x.etat || "")) && acteRefuse(c, "valider")){ refus++; ignores.push("dmd (validation non permise par la matrice de l'écran)"); continue; }
           if (c === "dmd"){ const d = decisionDmd(avant, x, P, login, admin, {ref, emps:await employes()}); if (d.refus){ refus++; ignores.push("dmd ("+d.refus+")"); continue; } x = d.x; }
           /* correctif 16 : journal des événements — contenu reconstruit par le serveur (règle existante et active, codes
              d'action connus, salarié du périmètre, nom et libellés repris du paramétrage) ; une même règle n'est
@@ -538,7 +557,7 @@ function creer(B, PERIM){
              horloge du serveur) — auparavant ceux envoyés par le navigateur, qui pouvait attribuer une trace à un autre compte */
           if (immuable && !avant){ const h = horodatage(); x = Object.assign({}, x, c === "audit" ? {user:login, ts:h.min, srv:1} : {par:login, ts:h.min, at:h.sec, srv:1}); }
           let v = immuable ? x : Object.assign({}, x, {__v:Number((avant && avant.__v)||0) + 1});
-          if (c === "emps" && avant && P.profil && P.profil.persoMasque){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
+          if (c === "emps" && avant && PERIM.masquePerso(P)){ v = Object.assign({}, v); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (v[k] === "•••") v[k] = avant[k]; }); }
           await ecrire(c, v, c === "emps" ? avant : undefined); nbEcrits++; ECR.add(String(v.id)); { const pc = parColl[c] || (parColl[c] = {crees:0, maj:0, suppr:0, mats:[]}); pc[avant ? "maj" : "crees"]++; if (v.mat && pc.mats.length < 30 && pc.mats.indexOf(String(v.mat)) < 0) pc.mats.push(String(v.mat)); }
           if (c === "notifs" && !avant) nouvellesNotifs.push(v);
           if (UNI) UNI_CHAMPS.forEach(k=>{ const a = normUni(avant && avant[k]), n = normUni(v[k]); if (a && UNI[k].get(a) === String(v.id)) UNI[k].delete(a); if (n) UNI[k].set(n, String(v.id)); });
@@ -834,6 +853,8 @@ function controleConvsPerim(avant, apres, sitesP){
   return "";
 }
 function controleEmp(x, ref, avant, mats){
+  /* correctif 22 : valeur masquée (« ••• », profil sans accès aux données sensibles) = valeur inchangée */
+  if (avant){ const y = Object.assign({}, x); ["cin","email","tel","adresse","urgenceNom","urgenceLien","urgenceTel","pin","badge","naissance"].forEach(k=>{ if (y[k] === "•••") y[k] = avant[k]; }); x = y; }
   /* seuls les champs modifiés sont contrôlés (une fiche ancienne incomplète reste modifiable) */
   const chg = k => !avant || JSON.stringify(avant[k]) !== JSON.stringify(x[k]);
   const dv = k => !chg(k) || !x[k] || jourReel(x[k]);
@@ -848,6 +869,49 @@ function controleEmp(x, ref, avant, mats){
   if (!avant && !String(x.nom || "").trim()) return "nom obligatoire";
   if (chg("chefMat") && x.chefMat){ if (String(x.chefMat) === String(x.mat)) return "un salarié ne peut pas être son propre responsable";
     if (mats && !mats.has(String(x.chefMat))) return "responsable inconnu ("+String(x.chefMat).slice(0, 30)+")"; }
+  return "";
+}
+/* correctif 22 : contenu d'un profil validé (auparavant seuls l'identifiant et les doublons l'étaient : un droit
+   « superuser », un niveau « toString », des services en chaîne faisant échouer en erreur 500 /donnees pour tous les
+   comptes du profil, un nom de 300 000 caractères étaient enregistrés) */
+const DROITS_OK = new Set(["aucun","lecture","saisie","validation","config"]), NIV_OK = new Set(["simple","avance","rh","admin"]);
+const MENU_OK = new Set(["visible","ecriture","lecture","masque"]), ACTES_OK = new Set(["lire","creer","modifier","supprimer","valider","exporter","imprimer"]);
+function validerProfils(avant, apres, ref){
+  if (!Array.isArray(apres)) return "";
+  const av = new Map((avant || []).map(p=>[p && p.id, JSON.stringify(p)])), ID = /^[A-Za-z0-9_.:-]{1,80}$/;
+  const sites = new Set((ref.sites || []).map(x=>x && x.id)), depts = new Set((ref.depts || []).map(x=>x && x.id)), champs = new Set((ref.champs || []).map(c=>c && String(c.code)).concat(["STATUT","CATEGORIE","GRADE","CONTRAT"]));
+  const obj = v => v && typeof v === "object" && !Array.isArray(v), ids = (l, n) => Array.isArray(l) && l.length <= n && l.every(x=>typeof x === "string" && ID.test(x));
+  const interdit = o => obj(o) && Object.keys(o).some(k=>k === "__proto__" || k === "constructor" || k === "prototype");
+  for (const p of apres){
+    if (av.get(p.id) === JSON.stringify(p)) continue;
+    const l = "profil « "+String(typeof p.nom === "string" ? p.nom : p.id).slice(0, 60)+" » : ";
+    if (interdit(p) || interdit(p.droits) || interdit(p.menus) || interdit(p.actions) || interdit(p.filtres)) return l+"champ interdit";
+    if (JSON.stringify(p).length > 400000) return l+"profil trop volumineux";
+    if (typeof p.nom !== "string" || !p.nom.trim() || p.nom.length > 120) return l+"nom obligatoire (120 caractères au plus)";
+    if (!obj(p.droits) || Object.keys(p.droits).some(m=>!/^[A-Z]{2,4}$/.test(m) || !DROITS_OK.has(p.droits[m]))) return l+"droits invalides (aucun, lecture, saisie, validation, config)";
+    if (p.niveauMenu !== undefined && !NIV_OK.has(p.niveauMenu)) return l+"niveau de menu invalide";
+    if (p.menus !== undefined && (!obj(p.menus) || Object.keys(p.menus).some(v=>!/^[A-Za-z0-9_-]{1,40}$/.test(v) || !MENU_OK.has(p.menus[v])))) return l+"visibilité des écrans invalide";
+    if (p.actions !== undefined && (!obj(p.actions) || Object.keys(p.actions).some(v=>!/^[A-Za-z0-9_-]{1,40}$/.test(v) || !obj(p.actions[v]) || Object.keys(p.actions[v]).some(a=>!ACTES_OK.has(a) || typeof p.actions[v][a] !== "boolean")))) return l+"matrice des actions invalide";
+    if (p.mode !== undefined && p.mode !== "regle" && p.mode !== "liste") return l+"mode de périmètre invalide";
+    for (const [k, n] of [["sites", 5000], ["depts", 5000], ["inclus", 50000], ["exclus", 50000]]) if (p[k] !== undefined && !ids(p[k], n)) return l+"liste « "+k+" » invalide";
+    if ((p.sites || []).some(x=>!sites.has(x))) return l+"site inconnu dans le périmètre";
+    if ((p.depts || []).some(x=>!depts.has(x))) return l+"service inconnu dans le périmètre";
+    if (p.filtres !== undefined && (!obj(p.filtres) || Object.keys(p.filtres).some(c=>!champs.has(c) || (p.filtres[c] != null && typeof p.filtres[c] !== "string")))) return l+"filtre sur un champ inconnu";
+    for (const f of ["sensibles","cloture","reouverture","a2f","persoMasque"]) if (p[f] !== undefined && typeof p[f] !== "boolean") return l+"« "+f+" » doit valoir oui ou non";
+  }
+  return "";
+}
+/* un non-administrateur n'accorde pas plus qu'il n'a : drapeaux (clôture, réouverture, données sensibles), données
+   démasquées, périmètre hors de ses propres sites */
+function controleProfilsFins(avant, apres, P, sitesP, ref){
+  if (!Array.isArray(apres)) return "";
+  const av = new Map((avant || []).map(p=>[p && p.id, p])), moi = P.profil || {}, masque = moi.persoMasque === true || moi.sensibles !== true;
+  for (const n of apres){ const a = av.get(n.id); if (a && JSON.stringify(a) === JSON.stringify(n)) continue;
+    const l = "profil « "+String(n.nom || n.id).slice(0, 60)+" » : ";
+    for (const f of ["cloture","reouverture","sensibles"]) if (n[f] === true && !(a && a[f] === true) && moi[f] !== true) return l+"vous ne pouvez pas accorder « "+f+" » que vous n'avez pas";
+    if (masque && n.persoMasque !== true && (!a || a.persoMasque === true)) return l+"vous ne pouvez pas démasquer les données personnelles";
+    if (sitesP){ const s2 = (n.sites || []).filter(x=>!(a && (a.sites || []).indexOf(x) >= 0)); if (s2.some(x=>!sitesP.has(x)) || (!(n.sites || []).length && !(n.depts || []).length && (n.mode || "regle") === "regle" && a && ((a.sites || []).length || (a.depts || []).length))) return l+"périmètre hors de vos sites"; }
+  }
   return "";
 }
 function controleProfils(avant, apres, P, admin, users, niveau){
@@ -876,7 +940,7 @@ function controleProfils(avant, apres, P, admin, users, niveau){
       if (estAdmin(n)) return "seul un administrateur crée un profil administrateur (niveau administrateur ou droit Système en paramétrage)";
       const trop = Object.keys(n.droits || {}).find(m=>(RG[(n.droits || {})[m]] || 0) > (RG[mesDroits[m]] || 0));
       if (trop) return "droit "+trop+" supérieur au vôtre";
-      if (n.a2f === false && a && a.a2f === true) return "la double authentification d'un profil ne peut être retirée que par un administrateur";
+      if (a && a.a2f === true && n.a2f !== true) return "la double authentification d'un profil ne peut être retirée que par un administrateur";
     }
   }
   return "";

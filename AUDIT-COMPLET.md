@@ -1613,3 +1613,44 @@ Vérifié (copie neuve du serveur, Chromium) :
 - **Démonstration et non-régression** : la démonstration fonctionne ; les 56 écrans s'affichent sans erreur ; seul le salarié 10188 a des compteurs différents, ce qui est attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-21.zip (cumulatif : correctifs 2 à 20 inclus).
+
+## Correctif 22 — Administration › Profils (analyse approfondie)
+
+Deux analyses (serveur et sécurité ; écran et effets dans l'application) sur le serveur réel, Chromium et 20 000 salariés.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| P1 | Délégation du profil Admin : le délégué se réécrivait administrateur pour de bon (le serveur prenait le profil délégué pour un rôle d'administrateur dans l'enregistrement) | **critique** | administrateur = rôle du compte vérifié par le serveur, jamais un profil reçu en délégation |
+| P2 | Double authentification : retirée par un non-administrateur (clé supprimée), annulée par une délégation, pas exigée des sessions déjà ouvertes | **haute** | retrait réservé à l'administrateur ; exigée si le profil propre OU délégué l'exige ; sessions ouvertes soumises à la vérification dès l'activation |
+| P3 | Profil « aucun droit » : fiches (CIN, téléphone), badgeages et journées calculées servis par `/employes`, `/pointages`, `/calcul/*` et à l'ouverture | **haute** | droit de lecture du module et écran non masqué exigés ; à l'ouverture, sans droit sur un module, seules ses propres données |
+| P4 | « Accès aux données sensibles » décoché : aucun effet (CIN, téléphone, e-mail, badge en clair) ; recherche révélant un CIN masqué chiffre par chiffre | **haute** | données personnelles masquées sans ce drapeau (sauf administrateur et sa propre fiche) ; valeurs masquées conservées à l'enregistrement ; recherche limitée au nom et au matricule |
+| P5 | Aucun contrôle du contenu d'un profil (droit « superuser », niveau « toString », services en chaîne → erreur 500 pour tous les comptes du profil, sites inexistants, nom de 300 000 caractères) | **haute** | validation complète (droits, niveau, écrans, matrice, mode, listes, sites, services, filtres, drapeaux, tailles, clés réservées) |
+| P6 | Sous-administrateur (Système « configuration », niveau RH) élargissant par l'API un profil attribué (périmètre « tous », clôture, données démasquées, écrans) | moyenne | profils modifiables par un administrateur seulement (comme l'écran) |
+| P7 | Matrice des actions appliquée aux seuls salariés et badgeages créés : badgeage modifié, demande créée et validée malgré la matrice | moyenne | matrice appliquée aux demandes et absences, à la modification de toute collection et à la validation des demandes |
+| P8 | Aperçu « salariés couverts » faux (autre règle que le serveur ; faux en grand effectif) ; texte « Tous » pour un profil sans règle | moyenne | aperçu calculé par le serveur (`/api/v1/profils/apercu`) avec la règle appliquée expliquée ; texte du périmètre conforme ; calcul inutile retiré de la liste |
+| P9 | Profil promu ou rétrogradé sans effet sur le rôle des comptes ; compte rattaché à un profil inexistant voyant tous les menus d'administration | moyenne | rôles des comptes recalculés à chaque modification de profil ; profil inconnu refusé ; profil absent = aucun droit à l'écran |
+| P10 | Exclusion d'un salarié annulée par l'équipe directe ; périmètre en liste à 15 000 salariés : 646 ms par calcul | moyenne | exclusions appliquées en dernier ; calcul par ensembles |
+| P11 | Écran : « Ajouter » proposé sur un module en lecture ; fiche nouvelle sans « Enregistrer » (créer sans modifier) ; nom en double ; délégations ignorées dans les impacts ; listes non étiquetées pour les lecteurs d'écran ; export réduit à id/nom/mode ; pas de duplication ; « réouverture » trompeuse ; « Paie » dans un libellé arabe | basse / moyenne | corrigés (matrice coupée selon le droit du module, « Enregistrer » d'une fiche nouvelle = créer, contrôles, étiquettes, export complet, bouton Dupliquer, libellé « consulter les clôtures », terme corrigé) |
+| P12 | Audit : seul le mot « profils » était tracé | moyenne | `profils.modifies` (droits, niveau, drapeaux, périmètre, écrans, matrice : avant → après) et `a2f.exigee` |
+
+Non traité : le périmètre propre d'un compte remplace celui du profil au lieu de s'y ajouter (règle existante, désormais expliquée à l'écran) ; libellés abrégés de la matrice ; options de droits limitées aux droits de l'utilisateur (sans objet : écran réservé à l'administrateur).
+
+Vérifié :
+- **Copie neuve du serveur.**
+  - Profils piégés refusés (8 cas).
+  - Délégation Admin : la tentative d'élévation est refusée ; après reconnexion, `/comptes` répond toujours 403.
+  - Profil « aucun droit » : 0 fiche, 0 badgeage, et 403 sur `/employes`, `/pointages` et `/calcul`.
+  - « Sensibles » décoché : CIN masqué ; une modification de la fiche conserve le CIN ; la recherche par CIN ne trouve rien.
+  - Double authentification activée : la session ouverte est soumise à la vérification.
+  - Badgeage modifié, demande créée sur un écran en lecture : refusés.
+  - Profil inconnu sur un compte, écriture d'un profil par un non-administrateur : refusées.
+  - Audit détaillé.
+- **Chromium.**
+  - Aperçu serveur dans la liste et la fiche ; étiquettes ; duplication.
+  - Nom en double signalé ; export complet ; matrice coupée.
+  - 4 comptes ouvrent tous leurs écrans sans erreur JavaScript.
+- **Démonstration et non-régression.**
+  - La démonstration fonctionne ; les 56 écrans s'affichent sans erreur JavaScript.
+  - Compteurs inchangés : seul le salarié 10188 diffère, ce qui était attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-22.zip (cumulatif : correctifs 2 à 21 inclus).
