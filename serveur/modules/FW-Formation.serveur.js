@@ -84,7 +84,8 @@ const MSG = {
 function creer(o){
   const {B, D, audit} = o, actif = o.moduleActif || (()=>false), pg = B.type === "pg";
   const id = p => p+"-"+crypto.randomBytes(6).toString("hex"), maint = () => new Date().toISOString(), auj = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2, "0")+"-"+String(d.getDate()).padStart(2, "0"); };
-  const dateOk = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && ajoutJours(s, 0) === s && +s.slice(0, 4) >= 1990 && +s.slice(0, 4) <= 2100;
+  /* correctif 40 : un mois ou un jour hors limites (2026-13-45) levait une exception (erreur 500) au lieu d'être refusé */
+  const dateOk = s => { if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s) || +s.slice(0, 4) < 1990 || +s.slice(0, 4) > 2100) return false; const d = new Date(s+"T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === s; };
   const jj = d => d ? String(d).slice(8, 10)+"/"+String(d).slice(5, 7)+"/"+String(d).slice(0, 4) : "—";
   const sorti = e => !!(e && e.sortie && e.sortie < auj());
   const actifEmp = async mat => { const e = (await D.employes()).find(x=>String(x.mat) === String(mat)); return !e ? null : sorti(e) ? false : e; };
@@ -212,7 +213,9 @@ function creer(o){
     const {p, C, admin, P, u, json, corpsJson, ip} = x;
     const L = (()=>{ const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
     const m = (k, v) => { let t = (MSG[k] || [k])[L] || MSG[k][0]; Object.keys(v || {}).forEach(z=>{ t = t.split("{"+z+"}").join(v[z]); }); return t; };
-    const err = (st, k, v) => json(res, st, {message:m(k, v), code:k});
+    /* correctif 40 : err renvoie true — « if (e) return e » après tx() arrêtait le traitement seulement en apparence
+       (json renvoie undefined : l'audit et une seconde réponse suivaient un refus) */
+    const err = (st, k, v) => { json(res, st, {message:m(k, v), code:k}); return true; };
     const txt = (b, k, max) => { const v = b[k]; if (v == null) return ""; if (typeof v !== "string" && typeof v !== "number") throw Object.assign(new Error("texte"), {champ:k}); return String(v).trim().slice(0, max); };
     try { return await router(); }
     catch(e){ if (e && e.message === "JSON invalide") return err(400, "json"); if (e && e.message === "texte") return err(400, "texte", {c:e.champ}); throw e; }

@@ -2,7 +2,7 @@
   "id": "FW-HSE",
   "nom": "Santé, sécurité, environnement",
   "categorie": "metier",
-  "version": "1.0",
+  "version": "1.1",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -37,14 +37,14 @@
     "unmount": "unmount(ctx)"
   },
   "budget": {
-    "js_ko": 38,
+    "js_ko": 45,
     "css_ko": 4
   },
   "depsFacultatives": [
     "FW-Time"
   ],
   "integrite": {
-    "js": "sha384-EL8kQ4k+kZ3HHzcs0WXA3mCqGAfMVAftuxbxEXZg7d4/aJWAjQvg8gALPJMK0eZY",
+    "js": "sha384-lsod83TIHh0MMcNxhy0PTBMCgptQWH+pX60ZMI2HMhglwn2+Br8kegQznRailV8Z",
     "css": "sha384-lNsjU3hHntOjN4GsTADfrwK/Ui8yIPnR+C19aUg5THVNJmYiWqvTj8lcHNozgVjG"
   }
 }

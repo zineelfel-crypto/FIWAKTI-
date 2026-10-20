@@ -2,7 +2,7 @@
   "id": "FW-Evaluation",
   "nom": "Évaluations",
   "categorie": "metier",
-  "version": "1.3",
+  "version": "1.4",
   "deps": [
     "FW-Core",
     "FW-RH"

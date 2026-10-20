@@ -117,7 +117,9 @@ function creer(o){
     const {p, C, admin, P, u, json, corpsJson, ip} = x;
     const L = (()=>{ const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
     const m = (k, v) => { let t = (MSG[k] || [k])[L] || MSG[k][0]; Object.keys(v || {}).forEach(z=>{ t = t.split("{"+z+"}").join(v[z]); }); return t; };
-    const err = (st, k, v) => json(res, st, {message:m(k, v), code:k});
+    /* correctif 40 : err renvoie true — « if (e) return e » après tx() arrêtait le traitement seulement en apparence
+       (json renvoie undefined : l'audit et une seconde réponse suivaient un refus) */
+    const err = (st, k, v) => { json(res, st, {message:m(k, v), code:k}); return true; };
     const txt = (b, k, max) => { const v = b[k]; if (v == null) return ""; if (typeof v !== "string" && typeof v !== "number") throw Object.assign(new Error("texte"), {champ:k}); return String(v).trim().slice(0, max); };
     try { return await router(); }
     catch(e){ if (e && e.message === "JSON invalide") return err(400, "json"); if (e && e.message === "texte") return err(400, "texte", {c:e.champ}); throw e; }

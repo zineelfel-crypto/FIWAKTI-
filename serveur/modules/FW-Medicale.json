@@ -2,7 +2,7 @@
   "id": "FW-Medicale",
   "nom": "Suivi médical",
   "categorie": "metier",
-  "version": "1.0",
+  "version": "1.1",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -37,11 +37,11 @@
     "unmount": "unmount(ctx)"
   },
   "budget": {
-    "js_ko": 30,
+    "js_ko": 33,
     "css_ko": 3
   },
   "integrite": {
-    "js": "sha384-LCzmwTJW9rQw1S7hrbejzokS+mr/rw42tDYX+XA5kD09g0yWM+cflUIKho7YkNaw",
+    "js": "sha384-DbvT3jgebH7Src0ON/kUyYvu11yBiUKfnYqQ9A3KDuxo+xQsN+Q4QvY7Wql8Dl1V",
     "css": "sha384-6geXXqR35LR1BapII5aCeb4N3WJJwsll1CWpXBby3KKg5aX9vHbEyTLRpzOTxrSe"
   }
 }
