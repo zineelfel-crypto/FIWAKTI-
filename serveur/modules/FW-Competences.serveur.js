@@ -165,10 +165,14 @@ function creer(o){
     catalogue:()=>B.all("SELECT id, code, nom FROM comp_catalogue WHERE actif=1 ORDER BY code"),
     exigences:()=>B.all("SELECT fonction, competence_id, niveau FROM comp_exigences"),
     niveaux:()=>B.all("SELECT mat, competence_id, niveau FROM comp_niveaux"),
+    /* correctif 37 : index en mémoire (la génération des besoins relisait toute la table à chaque passage) */
+    niveauxIndex:()=>niveauxIndex(),
     exigencesFonction:(mat, fonction)=>B.all("SELECT e.competence_id, e.niveau requis, c.code, c.nom, (SELECT niveau FROM comp_niveaux n WHERE n.mat=? AND n.competence_id=e.competence_id) actuel FROM comp_exigences e JOIN comp_catalogue c ON c.id=e.competence_id WHERE e.fonction=? AND c.actif=1 ORDER BY c.code", mat, fonction),
     /* niveau écrit (hausse seulement si « hausse »), historisé et annoncé aux modules qui écoutent ; true si modifié */
     async ecrireNiveau(mat, competenceId, niveau, par, motif, d, hausse){
       niveau = entier(niveau); if (NIVEAUX.indexOf(niveau) < 0 || !(await salarieActif(mat))) return false;
+      /* correctif 37 : pas de niveau sur une compétence retirée du catalogue */
+      if (!await B.get("SELECT 1 FROM comp_catalogue WHERE id=? AND actif=1", competenceId)) return false;
       const av = await B.get("SELECT niveau FROM comp_niveaux WHERE mat=? AND competence_id=?", mat, competenceId);
       if (av && (hausse ? av.niveau >= niveau : av.niveau === niveau)) return false;
       await B.run("INSERT INTO comp_niveaux(mat,competence_id,niveau,d,evaluateur) VALUES(?,?,?,?,?) ON CONFLICT(mat, competence_id) DO UPDATE SET niveau=excluded.niveau, d=excluded.d, evaluateur=excluded.evaluateur", mat, competenceId, niveau, d || new Date().toISOString().slice(0, 10), par);

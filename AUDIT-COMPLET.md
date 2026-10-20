@@ -2167,3 +2167,35 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-36.zip (cumulatif : correctifs 2 à 35 inclus).
+
+## Correctif 37 — Talents › Formation et habilitations (FW-Formation, analyse approfondie)
+
+Analyse de l'écran après les correctifs 34 et 36, sur le serveur réel en SQLite puis en PostgreSQL 16, avec des comptes à menu masqué, en lecture, à actions refusées et limités par site, à 20 000 salariés (133 700 besoins), dans Chromium (fr / ar) et la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| F1 | Matrice de l'écran ignorée : menu masqué → lecture et création de sessions ; menu en lecture → sessions et besoins créés ; actions refusées → génération (15 besoins) ; « À traiter » et fiche 360° affichés | **critique** | `droitsEcran` (créer : besoin, inscription ; modifier : présence, désinscription ; valider : génération, sessions, clôture, annulation ; paramétrer : catalogue ; exporter) sur toutes les routes, « À traiter » et la fiche 360° ; droits renvoyés à l'écran |
+| F2 | PostgreSQL : 6 inscriptions simultanées → 5 inscrits pour 2 places ; même salarié ×3 → erreur 500 ; 3 codes « DUP » → 2 lignes | **critique** | contrôle et écriture sous verrou dans une transaction (vérifié : `200,409,200,409,409,409` → 2 inscrits ; `409,409,200` ; `409,200,409`) |
+| F3 | Clôture et annulation non atomiques : 3 clôtures → 2 succès et 2 audits ; clôture + annulation → toutes deux OK, session finalement clôturée avec besoins rouverts | **critique** | verrou et passage d'état conditionnel (`AND statut='planifiee'`), 409 « modifiée entre-temps » (vérifié : une seule réussite) |
+| F4 | Génération des besoins à 20 000 salariés : 133 700 insertions une à une, serveur bloqué 17 s (aussi 2 min après chaque démarrage) | **critique** | exigences indexées par fonction, index des niveaux en mémoire (service Compétences), insertions par lots de 500 en rendant la main ; aperçu avant création ; tâche quotidienne 15 min après le démarrage (vérifié : 4,4 s, latence ≤ 133 ms) |
+| F5 | Nombres non entiers (validité, niveau, places 2,5 → 500 sous PostgreSQL ; enregistrés sous SQLite), valeurs corrigées en silence (validité 300 → 240, places −5 → 1, type inconnu) ; JSON invalide → 500 ; champs objets ; messages en français | haute | entiers stricts bornés, durée par 0,5 h, 400 ; champs texte stricts ; messages trilingues |
+| F6 | La génération recréait le besoin d'une formation déjà acquise (niveau visé atteint) ; choix de formation aléatoire ; besoin annulé recréé | haute | formation retenue seulement si son niveau visé dépasse le niveau actuel (celle qui couvre l'exigence d'abord) ; besoins annulés non recréés |
+| F7 | Saisie perdue après une erreur (session, catalogue, inscription) | haute | saisie conservée (`E.form`), vidée après succès (vérifié dans Chromium) |
+| F8 | Clôture : présent sans résultat accepté (besoin rouvert sans avertissement) ; habilitation créée pour un salarié sorti ; compteur d'habilitations faux | haute | 409 « résultat manquant » ; salariés sortis ignorés (signalés) ; compteur sur les lignes réellement écrites |
+| F9 | Sessions sans périmètre : liste de toutes les sessions, clôture d'une session d'un autre site par un compte limité ; inscription après la fin ; présence avant le début ; clôture d'une session vide | moyenne | site de la session, portée (créateur, site, inscrits du périmètre) ; inscription refusée après la fin ; présence à partir du début ; clôture d'une session vide refusée |
+| F10 | Échéance fausse en fin de mois (31/08 + 6 mois → 03/03) ; « À traiter » comptant salariés sortis et formations retirées, « à clôturer » hors périmètre ; besoins des sortis jamais clos | moyenne | dernier jour du mois ; jointure catalogue actif, salariés présents, périmètre ; annulation quotidienne des besoins des sortis |
+| F11 | Fonctions absentes : désinscription, modification de session et du catalogue, présence « excusé », effacement d'un résultat, habilitation obtenue hors session, annulation d'un besoin, saisie manuelle à l'écran, émargement, historique d'un salarié ; besoin planifié ailleurs non rattaché | moyenne | routes et écran correspondants ; un besoin n'est rouvert que s'il n'est plus porté par aucune session ; feuille d'émargement CSV (cellules protégées) ; historique (droit d'accès) |
+| F12 | Démonstration : élément créé absent du catalogue, nouvelle session « undefined » et détail d'une autre, inscription et présence sans effet | moyenne | rejeu propre à la formation |
+| F13 | PostgreSQL : `inscrits` en texte | basse | conversion en nombre |
+| F14 | Accessibilité : pagination « ‹ », filtre sans libellé, présence sans nom du salarié, légendes identiques, focus perdu, flèche « → » en arabe ; « Tous présents (acquis) » sans confirmation | basse | `aria-label` complets, légendes distinctes, focus rétabli, flèches selon le sens, confirmation |
+
+Non traité : liste d'attente ; règle de conservation des données de formation ; matricule changé (les tables de formation ne référencent que le matricule) ; attestations de formation.
+
+Vérifié :
+- **SQLite.** Matrice (masqué 403, lecture 403, actions refusées 403, « À traiter » masqué vide) ; JSON invalide, champs objets, validité 2,5 / 300, type, durée, niveau 2,5 → 400 ; modification du catalogue, code pris 409 ; places 2,5, site inconnu → 400 ; session d'un autre site invisible et non clôturable ; clôture vide 409 ; inscription d'un sorti 409, session complète 409, places < inscrits 409 ; « excusé » ; présent sans résultat 409 ; trois clôtures `200,409,409` ; échéance 31/08 → 28/02 ; habilitation manuelle (future, sorti refusés) ; présence avant début 409 ; désinscription ; aperçu et génération (salarié déjà au niveau visé exclu, sorti exclu, deuxième passe 0) ; annulation de besoin avec motif ; émargement ; historique.
+- **20 000 salariés.** Génération de 133 700 besoins en 4,4 s, latence ≤ 133 ms ; deuxième passe 1 s ; « À traiter » ≈ 0,3 s ; session de 500 inscrits 0,5 s.
+- **PostgreSQL 16.** Courses (codes, places, doublons, clôture/annulation) maîtrisées ; nombres ; JSON invalide ; génération, « À traiter », tâche quotidienne.
+- **Chromium.** Saisie conservée après erreur (catalogue, session, inscription), édition du catalogue, présence nommée et focus conservé, « Excusé », émargement, aperçu de génération, arabe ; démonstration : catalogue, nouvelle session, inscription, présence ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-37.zip (cumulatif : correctifs 2 à 36 inclus).

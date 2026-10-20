@@ -185,14 +185,53 @@
     if ((m = /^\/api\/v1\/onboarding\/modeles\/([^/]+)$/.exec(p))){ modifier(m[1], {nom:b.nom, fonction:b.fonction, taches:b.taches}); return {ok:true, demo:true}; }
     return undefined;
   }
+  /* correctif 37 : formation — catalogue (ajout, modification, retrait), sessions avec détail propre, inscriptions,
+     présence (une à une et en lot), désinscription, clôture, annulation, besoins (ajout, annulation), habilitations */
+  const FR = "/api/v1/formation";
+  const sessionsFr = () => { const l = []; chemins().filter(k => sansQ(k) === FR+"/sessions").forEach(k => (REP[k].sessions || []).forEach(x => { if (!l.some(y => y.id === x.id)) l.push(x); })); return l; };
+  const catFr = () => (REP[FR+"/catalogue"] || {catalogue:[]}).catalogue;
+  function compterInscrits(sid){ const d = REP[FR+"/sessions/"+sid]; if (d) modifier(sid, {inscrits:d.inscriptions.length}); }
+  function formation(methode, c, b){
+    const p = sansQ(c); if (p.indexOf(FR+"/") !== 0) return undefined; b = b || {};
+    let m;
+    if (methode === "GET"){
+      if (p === FR+"/sessions"){ const st = qp(c).get("statut") || "", off = +qp(c).get("offset") || 0, l = sessionsFr().filter(x => !st || x.statut === st); return {sessions:copie(l.slice(off, off + 50)), total:l.length}; }
+      if ((m = /^\/api\/v1\/formation\/sessions\/([^/]+)$/.exec(p))){ const d = REP[FR+"/sessions/"+m[1]]; if (!d) return undefined; const v = copie(d); v.session.inscrits = v.inscriptions.length; v.inscriptions.forEach(i => { i.nom = i.nom || nomDe(i.mat); }); return v; }
+      if (p === FR+"/historique") return {mat:qp(c).get("mat"), sessions:[], habilitations:[], besoins:[]};
+      return undefined;
+    }
+    if (p === FR+"/catalogue"){ const it = {id:nouvelId("fc"), code:b.code, titre:b.titre, type:b.type || "formation", duree_h:b.dureeH || 0, validite_mois:b.validiteMois || null, competence_id:b.competenceId || null, niveau_vise:b.competenceId ? b.niveauVise || 1 : null, organisme:b.organisme || "", actif:1, cree:maint()}; catFr().push(it); return {ok:true, demo:true, id:it.id}; }
+    if ((m = /^\/api\/v1\/formation\/catalogue\/([^/]+)\/retirer$/.exec(p))){ const C = REP[FR+"/catalogue"]; if (C) C.catalogue = C.catalogue.filter(x => x.id !== m[1]); return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/formation\/catalogue\/([^/]+)$/.exec(p))){ modifier(m[1], {code:b.code, titre:b.titre, type:b.type, duree_h:b.dureeH, validite_mois:b.validiteMois || null, competence_id:b.competenceId || null, niveau_vise:b.competenceId ? b.niveauVise : null, organisme:b.organisme}); return {ok:true, demo:true}; }
+    if (p === FR+"/besoins"){ const ca = catFr().find(x => x.id === b.catalogueId) || {}; const it = {id:nouvelId("fb"), mat:b.mat, catalogue_id:b.catalogueId, origine:"manuel", statut:"ouvert", cree:maint(), titre:ca.titre || "", code:ca.code || "", type:ca.type || "formation", nom:nomDe(b.mat)};
+      chemins().filter(k => sansQ(k) === FR+"/besoins" && (qp(k).get("statut") || "ouvert") === "ouvert").forEach(k => { REP[k].lignes.unshift(copie(it)); REP[k].total++; }); return {ok:true, demo:true, id:it.id}; }
+    if ((m = /^\/api\/v1\/formation\/besoins\/([^/]+)\/annuler$/.exec(p))){ modifier(m[1], {statut:"annule"}); return {ok:true, demo:true}; }
+    if (p === FR+"/besoins/generer") return b.apercu ? {ok:true, demo:true, apercu:0} : {ok:true, demo:true, crees:0};
+    if (p === FR+"/sessions"){ const ca = catFr().find(x => x.id === b.catalogueId) || {}, sid = nouvelId("fs");
+      const se = {id:sid, catalogue_id:b.catalogueId, debut:b.debut, fin:b.fin, lieu:b.lieu || "", formateur:b.formateur || "", places:b.places || 12, statut:"planifiee", cree:maint(), par:"admin", titre:ca.titre || "", code:ca.code || "", type:ca.type || "formation", inscrits:0, site_id:b.siteId || null};
+      chemins().filter(k => sansQ(k) === FR+"/sessions").forEach(k => { REP[k].sessions.unshift(copie(se)); if (typeof REP[k].total === "number") REP[k].total++; });
+      REP[FR+"/sessions/"+sid] = {session:copie(se), inscriptions:[], horsPerimetre:0}; return {ok:true, demo:true, id:sid, inscrits:0}; }
+    if ((m = /^\/api\/v1\/formation\/sessions\/([^/]+)(?:\/([a-z-]+))?$/.exec(p))){
+      const d = REP[FR+"/sessions/"+m[1]]; if (!d) return {ok:true, demo:true};
+      if (!m[2]){ modifier(m[1], {debut:b.debut, fin:b.fin, lieu:b.lieu, formateur:b.formateur, places:b.places, site_id:b.siteId || null}); return {ok:true, demo:true}; }
+      if (m[2] === "inscrire"){ d.inscriptions.push({id:nouvelId("fi"), session_id:m[1], mat:b.mat, besoin_id:null, presence:"inscrit", resultat:null, maj:maint(), par:"admin", nom:nomDe(b.mat)}); compterInscrits(m[1]); return {ok:true, demo:true}; }
+      if (m[2] === "desinscrire"){ d.inscriptions = d.inscriptions.filter(i => i.id !== b.inscriptionId); compterInscrits(m[1]); return {ok:true, demo:true}; }
+      if (m[2] === "presence"){ const z = {}; if (b.presence !== undefined) z.presence = b.presence; if (b.resultat !== undefined) z.resultat = b.resultat || null; if (z.presence && z.presence !== "present") z.resultat = null; modifier(b.inscriptionId, z); return {ok:true, demo:true}; }
+      if (m[2] === "presence-lot"){ d.inscriptions.filter(i => i.presence === "inscrit").forEach(i => { i.presence = b.presence; i.resultat = b.presence === "present" ? (b.resultat || null) : null; }); return {ok:true, demo:true}; }
+      if (m[2] === "cloturer"){ modifier(m[1], {statut:"realisee"}); return {ok:true, demo:true, niveaux:0, habilitations:0}; }
+      if (m[2] === "annuler"){ modifier(m[1], {statut:"annulee"}); return {ok:true, demo:true}; }
+    }
+    if (p === FR+"/habilitations"){ const ca = catFr().find(x => x.id === b.catalogueId) || {}; chemins().filter(k => sansQ(k) === FR+"/habilitations").forEach(k => { REP[k].lignes.unshift({id:nouvelId("fh"), mat:b.mat, catalogue_id:b.catalogueId, obtenue_le:b.obtenueLe, expire_le:null, titre:ca.titre || "", code:ca.code || "", nom:nomDe(b.mat), actif:1, etat:"valide"}); REP[k].total++; }); return {ok:true, demo:true}; }
+    return undefined;
+  }
   return function(chemin, o){
     const c = "/"+String(chemin || "").replace(/^\.?\//, "");
     const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
     if (methode !== "GET"){
-      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
+      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = formation(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
       return new Promise(ok => setTimeout(() => ok(r), 150));
     }
-    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
+    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr === undefined) rr = formation("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
     const p = sansQ(c), parent = p.replace(/\/[^/]+$/, "/"), cles = chemins();
     let k = REP[c] !== undefined ? c : cles.find(x => sansQ(x) === p);
     if (!k) k = cles.find(x => { const y = sansQ(x); return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });

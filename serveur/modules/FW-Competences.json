@@ -2,7 +2,7 @@
   "id": "FW-Competences",
   "nom": "Compétences",
   "categorie": "metier",
-  "version": "1.2",
+  "version": "1.3",
   "deps": [
     "FW-Core",
     "FW-RH"
