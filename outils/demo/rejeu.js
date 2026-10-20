@@ -356,6 +356,14 @@
     prochaine:["Prochaine visite : date réelle postérieure à la visite.","Next visit: a real date after the visit.","الزيارة القادمة: تاريخ لاحق للزيارة."],
     report:["Nouvelle date réelle, à partir d'aujourd'hui et différente de l'actuelle.","A real new date, from today and different from the current one.","تاريخ جديد صالح ابتداء من اليوم ومختلف عن الحالي."],
     traitee:["Visite déjà traitée.","Visit already processed.","تمت معالجة الزيارة."],
+    sorti:["Salarié sorti : aucune visite à planifier.","Employee has left: no visit to schedule.","غادر الأجير: لا زيارة للبرمجة."],
+    avantEntree:["Date antérieure à l'entrée du salarié.","Date before the employee's start date.","تاريخ سابق لانتداب الأجير."],
+    trop:["Texte trop long.","Text too long.","نص طويل جدا."],
+    tableau:["Tableau : numéro de 1 à 3 chiffres, éventuellement « bis » ou « ter ».","Table: 1 to 3 digits, optionally “bis” or “ter”.","الجدول: رقم من 1 إلى 3 أرقام."],
+    mpStatut:["Statut non prévu.","Status not allowed.","حالة غير مقبولة."],
+    mpTransition:["Retour d'un statut décidé : motif obligatoire.","Reverting a decided status: reason required.","الرجوع عن حالة مقررة: التعليل إجباري."],
+    pasRealisee:["Seule une visite réalisée se rectifie.","Only a completed visit can be corrected.","تصحح الزيارة المنجزة فقط."],
+    restrictionsHors:["Les restrictions ne s'inscrivent qu'avec l'aptitude « apte avec restriction ».","Restrictions are only recorded with “fit with restrictions”.","تسجل القيود فقط مع «أهل مع قيود»."],
     declarationMp:["Salarié et date de déclaration (réelle, au plus tard aujourd'hui) obligatoires.","Employee and a real declaration date (today at the latest) required.","الأجير وتاريخ التصريح إجباريان."],
     export:["Export non disponible dans la version de démonstration.","Export not available in the demo version.","التصدير غير متاح في النسخة التجريبية."]
   };
@@ -480,7 +488,7 @@
     MDD = {vis, mp, journal:[], per:+((REP[MED+"/parametres"] || {}).periodiciteMois) || 12};
     return MDD;
   }
-  const MDROITS = {medical:true, sensibles:true, planifier:true, modifier:true, declarer:true, parametrer:true, exporter:false};
+  const MDROITS = {medical:true, sensibles:true, planifier:true, modifier:true, declarer:true, valider:true, supprimer:true, imprimer:true, parametrer:true, exporter:false};
   function medAptitude(d, mat){ const l = d.vis.filter(v => v.mat === String(mat) && v.statut === "realisee" && v.type !== "pre_reprise").sort((x, y) => (x.realisee_le+x.maj).localeCompare(y.realisee_le+y.maj)), v = l[l.length - 1];
     return v ? {aptitude:v.aptitude, derniere:v.realisee_le, prochaine:v.aptitude === "inapte" ? null : v.prochaine_le, type:v.type} : null; }
   function medical(methode, c, b){
@@ -488,6 +496,8 @@
     const d = medDonnees(), q = qp(c), a = aujL(); let m;
     const echue = v => !v || (v.aptitude !== "inapte" && (!v.prochaine || v.prochaine <= a));
     if (methode === "GET"){
+      if (p === MED+"/salaries"){ const s = String(q.get("q") || "").trim().toLowerCase(); let l = []; try { l = s.length < 2 ? [] : (db.emps || []).filter(e => (!e.sortie || e.sortie >= a) && (String(e.mat).toLowerCase().indexOf(s) === 0 || ((e.nom||"")+" "+(e.prenom||"")).toLowerCase().indexOf(s) >= 0)).slice(0, 15); } catch(e){}
+        return {lignes:l.map(e => ({mat:e.mat, nom:nomDe(e.mat)}))}; }
       if (p === MED+"/aptitudes"){ const s = String(q.get("q") || "").trim().toLowerCase(), f = q.get("filtre") || "";
         let emps = []; try { emps = (db.emps || []).filter(e => !e.sortie || e.sortie >= a); } catch(e){}
         const l = emps.filter(e => !s || String(e.mat).toLowerCase() === s || ((e.nom||"")+" "+(e.prenom||"")).toLowerCase().indexOf(s) >= 0).map(e => { const v = medAptitude(d, e.mat), pl = d.vis.filter(x => x.mat === String(e.mat) && x.statut === "planifiee").sort((x, y) => x.prevue_le.localeCompare(y.prevue_le))[0];
@@ -504,23 +514,30 @@
       if ((m = /^\/api\/v1\/medical\/dossier\/([^/]+)$/.exec(p))){ let mat; try { mat = decodeURIComponent(m[1]); } catch(e){ mat = ""; } const e = empDe(mat);
         if (!e) return Promise.reject(Object.assign(new Error((MD.salarie)[langue()]), {status:404}));
         const vis = d.vis.filter(v => v.mat === String(mat)).sort((x, y) => ((y.realisee_le || y.prevue_le)+y.maj).localeCompare((x.realisee_le || x.prevue_le)+x.maj));
-        return {salarie:{mat:e.mat, nom:nomDe(mat), poste:e.poste || "", entree:e.entree || "", sortie:e.sortie || ""}, aptitude:medAptitude(d, mat), visites:copie(vis), journal:copie(d.journal.filter(j => vis.some(v => v.id === j.visite))), maladiesPro:copie(d.mp.filter(z => z.mat === String(mat))), illisible:0, droits:MDROITS}; }
+        return {salarie:{mat:e.mat, nom:nomDe(mat), poste:e.poste || "", entree:e.entree || "", sortie:e.sortie || ""}, aptitude:medAptitude(d, mat), visites:copie(vis), journal:copie(d.journal.filter(j => vis.some(v => v.id === j.visite) || d.mp.some(z => z.id === j.visite && z.mat === String(mat)))), maladiesPro:copie(d.mp.filter(z => z.mat === String(mat))), illisible:0, droits:MDROITS}; }
       if (p === MED+"/export") return refus("export", 404);
       return undefined;
     }
     if (p === MED+"/parametres"){ const n = +b.periodiciteMois; if ([6,12,24,36].indexOf(n) >= 0) d.per = n; return {ok:true, demo:true}; }
     if (p === MED+"/visites"){ const mat = String(b.mat || "").trim(), T = ["embauche","periodique","reprise","pre_reprise","demande"];
-      if (!mat || T.indexOf(b.type) < 0 || !dOk(b.prevueLe)) return refus("planif"); if (!empDe(mat)) return refus("salarie", 404); if (b.prevueLe < a) return refus("passee");
+      if (!mat || T.indexOf(b.type) < 0 || !dOk(b.prevueLe)) return refus("planif"); const em = empDe(mat); if (!em) return refus("salarie", 404); if (em.sortie && em.sortie < a) return refus("sorti", 409); if (b.prevueLe < a) return refus("passee");
       if (d.vis.some(v => v.mat === mat && v.type === b.type && v.statut === "planifiee")) return refus("doublon", 409);
       const it = {id:nouvelId("mv"), mat, type:b.type, prevue_le:b.prevueLe, realisee_le:null, statut:"planifiee", aptitude:null, restrictions:"", observations:"", prochaine_le:null, maj:maint(), par:"admin"}; d.vis.push(it); return {ok:true, demo:true, id:it.id}; }
-    if ((m = /^\/api\/v1\/medical\/visites\/([^/]+)\/(realiser|annuler|reporter|rectifier)$/.exec(p))){
+    if ((m = /^\/api\/v1\/medical\/visites\/([^/]+)\/(realiser|annuler|reporter|rectifier|imprime)$/.exec(p))){
       const v = d.vis.find(x => x.id === m[1]); if (!v) return Promise.reject(Object.assign(new Error("Introuvable."), {status:404}));
-      const resultat = () => { const r = b.realiseeLe || a; if (!dOk(r) || r > a) return {err:"dateRealisation"}; if (["apte","apte_restriction","inapte"].indexOf(b.aptitude) < 0) return {err:"aptitude"};
+      if (m[2] === "imprime") return {ok:true, demo:true};
+      const em = empDe(v.mat) || {};
+      const resultat = () => { const r = b.realiseeLe || a; if (!dOk(r) || r > a) return {err:"dateRealisation"}; if (em.entree && r < jPlus(em.entree, -60)) return {err:"avantEntree"};
+        if (String(b.restrictions || "").length > 2000 || String(b.observations || "").length > 4000) return {err:"trop"};
+        if (!(v.type === "pre_reprise" && !b.aptitude) && ["apte","apte_restriction","inapte"].indexOf(b.aptitude) < 0) return {err:"aptitude"};
         if (b.aptitude === "apte_restriction" && !String(b.restrictions || "").trim()) return {err:"restrictions"};
+        if (String(b.restrictions || "").trim() && b.aptitude !== "apte_restriction") return {err:"restrictionsHors"};
         let pr = null; if (b.aptitude !== "inapte" && v.type !== "pre_reprise"){ if (b.prochaineLe){ if (!dOk(b.prochaineLe) || b.prochaineLe <= r) return {err:"prochaine"}; pr = b.prochaineLe; } else pr = mPlus(r, d.per); }
         return {realisee_le:r, aptitude:b.aptitude, restrictions:String(b.restrictions || "").trim(), observations:String(b.observations || "").trim(), prochaine_le:pr, maj:maint()}; };
-      if (m[2] === "rectifier"){ if (v.statut !== "realisee") return refus("traitee", 409); if (!String(b.motif || "").trim()) return refus("motif"); const x = resultat(); if (x.err) return refus(x.err);
-        d.journal.unshift({visite:v.id, nature:"rectification", le:maint(), par:"admin", motif:String(b.motif).trim(), avant:null, apres:null}); Object.assign(v, x); return {ok:true, demo:true, prochaine:x.prochaine_le}; }
+      if (m[2] === "rectifier"){ if (v.statut !== "realisee") return refus("pasRealisee", 409); if (!String(b.motif || "").trim()) return refus("motif"); const x = resultat(); if (x.err) return refus(x.err);
+        d.journal.unshift({visite:v.id, nature:"rectification", le:maint(), par:"admin", motif:String(b.motif).trim(), avant:{realisee_le:v.realisee_le, aptitude:v.aptitude, restrictions:v.restrictions, prochaine_le:v.prochaine_le}, apres:null}); Object.assign(v, x); return {ok:true, demo:true, prochaine:x.prochaine_le}; }
+      if (m[2] === "annuler" && v.statut === "realisee"){ if (!String(b.motif || "").trim()) return refus("motif");
+        d.journal.unshift({visite:v.id, nature:"annulation", le:maint(), par:"admin", motif:String(b.motif).trim(), avant:{realisee_le:v.realisee_le, aptitude:v.aptitude}, apres:null}); Object.assign(v, {statut:"annulee", maj:maint()}); return {ok:true, demo:true}; }
       if (v.statut !== "planifiee") return refus("traitee", 409);
       if (m[2] === "annuler" || m[2] === "reporter"){ if (!String(b.motif || "").trim()) return refus("motif");
         if (m[2] === "reporter" && (!dOk(b.prevueLe) || b.prevueLe < a || b.prevueLe === v.prevue_le)) return refus("report");
@@ -528,8 +545,17 @@
         if (m[2] === "annuler") Object.assign(v, {statut:"annulee", maj:maint()}); else Object.assign(v, {prevue_le:b.prevueLe, maj:maint()}); return {ok:true, demo:true}; }
       const x = resultat(); if (x.err) return refus(x.err); Object.assign(v, x, {statut:"realisee"}); return {ok:true, demo:true, prochaine:x.prochaine_le}; }
     if (p === MED+"/maladies-pro"){ const mat = String(b.mat || "").trim(); if (!mat || !dOk(b.declareeLe) || b.declareeLe > a) return refus("declarationMp");
+      const em = empDe(mat) || {}; if (em.entree && b.declareeLe < em.entree) return refus("avantEntree"); if (b.tableau && !/^\d{1,3}( ?(bis|ter))?$/i.test(String(b.tableau).trim())) return refus("tableau");
+      if (String(b.observations || "").length > 4000) return refus("trop");
       const it = {id:nouvelId("mp"), mat, declaree_le:b.declareeLe, tableau:String(b.tableau || ""), statut:"declaree", observations:String(b.observations || ""), maj:maint(), par:"admin"}; d.mp.unshift(it); return {ok:true, demo:true, id:it.id}; }
-    if ((m = /^\/api\/v1\/medical\/maladies-pro\/([^/]+)\/statut$/.exec(p))){ const z = d.mp.find(x => x.id === m[1]); if (z && ["declaree","reconnue","refusee"].indexOf(b.statut) >= 0) z.statut = b.statut; return {ok:true, demo:true}; }
+    if ((m = /^\/api\/v1\/medical\/maladies-pro\/([^/]+)\/(statut|rectifier|annuler)$/.exec(p))){ const z = d.mp.find(x => x.id === m[1]); if (!z) return Promise.reject(Object.assign(new Error("Introuvable."), {status:404}));
+      const motif = String(b.motif || "").trim();
+      if (m[2] === "statut"){ if (["declaree","reconnue","refusee"].indexOf(b.statut) < 0) return refus("mpStatut"); if (z.statut !== "declaree" && b.statut !== z.statut && !motif) return refus("mpTransition");
+        if (b.statut !== z.statut) d.journal.unshift({visite:z.id, nature:"mp.statut", le:maint(), par:"admin", motif, avant:{statut:z.statut}, apres:b.statut}); z.statut = b.statut; return {ok:true, demo:true}; }
+      if (!motif) return refus("motif");
+      if (m[2] === "annuler"){ d.journal.unshift({visite:z.id, nature:"mp.annulation", le:maint(), par:"admin", motif, avant:{statut:z.statut}, apres:null}); z.statut = "annulee"; return {ok:true, demo:true}; }
+      if (!dOk(b.declareeLe) || b.declareeLe > a) return refus("declarationMp"); if (b.tableau && !/^\d{1,3}( ?(bis|ter))?$/i.test(String(b.tableau).trim())) return refus("tableau");
+      d.journal.unshift({visite:z.id, nature:"mp.rectification", le:maint(), par:"admin", motif, avant:{declaree_le:z.declaree_le, tableau:z.tableau}, apres:null}); Object.assign(z, {declaree_le:b.declareeLe, tableau:String(b.tableau || ""), observations:String(b.observations || "")}); return {ok:true, demo:true}; }
     return undefined;
   }
   return function(chemin, o){

@@ -2371,3 +2371,77 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-41.zip (cumulatif : correctifs 2 à 40 inclus ; 54 fichiers avec la feuille de style HSE).
+
+## Correctif 42 — Santé et sécurité › Suivi médical (FW-Medicale, seconde analyse approfondie)
+
+Seconde analyse du suivi médical, après les correctifs 40 et 41. Tests menés :
+- sur le serveur réel, en SQLite puis en PostgreSQL 16 ;
+- avec les comptes médecin, infirmier, lecture, menu masqué, actions refusées, sans données sensibles et RH ;
+- à 20 000 salariés (25 000 visites) ;
+- dans Chromium (fr / ar) et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| U1 | Pilotage : indicateurs médicaux servis à un profil dont l'écran Suivi médical est masqué ; une erreur du module rendait tout le Pilotage indisponible | haute | bloc filtré selon la matrice de l'écran (`service.filtrePilotage`) ; calcul sous `domaine()` |
+| U2 | Pilotage et « À traiter » périmés après une saisie | haute | `publier("medical.maj")` après chaque écriture |
+| U3 | Total du Pilotage incluant les services masqués : leurs valeurs (maladies professionnelles) se déduisaient par différence | haute | total calculé sur les seuls services publiés (`horsServicesMasques`, `servicesMasques`) |
+| U4 | Mises à jour perdues : rectifications, statut de maladie professionnelle et paramètres simultanés tous acceptés | haute | version exigée (empreinte de la visite ou de la déclaration, valeur de la périodicité) sous verrou ; 409 `concurrence` |
+| U5 | Infirmier (MED saisie) ou action « valider » refusée : aptitude prononcée et maladie professionnelle reconnue | haute | réaliser, rectifier et changer le statut réservés à `valider` (MED ≥ validation) ; 403 `valider` ; formulaire masqué à l'écran |
+| U6 | Rectification d'une ancienne visite déplacée après la plus récente : aptitude courante inversée | haute | date rectifiée bornée par les visites voisines (400 `ordreVisites`) |
+| U7 | Historique sans valeurs précédentes ; statut de maladie professionnelle et paramètres non journalisés | moyenne | `avant` renvoyé et affiché ; natures `mp.statut`, `mp.rectification`, `mp.annulation`, `parametre` |
+| U8 | Maladies professionnelles : tableau libre (HTML), date antérieure à l'entrée, doublons, création déjà « reconnue », retours sans motif, ni rectification ni annulation | moyenne | tableau `^\d{1,3}( bis| ter)?$`, date ≥ entrée, doublon refusé sous verrou, création « déclarée », retour motivé, routes de rectification et d'annulation motivées |
+| U9 | Salariés sortis : comptés en retard et dans la liste ; visite réalisée après la sortie | moyenne | exclus des compteurs, de `med-retard` et de la liste ; 400 `apresSortieR` |
+| U10 | « À traiter » : reprise oubliée après 60 jours ; salarié compté deux fois (embauche et reprise) ; une requête par accident ; erreur avalée | moyenne | sans borne basse (12 mois), sans double compte, requête unique, erreur journalisée |
+| U11 | Pilotage : « à jour » ne suivait pas la définition de l'écran | moyenne | visite non échue à la fin de la période (prochaine visite), inapte compris |
+| U12 | Prochaine visite non bornée (2100) | moyenne | au plus tard à la périodicité (400 `prochaineMax`) |
+| U13 | Ni annulation d'une visite réalisée erronée ni fiche d'aptitude imprimable | moyenne | annulation motivée (droit « supprimer ») ; fiche employeur (aptitude seule) et salarié (restrictions), tracée (droit « imprimer ») |
+| U14 | Recherche du salarié par matricule seulement ; filtres de la liste ignorés ; export de tout l'historique | moyenne | `/medical/salaries` (nom ou matricule, périmètre) ; filtres salarié, type, période, site ; export borné à deux ans, période dans l'audit |
+| U15 | Démonstration plus permissive que le serveur | moyenne | mêmes contrôles (sortie, entrée, longueurs, tableau, statuts, transitions) |
+| U16 | Dossier : seule la plus ancienne visite planifiée était actionnable ; motif des annulées absent ; pas de mention de lecture seule ; statut changé sans confirmation | moyenne | actions par visite, colonne « Motif », mentions, confirmation et version |
+| U17 | Restrictions acceptées avec « apte » ; seconde visite d'embauche ; aptitude imposée à une pré-reprise ; libellé « Réalisées » sur chaque ligne ; menu affiché quand l'action « lire » est refusée | basse | 400 `restrictionsHors`, 409 `embaucheFaite`, aptitude facultative, statut au singulier, `ecranAutorise` |
+
+Non traité, à décider avec le client :
+- durée de conservation, purge et droit d'accès du salarié à son dossier (RGPD, données de santé) ;
+- visibilité de « inapte » pour un profil RH sans accès aux données sensibles, et un éventuel champ « aménagement communicable à l'employeur » ;
+- surveillance médicale renforcée et périodicité par poste ;
+- reprise après une absence pour maladie (seuil légal) ;
+- référentiel des tableaux tunisiens ;
+- statut « visite non honorée » et relance des inaptes.
+
+Vérifié :
+- **SQLite.**
+  - `m1.js` : 51 contrôles, adaptés aux nouveaux droits et aux versions.
+  - `m3.js` : 42 contrôles des constats U1 à U17 :
+    - infirmier et actions refusées : 403 ;
+    - prochaine visite bornée, restrictions hors aptitude refusées ;
+    - ordre des visites, version périmée, journal des valeurs précédentes, paramètre périmé ;
+    - annulation d'une visite réalisée et aptitude recalculée ; motif et filtre de la liste ; impression ;
+    - pré-reprise sans aptitude, seconde embauche refusée ;
+    - maladies professionnelles : entrée, tableau, doublons simultanés, statut initial, droits, version, retour motivé, rectification, journal, annulation ;
+    - salariés sortis (planification, liste et compteurs, réalisation) ;
+    - recherche et périmètre, export borné et filtré ;
+    - Pilotage masqué et invalidé ;
+    - reprise d'un accident ancien de 120 jours.
+  - HSE : `h1.js` (73) et `h2.js` (44).
+- **PostgreSQL 16.**
+  - `m1.js` et `m3.js`. Le seul échec de `m3.js` est attendu : le test insère sa visite de salarié sorti dans la base SQLite, que le serveur PostgreSQL ne lit pas ; ce cas a été vérifié en SQLite.
+  - 10 rectifications, 10 statuts de maladie professionnelle, 10 déclarations identiques et 10 paramétrages simultanés : un seul 200 à chaque fois.
+  - Concurrence du correctif 40 : aucune anomalie.
+- **20 000 salariés.**
+  - Aptitudes : 152 ms. Visites : 19 ms. Dossier : 6 ms.
+  - Recherche du salarié : 7 ms. Export : 113 ms.
+  - « À traiter » : 174 ms.
+  - Pilotage recalculé : 2,0 s ; total sur 19 603 salariés publiés, 5 services masqués exclus.
+- **Chromium.**
+  - Liste de salariés proposée ; filtre par salarié ; deux visites planifiées actionnables, choix de la visite.
+  - Restrictions refusées avec « apte ».
+  - Fiches employeur et salarié ; rectification avec « Avant : … ».
+  - Statut de maladie professionnelle confirmé ; lien d'export avec période.
+  - Infirmier : sans formulaire de résultat, avec la mention correspondante. Profil en lecture : mention affichée.
+  - Arabe ; aucune erreur JavaScript.
+- **Démonstration.**
+  - Salarié sorti, restrictions, entrée, tableau, statut inconnu et retour sans motif refusés.
+  - Journal ; recherche ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-42.zip (cumulatif : correctifs 2 à 41 inclus ; 55 fichiers avec la feuille de style du suivi médical).

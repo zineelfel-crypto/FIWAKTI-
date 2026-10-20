@@ -105,8 +105,9 @@ function creer(o){
           tf:h >= 1000 ? Math.round(aa.length * 1e6 / h * 100) / 100 : null, tg:h >= 1000 ? Math.round(j * 1e3 / h * 100) / 100 : null, nonSignificatif:h < 1000}; }
     });
     /* v56.21 : suivi médical — taux et nombres par service seulement (masqués sous 5 salariés), jamais de détail */
+    /* correctif 42 : sous domaine() (une erreur du module ne rend plus tout le Pilotage indisponible) */
     if (actif("FW-Medicale") && o.service){ const m = o.service("FW-Medicale");
-      if (m && m.indicateurs){ out.sources.push("FW-Medicale"); out.medical = await m.indicateurs(emps, du, au); } }
+      if (m && m.indicateurs) await domaine("suivi médical", async ()=>{ out.sources.push("FW-Medicale"); out.medical = await m.indicateurs(emps, du, au); }); }
     /* recrutement (postes ouverts : global ; embauches de la période dans le périmètre) */
     if (actif("FW-Recrutement")) await domaine("recrutement", async ()=>{
       out.sources.push("FW-Recrutement");
@@ -192,7 +193,10 @@ function creer(o){
     /* correctif 41 : le bloc « santé et sécurité » suit la matrice de l'écran Santé et sécurité du demandeur (écran masqué :
        aucune donnée ; sans accès aux données sensibles : ni jours d'arrêt ni taux de gravité) — le cache est partagé par périmètre */
     const svH = actif("FW-HSE") && o.service ? o.service("FW-HSE") : null, fH = svH && svH.service && svH.service.filtrePilotage;
-    const filtreHse = r => { if (r.hse && fH){ const h = fH(admin, P, r.hse); if (h === undefined){ delete r.hse; r.sources = (r.sources || []).filter(s=>s !== "FW-HSE"); } else r.hse = h; } return r; };
+    /* correctif 42 : même règle pour le bloc « suivi médical » (matrice de l'écran Suivi médical) */
+    const svM = actif("FW-Medicale") && o.service ? o.service("FW-Medicale") : null, fM = svM && svM.service && svM.service.filtrePilotage;
+    const filtreHse = r => { if (r.hse && fH){ const h = fH(admin, P, r.hse); if (h === undefined){ delete r.hse; r.sources = (r.sources || []).filter(s=>s !== "FW-HSE"); } else r.hse = h; }
+      if (r.medical && fM && fM(admin, P, r.medical) === undefined){ delete r.medical; r.sources = (r.sources || []).filter(s=>s !== "FW-Medicale"); } return r; };
     const voitHse = !fH || !!(svH.service.droitsEcran(admin, P).voir);
     const filtreVent = r => { if (!voitHse && Array.isArray(r.lignes)) r.lignes = r.lignes.map(l=>{ const z = Object.assign({}, l); delete z.accidents; return z; }); return r; };
     try { periode(q); } catch(e){ if (p === "/api/v1/bi/tableau" || p === "/api/v1/bi/ventilation" || p === "/api/v1/bi/export") return erreur(res, e.code || 400, e.message); }

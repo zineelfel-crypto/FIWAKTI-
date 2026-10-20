@@ -5,3 +5,7 @@
 .fwm-a{font-size:12px; font-weight:600; border-radius:6px; padding:3px 8px;}
 .fwm-apte{background:#E3F0EE; color:#0A4743;} .fwm-apte_restriction{background:#FBEFDF; color:#7A3E0B;} .fwm-inapte{background:#FDE2E1; color:#8A1C14;}
 .fwm-ko{color:#B45309; font-weight:600;}
+/* correctif 42 : visite planifiée choisie pour la saisie du résultat ; maladie professionnelle annulée */
+.fwm-choix td{font-weight:600;}
+.fwm-annule td{color:var(--text-2); text-decoration:line-through;}
+.fwm-annule td:last-child{text-decoration:none;}
