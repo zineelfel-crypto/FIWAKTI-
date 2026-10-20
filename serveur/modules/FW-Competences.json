@@ -2,7 +2,7 @@
   "id": "FW-Competences",
   "nom": "Compétences",
   "categorie": "metier",
-  "version": "1.4",
+  "version": "1.5",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -40,7 +40,7 @@
     "css_ko": 5
   },
   "integrite": {
-    "js": "sha384-Qdj/U55G+3AcdnHOBZgYc9ZuBM/ZV+D+IF0bVYHNmb6ttpfJ1JjTbP7UPNa3+YJc",
+    "js": "sha384-mgR5XTw+2BFUAPUbX0v1vwK41glK2ou9DqpY9JzrsGuhNfKpeb4XolfCdV5bgBUU",
     "css": "sha384-MYj9y57BIXQxVokETUxGJnUAZMIH0t0yXR9v4IaEyCYAyN2huVO6Ihovqd/rHXmo"
   }
 }

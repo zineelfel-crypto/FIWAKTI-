@@ -150,7 +150,7 @@ function vueDossier(ctx){
 function vueParametres(ctx){
   const P = ctx.etat.par, dr = droits(ctx);
   return (!P ? erreurOuCharge(ctx, "par") : '<div class="fw-toolbar"><label>'+ctx.esc(T(ctx,"periodicite"))+' <select data-fwmc="per"'+(dr.parametrer ? '' : ' disabled')+'>'+[6,12,24,36].map(n=>'<option value="'+n+'"'+(n === P.periodiciteMois ? ' selected' : '')+'>'+ctx.esc(T(ctx,"mois").replace("{n}", n))+'</option>').join("")+'</select></label></div>')+
-    (dr.exporter ? '<div class="fw-toolbar"><a class="fw-btn" href="api/v1/medical/export" download>'+ctx.esc(T(ctx,"exporter"))+'</a></div>' : '');
+    (dr.exporter ? '<div class="fw-toolbar"><a class="fw-btn" href="api/v1/medical/export?lang='+encodeURIComponent(ctx.lang||"fr")+'" download>'+ctx.esc(T(ctx,"exporter"))+'</a></div>' : '');
 }
 function focusSur(id){ setTimeout(()=>{ const x = document.getElementById(id); if (x) x.focus(); }, 80); }
 function dossier(ctx, mat, focus){ return ctx.api("api/v1/medical/dossier/"+encodeURIComponent(mat)).then(j=>{ const E = ctx.etat; if (!E.D || E.D.salarie.mat !== j.salarie.mat){ E.report = E.rect = null; } E.D = j; E.onglet = "dossier"; ctx.rendre(); focusSur(focus || "fwmDT"); }); }

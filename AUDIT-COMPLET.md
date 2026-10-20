@@ -2296,3 +2296,78 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-40.zip (cumulatif : correctifs 2 à 39 inclus ; 53 fichiers).
+
+## Correctif 41 — Santé et sécurité › Santé et sécurité (FW-HSE, seconde analyse approfondie)
+
+Seconde analyse de l'écran Santé et sécurité, après le correctif 40, sur le serveur réel en SQLite puis en PostgreSQL 16. Comptes utilisés : menu masqué, menu en lecture, profil sans accès aux données sensibles, profil « saisie », comptes limités à un site. Tests à 20 000 salariés, dans Chromium (fr / ar, clavier, impression) et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| T1 | Un profil sans accès aux données sensibles voyait « ••• » et l'enregistrait : description écrasée, cause remplacée, jours d'arrêt remis à 0 | haute | modification et analyse refusées (403 `sensibles`) ; formulaires masqués à l'écran |
+| T2 | Déclaration CNAM conservée après un passage en incident, un changement de salarié ou de date (registre incohérent, y compris en concurrence) | haute | sous le verrou de l'événement : type d'accident, salarié et date ≤ déclaration imposés (409 `cnamExiste`) ; la route CNAM relit le type dans la transaction |
+| T3 | Pilotage : chiffres HSE servis à un profil dont l'écran est masqué ; jours d'arrêt sans accès aux données sensibles ; cache non invalidé ; taux de fréquence de 375 000 calculé sur 8 h | haute | bloc filtré selon la matrice HSE du demandeur ; mêmes règles que l'écran (annulés exclus, seuil de 1 000 h) ; `publier("hse.maj")` à chaque écriture |
+| T4 | Un profil « saisie » supprimait l'arrêt et les jours d'arrêt validés en modifiant la déclaration | moyenne | gravité, arrêt et jours conservés sans droit de validation dès l'analyse |
+| T5 | Modification d'une action : échéance dans le passé ou antérieure à l'événement acceptée | moyenne | 400 `echeancePassee` ; `min` à l'écran |
+| T6 | Un compte limité à un site s'appropriait un risque commun en le révisant | moyenne | un risque commun reste commun (400 `siteCommun`) |
+| T7 | Modifier un événement survenu sur un autre site le déplaçait sur le site du salarié | moyenne | site enregistré conservé même hors périmètre ; nom du site affiché et proposé |
+| T8 | Mises à jour perdues (deux modifications simultanées acceptées) | moyenne | version de l'élément exigée (événement, action, risque) ; 409 `concurrence` |
+| T9 | Historique vide après des modifications ; nouvelle déclaration CNAM écrasant l'ancienne sans trace ; révision de risque sans trace | moyenne | journal des valeurs précédentes (modification, analyse, CNAM, action, révision), affiché et masqué sans accès aux données sensibles |
+| T10 | « À traiter » CNAM : accidents de plus de 365 jours oubliés ; délai de 48 h non distingué | moyenne | `hse-cnam-retard` (urgence 3) et `hse-cnam` (dans le délai), sans limite d'ancienneté |
+| T11 | Messages serveur et registre toujours en français, quelle que soit la langue de l'écran | moyenne | en-tête `X-Langue` envoyé par l'application et `?lang=` dans les liens d'export, lus par tous les modules FW- |
+| T12 | Onglets inaccessibles au clavier | moyenne | gestionnaire générique `.fw-stabs` (flèches inversées en RTL, Début, Fin) dans `app.js` |
+| T13 | Aucune annulation d'un événement ou d'une dotation erronés ; actions « supprimer » et « imprimer » de la matrice sans effet ; dotation datée avant l'entrée | moyenne | annulation motivée (statut `annule`, gardée au registre, exclue des taux et alertes ; table `hse_epi_annul`) ; fiche imprimable tracée ; remise ≥ entrée |
+| T14 | Dotations et risques en double | basse | refus sous verrou (même salarié, équipement et date ; même unité, danger et site) |
+| T15 | Un « arrêt » de 0 jour compté dans le taux de fréquence | basse | au moins un jour d'arrêt exigé à la clôture |
+| T16 | Registre sans limite de période ni choix à l'écran ; période absente de l'audit ; colonnes manquantes | basse | borne de deux ans, champs Du / Au, période dans l'audit, description, cause, déclarant et date de clôture (masquées sans accès aux données sensibles) |
+| T17 | Démonstration plus permissive que le serveur (gravité 9, heure 25:99, site inconnu, CNAM sur un incident) | basse | mêmes contrôles ; annulation, recherche et filtres rejoués |
+| T18 | Mention de lecture seule absente des onglets Actions, Risques et Équipements ; badge gris pour l'accident de trajet ; fiche 360° comptant les trajets | basse | mentions, couleur dédiée, accidents du travail seulement |
+| T19 | Manques : recherche du salarié par matricule seulement ; aucun filtre de liste ; aucune visite de reprise proposée après un arrêt | moyenne | `/hse/salaries` (nom ou matricule, périmètre) avec liste proposée ; filtres salarié, période et site ; « À traiter » médical `med-reprise` |
+
+Non traité : rapprochement avec les absences « accident du travail » ; durée de conservation et purge des tables `hse_*` (RGPD) ; pièces jointes ; délai CNAM en jours ouvrables, à faire confirmer par un juriste (le calcul actuel compte 48 heures calendaires) ; couleurs des badges en mode sombre.
+
+Vérifié :
+- **SQLite.**
+  - `h1.js` : 73 contrôles. Le script a été adapté pour envoyer les versions désormais exigées.
+  - `h2.js` : 44 contrôles des constats ci-dessus :
+    - profil sans données sensibles refusé, cause intacte ;
+    - CNAM verrouillée (type, date, salarié), modification compatible acceptée, version périmée refusée ;
+    - journal des valeurs précédentes de la modification et de la CNAM ;
+    - profil « saisie » sans effet sur l'arrêt ;
+    - échéance passée refusée ;
+    - risque commun conservé, doublon de risque refusé ;
+    - site hors périmètre conservé ;
+    - CNAM en retard et dans le délai distinguées ;
+    - langue arabe (`X-Langue`) et registre en anglais ;
+    - annulation (motif obligatoire, droit exigé, liste des annulés, événement figé) et impression ;
+    - dotation avant l'entrée refusée, trois dotations simultanées → un seul 200, dotation annulée ;
+    - clôture avec 0 jour d'arrêt refusée, registre borné ;
+    - filtres et recherche (hors périmètre vide) ;
+    - Pilotage masqué, sans jours d'arrêt, invalidé ;
+    - fiche 360° sans les trajets.
+  - Suivi médical : 51 contrôles. « Reprise » apparaît après un arrêt et disparaît après planification ; message en anglais.
+  - Formation et Évaluations rejouées : seuls les identifiants changent.
+- **PostgreSQL 16.**
+  - 73 + 44 + 51 contrôles.
+  - 10 modifications simultanées depuis la même version : un seul 200 à chaque fois.
+  - 10 déclarations CNAM simultanées à un passage en incident : aucun incident déclaré.
+  - Concurrence du correctif 40 : aucune anomalie.
+- **20 000 salariés.**
+  - Indicateurs HSE : 4,9 s au premier appel (calcul des journées), puis 0,3 s.
+  - Événements : 20 ms.
+  - Recherche du salarié : 6 ms.
+  - Liste filtrée par salarié : 12 ms.
+  - Registre : 111 ms.
+  - « À traiter » médical : 113 ms.
+- **Chromium.**
+  - Onglets au clavier (→, Fin ; ← en arabe).
+  - Lien d'export avec langue et période.
+  - Liste de salariés proposée ; déclaration d'un accident de trajet.
+  - Modification et historique « Avant : … » ; fiche imprimée ; annulation motivée.
+  - Badge du trajet ; filtre par salarié.
+  - Profil sans données sensibles : ni analyse, ni modification, ni impression.
+  - Mentions de lecture seule ; erreur en arabe.
+  - Aucune erreur JavaScript.
+- **Démonstration.** Parcours du correctif 40 ; refus de la gravité 9, de l'heure 25:99, d'un site inconnu et d'une CNAM sur un incident ; annulation ; recherche ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-41.zip (cumulatif : correctifs 2 à 40 inclus ; 54 fichiers avec la feuille de style HSE).

@@ -59,6 +59,25 @@ const L = {
     exporter:"تصدير السجل (مسجل)", historique:"السجل", n_reouverture:"إعادة فتح", n_annulation:"إلغاء", actionDe:"{a} — {n}", sorti:"غادر", detailDe:"فتح حدث {d}",
     epiL:["حذاء السلامة","خوذة","قفازات","نظارات واقية","واقي السمع","سترة عاكسة","كمامة تنفس","ميدعة مضادة للكهرباء الساكنة","حزام الأمان"]}
 };
+/* correctif 41 : annulation, impression, filtres, historique détaillé, recherche du salarié */
+Object.assign(L.fr, {s_annule:"Annulé", annules:"Annulés", annulerEvt:"Annuler l'événement", annulerEvtQ:"Annuler cet événement saisi par erreur ? Il reste au registre mais sort des taux. Indiquez le motif.", imprimer:"Imprimer la fiche",
+  n_modification:"Modification", n_cnam:"Déclaration CNAM", n_analyse:"Analyse", n_action:"Action modifiée", n_revision:"Révision", avant:"Avant", du:"Du", au:"Au", tousSites:"Tous les sites", matF:"Matricule",
+  annulerEpi:"Annuler", annulerEpiQ:"Annuler la dotation « {n} » saisie par erreur ? Indiquez le motif.", epiAnnulee:"annulée", fiche:"Fiche de déclaration d'événement", editeLe:"Éditée le", declarant:"Déclaré par", closLe:"Clos le",
+  cnamDelai:"À déclarer à la CNAM dans les 48 heures.", rechSal:"Matricule ou nom (2 caractères au moins)", actionsLecture:"Actions en lecture seule pour votre profil.", risquesLecture:"Risques en lecture seule pour votre profil.", epiLecture:"Équipements en lecture seule pour votre profil.",
+  ch_type:"Type", ch_d:"Date", ch_heure:"Heure", ch_site_id:"Site", ch_lieu:"Lieu", ch_mat:"Salarié", ch_gravite:"Gravité", ch_arret:"Arrêt", ch_jours_arret:"Jours d'arrêt", ch_description:"Description", ch_cause:"Cause",
+  ch_declaree_le:"Déclarée le", ch_reference:"Référence", ch_titre:"Action", ch_responsable:"Responsable", ch_echeance:"Échéance", oui:"oui", non:"non", aucuneAvant:"aucune"});
+Object.assign(L.en, {s_annule:"Cancelled", annules:"Cancelled", annulerEvt:"Cancel the event", annulerEvtQ:"Cancel this event entered by mistake? It stays in the register but leaves the rates. Give the reason.", imprimer:"Print the form",
+  n_modification:"Edited", n_cnam:"CNAM declaration", n_analyse:"Analysis", n_action:"Action edited", n_revision:"Review", avant:"Before", du:"From", au:"To", tousSites:"All sites", matF:"Employee ID",
+  annulerEpi:"Cancel", annulerEpiQ:"Cancel the issue “{n}” entered by mistake? Give the reason.", epiAnnulee:"cancelled", fiche:"Event report form", editeLe:"Printed on", declarant:"Reported by", closLe:"Closed on",
+  cnamDelai:"To declare to the CNAM within 48 hours.", rechSal:"ID or name (at least 2 characters)", actionsLecture:"Actions are read-only for your profile.", risquesLecture:"Risks are read-only for your profile.", epiLecture:"Equipment is read-only for your profile.",
+  ch_type:"Type", ch_d:"Date", ch_heure:"Time", ch_site_id:"Site", ch_lieu:"Place", ch_mat:"Employee", ch_gravite:"Severity", ch_arret:"Lost time", ch_jours_arret:"Days lost", ch_description:"Description", ch_cause:"Cause",
+  ch_declaree_le:"Declared on", ch_reference:"Reference", ch_titre:"Action", ch_responsable:"Owner", ch_echeance:"Due", oui:"yes", non:"no", aucuneAvant:"none"});
+Object.assign(L.ar, {s_annule:"ملغى", annules:"الملغاة", annulerEvt:"إلغاء الحدث", annulerEvtQ:"إلغاء هذا الحدث المسجل خطأ؟ يبقى في السجل ويخرج من المعدلات. اذكر التعليل.", imprimer:"طباعة البطاقة",
+  n_modification:"تعديل", n_cnam:"التصريح للصندوق", n_analyse:"تحليل", n_action:"تعديل إجراء", n_revision:"مراجعة", avant:"قبل", du:"من", au:"إلى", tousSites:"كل المواقع", matF:"المعرف",
+  annulerEpi:"إلغاء", annulerEpiQ:"إلغاء التسليم «{n}» المسجل خطأ؟ اذكر التعليل.", epiAnnulee:"ملغى", fiche:"بطاقة التصريح بحدث", editeLe:"طبعت في", declarant:"صرّح به", closLe:"أغلق في",
+  cnamDelai:"يصرح به للصندوق خلال 48 ساعة.", rechSal:"المعرف أو الاسم (حرفان على الأقل)", actionsLecture:"الإجراءات للاطلاع فقط حسب ملفك.", risquesLecture:"المخاطر للاطلاع فقط حسب ملفك.", epiLecture:"المعدات للاطلاع فقط حسب ملفك.",
+  ch_type:"النوع", ch_d:"التاريخ", ch_heure:"الساعة", ch_site_id:"الموقع", ch_lieu:"المكان", ch_mat:"الأجير", ch_gravite:"الخطورة", ch_arret:"التوقف", ch_jours_arret:"أيام التوقف", ch_description:"الوصف", ch_cause:"السبب",
+  ch_declaree_le:"تاريخ التصريح", ch_reference:"المرجع", ch_titre:"الإجراء", ch_responsable:"المسؤول", ch_echeance:"الأجل", oui:"نعم", non:"لا", aucuneAvant:"لا شيء"});
 const T = (c, k) => (L[c.lang] || L.fr)[k] || L.fr[k] || k;
 const fl = (ctx, g) => ctx.lang === "ar" ? (g === "‹" ? "›" : g === "›" ? "‹" : g === "→" ? "←" : g === "←" ? "→" : g) : g;
 const msgErr = (ctx, e) => (e && (e.name === "TypeError" || /Failed to fetch|NetworkError/i.test(e.message))) ? T(ctx, "reseau") : (e && e.message) || "";
@@ -80,10 +99,10 @@ const droits = ctx => { const E = ctx.etat; return (E.detail||{}).droits || (E.E
 const tete = (ctx, leg, cols) => '<caption class="fw-sr">'+ctx.esc(T(ctx,leg))+'</caption><thead><tr>'+cols.map(c=>'<th scope="col"'+(c[0] === "#" ? ' class="fw-numh"' : '')+'>'+ctx.esc(c ? (c[0] === "#" ? c.slice(1) : T(ctx,c)) : "")+'</th>').join("")+'</tr></thead>';
 function charger(ctx){
   const E = ctx.etat;
-  if (!E.init) Object.assign(E, {init:true, onglet:"bord", I:null, EV:null, stE:"", offE:0, A:null, stA:"", offA:0, R:null, offR:0, P:null, filtreP:"", offP:0, detail:null, form:{}, edit:false, editR:null, editA:null});
+  if (!E.init) Object.assign(E, {init:true, onglet:"bord", I:null, EV:null, stE:"", offE:0, A:null, stA:"", offA:0, R:null, offR:0, P:null, filtreP:"", offP:0, detail:null, form:{}, edit:false, editR:null, editA:null, fE:{}, exDu:"", exAu:""});
   const get = (k, url) => { if (!E[k] && !E[k+"En"] && !E[k+"Err"]){ E[k+"En"] = true; ctx.api(url).then(j=>{ E[k] = j; E[k+"En"] = false; ctx.rendre(); }).catch(e=>{ E[k+"En"] = false; E[k+"Err"] = msgErr(ctx, e); ctx.rendre(); }); } };
   if (E.onglet === "bord") get("I", "api/v1/hse/indicateurs");
-  if (E.onglet === "evenements" && !E.detail) get("EV", "api/v1/hse/evenements?limit="+PAS+"&offset="+E.offE+"&statut="+(E.stE || ""));
+  if (E.onglet === "evenements" && !E.detail) get("EV", "api/v1/hse/evenements?limit="+PAS+"&offset="+E.offE+"&statut="+(E.stE || "")+["mat","du","au","site"].map(k=>E.fE[k] ? "&"+k+"="+encodeURIComponent(E.fE[k]) : "").join(""));
   if (E.onglet === "actions") get("A", "api/v1/hse/actions?limit="+PAS+"&offset="+E.offA+"&statut="+E.stA);
   if (E.onglet === "risques") get("R", "api/v1/hse/risques?limit="+PAS+"&offset="+E.offR);
   if (E.onglet === "epi") get("P", "api/v1/hse/epi?limit="+PAS+"&offset="+E.offP+"&filtre="+E.filtreP);
@@ -105,7 +124,8 @@ function vueBord(ctx){
     kp({v:I.trajets, l:T(ctx,"trajets"), ico:"hse", ton:I.trajets ? "att" : "ok"})+
     kp({v:I.presqueAccidents, l:T(ctx,"presque"), ico:"alerte", ton:"info", spark:M.map(m=>m.presque_accident)})+
     kp({v:I.actionsOuvertes, l:T(ctx,"actionsOuv"), aide:I.actionsRetard+" "+T(ctx,"retard"), ico:"succes", ton:I.actionsRetard ? "alerte" : "ok", act:"fwm:ongletV", data:"actions"})+'</div>'+
-    (dr.exporter ? '<div class="fw-toolbar"><a class="fw-btn" href="api/v1/hse/export" download>'+ctx.esc(T(ctx,"exporter"))+'</a></div>' : '')+
+    (dr.exporter ? '<div class="fw-toolbar">'+champ(ctx, T(ctx,"du"), '<input type="date" data-fwmc="exDu" value="'+ctx.esc(ctx.etat.exDu || I.du)+'">')+champ(ctx, T(ctx,"au"), '<input type="date" data-fwmc="exAu" value="'+ctx.esc(ctx.etat.exAu || I.au)+'">')+
+      '<a class="fw-btn" href="api/v1/hse/export?lang='+encodeURIComponent(ctx.lang || "fr")+'&du='+encodeURIComponent(ctx.etat.exDu || I.du)+'&au='+encodeURIComponent(ctx.etat.exAu || I.au)+'" download>'+ctx.esc(T(ctx,"exporter"))+'</a></div>' : '')+
     (!vide ? '<div class="fw-vgrille">'+
       V.graphe({titre:T(ctx,"evolution"), type:"barres", etiquettes:M.map(m=>V.mois(m.mois, true)),
         series:[{nom:T(ctx,"accidents"), valeurs:M.map(m=>+m.accident||0), couleur:"#e11d48"}, {nom:T(ctx,"trajets"), valeurs:M.map(m=>+m.accident_trajet||0), couleur:"#a855f7"}, {nom:T(ctx,"incidents"), valeurs:M.map(m=>+m.incident||0), couleur:"#f59e0b"},
@@ -128,7 +148,7 @@ function formEvenement(ctx, pre, sites, e){
   return champ(ctx, T(ctx,"type"), sel(ctx, pre+"Type", TYPES.map(t=>[t, T(ctx,"t_"+t)]), x.type || "accident"))+
     champ(ctx, T(ctx,"date"), inp(ctx, pre+"D", ' type="date" max="'+auj()+'"', x.d || auj()))+champ(ctx, T(ctx,"heure"), inp(ctx, pre+"H", ' type="time"', x.heure || ""))+
     champ(ctx, T(ctx,"site"), sel(ctx, pre+"S", sitesOpts(ctx, sites, T(ctx,"siteAuto")), x.site_id || ""))+champ(ctx, T(ctx,"lieu"), inp(ctx, pre+"L", ' maxlength="120"', x.lieu || ""))+
-    champ(ctx, T(ctx,"victime"), inp(ctx, pre+"M", ' maxlength="40" autocomplete="off"', x.mat || ""))+champ(ctx, T(ctx,"gravite"), sel(ctx, pre+"G", G4, x.gravite || 1))+
+    champ(ctx, T(ctx,"victime"), inp(ctx, pre+"M", ' maxlength="40" autocomplete="off" list="fwhSalL" title="'+ctx.esc(T(ctx,"rechSal"))+'"', x.mat || ""))+champ(ctx, T(ctx,"gravite"), sel(ctx, pre+"G", G4, x.gravite || 1))+
     coche(ctx, pre+"A", T(ctx,"arret"), x.arret)+champ(ctx, T(ctx,"jours"), inp(ctx, pre+"J", ' type="number" min="0" max="3650" step="1"', x.jours_arret != null ? x.jours_arret : 0))+
     champ(ctx, T(ctx,"description"), zone(ctx, pre+"Desc", x.description || ""))+
     '<button class="fw-btn pri" data-act="fwm:'+(e ? "majEvt" : "declarer")+'"'+dis+'>'+ctx.esc(T(ctx, e ? "enregistrer" : "declarer"))+'</button>'+(e ? '<button class="fw-btn" data-act="fwm:finEdit">'+ctx.esc(T(ctx,"fermer"))+'</button>' : '');
@@ -140,38 +160,49 @@ function vueEvenements(ctx){
   const X = E.EV, dr = droits(ctx);
   return (X && !dr.sensibles ? '<p class="fw-note warn">'+ctx.esc(T(ctx,"masqueNote"))+'</p>' : '')+
     (dr.creer ? '<div class="fw-card fw-u-p fwh-form">'+formEvenement(ctx, "fwh", (X||{}).sites)+'<p class="fw-hint" style="flex-basis:100%">'+ctx.esc(T(ctx,"sansDonneeMedicale"))+'</p></div>' : X ? '<p class="fw-note">'+ctx.esc(T(ctx,"lectureNote"))+'</p>' : '')+
-    '<div class="fw-toolbar"><select data-fwmc="stE" aria-label="'+ctx.esc(T(ctx,"statut"))+'"><option value="">'+ctx.esc(T(ctx,"enCours"))+'</option><option value="clos"'+(E.stE === "clos" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"clos"))+'</option><option value="tous"'+(E.stE === "tous" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"tous"))+'</option></select></div>'+
+    '<div class="fw-toolbar"><select data-fwmc="stE" aria-label="'+ctx.esc(T(ctx,"statut"))+'"><option value="">'+ctx.esc(T(ctx,"enCours"))+'</option><option value="clos"'+(E.stE === "clos" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"clos"))+'</option><option value="annule"'+(E.stE === "annule" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"annules"))+'</option><option value="tous"'+(E.stE === "tous" ? ' selected' : '')+'>'+ctx.esc(T(ctx,"tous"))+'</option></select>'+
+      '<input data-fwmc="fE:mat" list="fwhSalL" autocomplete="off" value="'+ctx.esc(E.fE.mat || "")+'" placeholder="'+ctx.esc(T(ctx,"matF"))+'" aria-label="'+ctx.esc(T(ctx,"matF"))+'" style="max-width:150px">'+
+      '<input type="date" data-fwmc="fE:du" value="'+ctx.esc(E.fE.du || "")+'" aria-label="'+ctx.esc(T(ctx,"du"))+'"><input type="date" data-fwmc="fE:au" value="'+ctx.esc(E.fE.au || "")+'" aria-label="'+ctx.esc(T(ctx,"au"))+'">'+
+      '<select data-fwmc="fE:site" aria-label="'+ctx.esc(T(ctx,"site"))+'">'+sitesOpts(ctx, (X||{}).sites, T(ctx,"tousSites")).map(([k, l])=>'<option value="'+ctx.esc(k)+'"'+((E.fE.site || "") === k ? ' selected' : '')+'>'+ctx.esc(l)+'</option>').join("")+'</select></div>'+
     (!X ? erreurOuCharge(ctx, "EV") : !X.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
     '<table class="fw-tbl">'+tete(ctx, "evenements", ["date","type","description","salarie","statut"])+'<tbody>'+
       X.lignes.map(e=>'<tr><td>'+ctx.esc(ctx.dateAff(e.d)+(e.heure ? " "+e.heure : ""))+'</td><td><span class="fwh-t fwh-'+e.type+'">'+ctx.esc(T(ctx,"t_"+e.type))+'</span></td>'+
         '<td><button class="fw-link" data-act="fwm:voir" data-id="'+ctx.esc(e.id)+'" aria-label="'+ctx.esc(T(ctx,"detailDe").replace("{d}", ctx.dateAff(e.d)))+'">'+ctx.esc(String(e.description).slice(0, 80))+'</button></td><td>'+ctx.esc(e.victime || "—")+'</td><td>'+ctx.esc(T(ctx,"s_"+e.statut))+
-        (ACC.indexOf(e.type) >= 0 && e.mat && !e.cnam ? ' <span class="fwh-ko" title="'+ctx.esc(T(ctx,"cnamManque"))+'">· '+ctx.esc(T(ctx,"cnam"))+'</span>' : '')+'</td></tr>').join("")+'</tbody></table>'+pager(ctx, "offE", E.offE, X.total));
+        (ACC.indexOf(e.type) >= 0 && e.mat && !e.cnam && e.statut !== "annule" ? ' <span class="'+(e.cnamRetard ? 'fwh-ko' : 'fw-hint')+'" title="'+ctx.esc(T(ctx, e.cnamRetard ? "cnamRetard" : "cnamDelai"))+'">· '+ctx.esc(T(ctx,"cnam"))+'</span>' : '')+'</td></tr>').join("")+'</tbody></table>'+pager(ctx, "offE", E.offE, X.total));
 }
 function vueDetail(ctx){
-  const E = ctx.etat, D = E.detail, e = D.evenement, dr = droits(ctx), ouvert = e.statut !== "clos", val3 = dr.valider && ouvert, dis = E.envoi ? ' disabled aria-busy="true"' : '';
-  const nomSite = ((D.sites||[]).find(s=>s.id === e.site_id) || {}).nom || "";
-  const hDecl = e.cnam ? null : (Date.now() - new Date(e.d+"T"+(e.heure || "00:00")+":00").getTime()) / 36e5;
+  /* correctif 41 : profil sans données sensibles sans formulaire d'analyse ni de modification ; événement annulé figé */
+  const E = ctx.etat, D = E.detail, e = D.evenement, dr = droits(ctx), ouvert = e.statut !== "clos" && e.statut !== "annule", val3 = dr.valider && ouvert && !e.masque, dis = E.envoi ? ' disabled aria-busy="true"' : '';
+  const nomSite = e.site_nom || ((D.sites||[]).find(s=>s.id === e.site_id) || {}).nom || "";
   return '<div class="fw-toolbar"><button class="fw-btn sm" data-act="fwm:retour">'+fl(ctx, "←")+' '+ctx.esc(T(ctx,"retour"))+'</button><span class="fwh-t fwh-'+e.type+'">'+ctx.esc(T(ctx,"t_"+e.type))+'</span><strong id="fwhDT" tabindex="-1">'+ctx.esc(ctx.dateAff(e.d)+(e.heure ? " "+e.heure : "")+(nomSite ? " · "+nomSite : "")+(e.lieu ? " · "+e.lieu : ""))+'</strong><span class="fw-tag">'+ctx.esc(T(ctx,"s_"+e.statut))+'</span>'+
-      (dr.modifier && ouvert && !E.edit && !e.masque ? '<button class="fw-btn sm" data-act="fwm:edit">'+ctx.esc(T(ctx,"modifier"))+'</button>' : '')+(dr.valider && !ouvert ? '<button class="fw-btn sm" data-act="fwm:rouvrir"'+dis+'>'+ctx.esc(T(ctx,"rouvrir"))+'</button>' : '')+'</div>'+
+      (dr.imprimer && !e.masque ? '<button class="fw-btn sm" data-act="fwm:imprimer"'+dis+'>'+ctx.esc(T(ctx,"imprimer"))+'</button>' : '')+
+      (dr.supprimer && e.statut !== "annule" ? '<button class="fw-btn sm" data-act="fwm:annulerEvt"'+dis+'>'+ctx.esc(T(ctx,"annulerEvt"))+'</button>' : '')+
+      (dr.modifierFaits && ouvert && !E.edit && !e.masque ? '<button class="fw-btn sm" data-act="fwm:edit">'+ctx.esc(T(ctx,"modifier"))+'</button>' : '')+(dr.valider && e.statut === "clos" ? '<button class="fw-btn sm" data-act="fwm:rouvrir"'+dis+'>'+ctx.esc(T(ctx,"rouvrir"))+'</button>' : '')+'</div>'+
     (E.edit ? '<div class="fw-card fw-u-p fwh-form">'+formEvenement(ctx, "fwhE", D.sites, e)+'</div>' :
     '<div class="fw-card fw-u-p"><p>'+ctx.esc(e.description)+'</p><p class="fw-hint">'+ctx.esc((e.victime ? T(ctx,"salarie")+" : "+e.victime+" · " : "")+T(ctx,"gravite")+" : "+(e.gravite || "—")+(e.arret && e.jours_arret != null ? " · "+T(ctx,"jours")+" : "+e.jours_arret : ""))+'</p>'+
       (val3 ? '<div class="fwh-form">'+champ(ctx, T(ctx,"cause"), zone(ctx, "fwhCause", e.masque ? "" : e.cause || ""))+(e.arret && !e.masque ? champ(ctx, T(ctx,"jours"), inp(ctx, "fwhJ2", ' type="number" min="0" max="3650" step="1"', e.jours_arret)) : '')+
         '<button class="fw-btn" data-act="fwm:analyser"'+dis+'>'+ctx.esc(T(ctx,"analyser"))+'</button></div>' : (e.cause ? '<p><strong>'+ctx.esc(T(ctx,"cause"))+' :</strong> '+ctx.esc(e.cause)+'</p>' : ''))+'</div>')+
     (ACC.indexOf(e.type) >= 0 && e.mat ? '<div class="fw-sec">'+ctx.esc(T(ctx,"cnam"))+'</div>'+(e.cnam ? '<p class="fw-hint">'+ctx.esc(T(ctx,"cnamLe")+" "+ctx.dateAff(e.cnam.declaree_le)+(e.cnam.reference ? " · "+T(ctx,"cnamRef")+" "+e.cnam.reference : ""))+'</p>' :
-      '<p class="fw-note warn">'+ctx.esc(T(ctx,"cnamManque")+(hDecl > 48 ? " "+T(ctx,"cnamRetard") : ""))+'</p>')+
-      (dr.modifier ? '<div class="fwh-form">'+champ(ctx, T(ctx,"cnamLe"), inp(ctx, "fwhCL", ' type="date" min="'+ctx.esc(e.d)+'" max="'+auj()+'"', e.cnam ? e.cnam.declaree_le : auj()))+champ(ctx, T(ctx,"cnamRef"), inp(ctx, "fwhCR", ' maxlength="60"', e.cnam ? e.cnam.reference || "" : ""))+
+      '<p class="fw-note warn">'+ctx.esc(e.statut === "annule" ? T(ctx,"s_annule") : T(ctx,"cnamManque")+(e.cnamRetard ? " "+T(ctx,"cnamRetard") : ""))+'</p>')+
+      ((dr.cnam || dr.modifier) && e.statut !== "annule" ? '<div class="fwh-form">'+champ(ctx, T(ctx,"cnamLe"), inp(ctx, "fwhCL", ' type="date" min="'+ctx.esc(e.d)+'" max="'+auj()+'"', e.cnam ? e.cnam.declaree_le : auj()))+champ(ctx, T(ctx,"cnamRef"), inp(ctx, "fwhCR", ' maxlength="60"', e.cnam ? e.cnam.reference || "" : ""))+
         '<button class="fw-btn" data-act="fwm:cnam"'+dis+'>'+ctx.esc(T(ctx,"cnamEnr"))+'</button></div>' : '') : '')+
     '<div class="fw-sec">'+ctx.esc(T(ctx,"actions"))+'</div>'+
     (D.actions.length ? '<table class="fw-tbl">'+tete(ctx, "actions", ["titreAction","responsable","echeance","statut",""])+'<tbody>'+D.actions.map(a=>ligneAction(ctx, a, ouvert)).join("")+'</tbody></table>' : '<div class="fw-hint">—</div>')+
     (val3 ? '<div class="fwh-form" style="margin-top:8px">'+champ(ctx, T(ctx,"titreAction"), inp(ctx, "fwhAT", ' maxlength="200"'))+champ(ctx, T(ctx,"responsable"), inp(ctx, "fwhAR", ' maxlength="80"'))+champ(ctx, T(ctx,"echeance"), inp(ctx, "fwhAE", ' type="date" min="'+auj()+'"'))+
       '<button class="fw-btn" data-act="fwm:action"'+dis+'>'+ctx.esc(T(ctx,"ajoutAction"))+'</button></div><div class="fw-toolbar"><button class="fw-btn pri" data-act="fwm:cloturer"'+dis+'>'+ctx.esc(T(ctx,"cloturer"))+'</button></div>' : '')+
-    ((D.journal||[]).length ? '<div class="fw-sec">'+ctx.esc(T(ctx,"historique"))+'</div><table class="fw-tbl">'+tete(ctx, "historique", ["", "motif", ""])+'<tbody>'+D.journal.map(j=>'<tr><td>'+ctx.esc(T(ctx,"n_"+j.nature))+'</td><td>'+ctx.esc(j.motif || "—")+'</td><td class="fw-hint">'+ctx.esc(ctx.dateAff(String(j.le).slice(0, 10))+" · "+(j.par||""))+'</td></tr>').join("")+'</tbody></table>' : '');
+    ((D.journal||[]).length ? '<div class="fw-sec">'+ctx.esc(T(ctx,"historique"))+'</div><table class="fw-tbl">'+tete(ctx, "historique", ["", "motif", ""])+'<tbody>'+D.journal.map(j=>'<tr><td>'+ctx.esc(T(ctx,"n_"+j.nature))+'</td><td>'+ctx.esc(j.motif || (j.avant ? "" : "—"))+(j.avant ? '<div class="fw-hint">'+ctx.esc(T(ctx,"avant")+" : "+avantTxt(ctx, j.avant, D.sites))+'</div>' : '')+'</td><td class="fw-hint">'+ctx.esc(ctx.dateAff(String(j.le).slice(0, 10))+" · "+(j.par||""))+'</td></tr>').join("")+'</tbody></table>' : '');
+}
+/* correctif 41 : valeurs précédentes d'une modification, lisibles (dates jj/mm/aaaa, libellés traduits) */
+function avantTxt(ctx, a, sites){
+  const k = Object.keys(a || {}); if (!k.length) return T(ctx,"aucuneAvant");
+  const v = (c, x) => x == null || x === "" ? "—" : c === "type" ? T(ctx,"t_"+x) : /^(d|echeance|declaree_le)$/.test(c) ? ctx.dateAff(x) : c === "arret" ? T(ctx, +x ? "oui" : "non") : c === "site_id" ? (((sites||[]).find(s=>s.id === x) || {}).nom || x) : String(x);
+  return k.map(c=>T(ctx,"ch_"+c)+" "+v(c, a[c])).join(" · ");
 }
 /* ligne d'action (détail d'un événement ou onglet Actions) ; modification en place pour le valideur */
 function ligneAction(ctx, a, ouvert, origine){
   const E = ctx.etat, dr = droits(ctx), enCours = a.statut !== "faite" && a.statut !== "annulee" && ouvert !== false, dis = E.envoi ? ' disabled' : '';
   if (E.editA === a.id) return '<tr><td colspan="'+(origine ? 6 : 5)+'"><div class="fwh-form">'+champ(ctx, T(ctx,"titreAction"), inp(ctx, "fwhXT", ' maxlength="200"', a.titre))+champ(ctx, T(ctx,"responsable"), inp(ctx, "fwhXR", ' maxlength="80"', a.responsable || ""))+
-    champ(ctx, T(ctx,"echeance"), inp(ctx, "fwhXE", ' type="date"', a.echeance))+'<button class="fw-btn pri" data-act="fwm:majAction" data-id="'+ctx.esc(a.id)+'"'+dis+'>'+ctx.esc(T(ctx,"enregistrer"))+'</button><button class="fw-btn" data-act="fwm:finEditA">'+ctx.esc(T(ctx,"fermer"))+'</button></div></td></tr>';
+    champ(ctx, T(ctx,"echeance"), inp(ctx, "fwhXE", ' type="date" min="'+auj()+'"', a.echeance))+'<button class="fw-btn pri" data-act="fwm:majAction" data-id="'+ctx.esc(a.id)+'"'+dis+'>'+ctx.esc(T(ctx,"enregistrer"))+'</button><button class="fw-btn" data-act="fwm:finEditA">'+ctx.esc(T(ctx,"fermer"))+'</button></div></td></tr>';
   const st = a.statut === "faite" ? T(ctx,"faite") : a.statut === "annulee" ? T(ctx,"annulee") : T(ctx,"s_a_faire");
   return '<tr><td>'+ctx.esc(a.titre)+'</td>'+(origine ? '<td>'+ctx.esc(a.evtype ? T(ctx,"t_"+a.evtype)+" "+ctx.dateAff(a.evd) : (a.danger || "—"))+'</td>' : '')+'<td>'+ctx.esc(a.responsable||"")+'</td>'+
     '<td'+(enCours && a.echeance < auj() ? ' class="fwh-ko"' : '')+'>'+ctx.esc(ctx.dateAff(a.echeance))+'</td><td>'+ctx.esc(st)+'</td><td>'+
@@ -179,8 +210,8 @@ function ligneAction(ctx, a, ouvert, origine){
     (enCours && dr.valider ? ' <button class="fw-btn sm" data-act="fwm:editA" data-id="'+ctx.esc(a.id)+'" aria-label="'+ctx.esc(T(ctx,"actionDe").replace("{a}", T(ctx,"modifier")).replace("{n}", a.titre))+'">'+ctx.esc(T(ctx,"modifier"))+'</button> <button class="fw-btn sm" data-act="fwm:annulerA" data-id="'+ctx.esc(a.id)+'" data-n="'+ctx.esc(a.titre)+'" aria-label="'+ctx.esc(T(ctx,"actionDe").replace("{a}", T(ctx,"annulerAction")).replace("{n}", a.titre))+'"'+dis+'>'+ctx.esc(T(ctx,"annulerAction"))+'</button>' : '')+'</td></tr>';
 }
 function vueActions(ctx){
-  const E = ctx.etat, X = E.A;
-  return '<div class="fw-toolbar"><select data-fwmc="stA" aria-label="'+ctx.esc(T(ctx,"statut"))+'">'+[["","ouvertes"],["faite","faites"],["annulee","annulees"]].map(([v, k])=>'<option value="'+v+'"'+(E.stA === v ? ' selected' : '')+'>'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select></div>'+
+  const E = ctx.etat, X = E.A, dr = droits(ctx);
+  return (X && !dr.modifier && !dr.valider ? '<p class="fw-note">'+ctx.esc(T(ctx,"actionsLecture"))+'</p>' : '')+'<div class="fw-toolbar"><select data-fwmc="stA" aria-label="'+ctx.esc(T(ctx,"statut"))+'">'+[["","ouvertes"],["faite","faites"],["annulee","annulees"]].map(([v, k])=>'<option value="'+v+'"'+(E.stA === v ? ' selected' : '')+'>'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select></div>'+
     (!X ? erreurOuCharge(ctx, "A") : !X.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
     '<table class="fw-tbl">'+tete(ctx, "actions", ["titreAction","origine","responsable","echeance","statut",""])+'<tbody>'+X.lignes.map(a=>ligneAction(ctx, a, true, true)).join("")+'</tbody></table>'+pager(ctx, "offA", E.offA, X.total));
 }
@@ -191,6 +222,7 @@ function vueRisques(ctx){
       champ(ctx, T(ctx,"site"), sel(ctx, "fwhRS", sitesOpts(ctx, sites, T(ctx,"commun")), ed ? ed.site_id || "" : ""))+
       champ(ctx, T(ctx,"gravite"), sel(ctx, "fwhRG", G4, ed ? ed.gravite : 1))+champ(ctx, T(ctx,"probabilite"), sel(ctx, "fwhRP", G4, ed ? ed.probabilite : 1))+
       champ(ctx, T(ctx,"mesures"), inp(ctx, "fwhRM", ' maxlength="2000"', ed ? ed.mesures || "" : ""))+'<button class="fw-btn pri" data-act="fwm:risque"'+dis+'>'+ctx.esc(T(ctx, ed ? "enregistrer" : "ajoutRisque"))+'</button>'+(ed ? '<button class="fw-btn" data-act="fwm:finEditR">'+ctx.esc(T(ctx,"fermer"))+'</button>' : '')+'</div>' : '')+
+    (X && !dr.valider ? '<p class="fw-note">'+ctx.esc(T(ctx,"risquesLecture"))+'</p>' : '')+
     (!X ? erreurOuCharge(ctx, "R") : !X.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
     '<table class="fw-tbl">'+tete(ctx, "risques", ["unite","danger","site","#G","#P","#"+T(ctx,"criticite"),"mesures","revision",""])+'<tbody>'+
       X.lignes.map(r=>'<tr><td>'+ctx.esc(r.unite)+'</td><td>'+ctx.esc(r.danger)+'</td><td>'+ctx.esc(nomSite(r.site_id))+'</td><td class="fw-num">'+r.gravite+'</td><td class="fw-num">'+r.probabilite+'</td><td class="fw-num"><span class="fwh-crit fwh-c'+(r.criticite >= 9 ? 3 : r.criticite >= 4 ? 2 : 1)+'">'+r.criticite+'</span></td><td>'+ctx.esc(r.mesures||"")+'</td>'+
@@ -198,19 +230,43 @@ function vueRisques(ctx){
 }
 function vueEpi(ctx){
   const E = ctx.etat, X = E.P, dr = droits(ctx), dis = E.envoi ? ' disabled aria-busy="true"' : '';
-  return (dr.creer ? '<div class="fw-card fw-u-p fwh-form">'+champ(ctx, T(ctx,"victime"), inp(ctx, "fwhPM", ' maxlength="40" autocomplete="off"'))+champ(ctx, T(ctx,"equipement"), inp(ctx, "fwhPT", ' list="fwhEpiL" maxlength="80"')+'<datalist id="fwhEpiL">'+T(ctx,"epiL").map(x=>'<option value="'+ctx.esc(x)+'">').join("")+'</datalist>')+
-      champ(ctx, T(ctx,"remis"), inp(ctx, "fwhPR", ' type="date" max="'+auj()+'"', auj()))+champ(ctx, T(ctx,"renouveler"), inp(ctx, "fwhPN", ' type="date"'))+'<button class="fw-btn pri" data-act="fwm:epi"'+dis+'>'+ctx.esc(T(ctx,"ajoutEpi"))+'</button></div>' : '')+
+  return (dr.creer ? '<div class="fw-card fw-u-p fwh-form">'+champ(ctx, T(ctx,"victime"), inp(ctx, "fwhPM", ' maxlength="40" autocomplete="off" list="fwhSalL" title="'+ctx.esc(T(ctx,"rechSal"))+'"'))+champ(ctx, T(ctx,"equipement"), inp(ctx, "fwhPT", ' list="fwhEpiL" maxlength="80"')+'<datalist id="fwhEpiL">'+T(ctx,"epiL").map(x=>'<option value="'+ctx.esc(x)+'">').join("")+'</datalist>')+
+      champ(ctx, T(ctx,"remis"), inp(ctx, "fwhPR", ' type="date" max="'+auj()+'"', auj()))+champ(ctx, T(ctx,"renouveler"), inp(ctx, "fwhPN", ' type="date"'))+'<button class="fw-btn pri" data-act="fwm:epi"'+dis+'>'+ctx.esc(T(ctx,"ajoutEpi"))+'</button></div>' : X ? '<p class="fw-note">'+ctx.esc(T(ctx,"epiLecture"))+'</p>' : '')+
     '<div class="fw-toolbar"><select data-fwmc="filtreP" aria-label="'+ctx.esc(T(ctx,"equipement"))+'">'+[["","enCoursEpi"],["renouveler","aRenouveler"],["historique","historiqueEpi"]].map(([v, k])=>'<option value="'+v+'"'+(E.filtreP === v ? ' selected' : '')+'>'+ctx.esc(T(ctx,k))+'</option>').join("")+'</select></div>'+
     (!X ? erreurOuCharge(ctx, "P") : !X.lignes.length ? '<div class="fw-empty">'+ctx.esc(T(ctx,"aucune"))+'</div>' :
-    '<table class="fw-tbl">'+tete(ctx, "epi", ["salarie","equipement","remis","renouveler"])+'<tbody>'+
-      X.lignes.map(r=>'<tr><td>'+ctx.esc((r.nom || r.mat)+" · "+r.mat+(r.sorti ? " ("+T(ctx,"sorti")+")" : ""))+'</td><td>'+ctx.esc(r.type)+'</td><td>'+ctx.esc(ctx.dateAff(r.remis_le))+'</td><td'+(r.aRenouveler && !r.sorti ? ' class="fwh-ko"' : '')+'>'+ctx.esc(r.renouveler_le ? ctx.dateAff(r.renouveler_le) : "—")+'</td></tr>').join("")+'</tbody></table>'+pager(ctx, "offP", E.offP, X.total));
+    '<table class="fw-tbl">'+tete(ctx, "epi", ["salarie","equipement","remis","renouveler",""])+'<tbody>'+
+      X.lignes.map(r=>'<tr'+(r.annule ? ' class="fwh-annule"' : '')+'><td>'+ctx.esc((r.nom || r.mat)+" · "+r.mat+(r.sorti ? " ("+T(ctx,"sorti")+")" : ""))+'</td><td>'+ctx.esc(r.type)+(r.annule ? ' <span class="fw-tag">'+ctx.esc(T(ctx,"epiAnnulee"))+'</span>' : '')+'</td><td>'+ctx.esc(ctx.dateAff(r.remis_le))+'</td><td'+(r.aRenouveler && !r.sorti ? ' class="fwh-ko"' : '')+'>'+ctx.esc(r.renouveler_le ? ctx.dateAff(r.renouveler_le) : "—")+'</td><td>'+(dr.supprimer && !r.annule ? '<button class="fw-btn sm" data-act="fwm:annulerEpi" data-id="'+ctx.esc(r.id)+'" data-n="'+ctx.esc(r.type+" · "+(r.nom || r.mat))+'" aria-label="'+ctx.esc(T(ctx,"actionDe").replace("{a}", T(ctx,"annulerEpi")).replace("{n}", r.type+" · "+(r.nom || r.mat)))+'"'+dis+'>'+ctx.esc(T(ctx,"annulerEpi"))+'</button>' : '')+'</td></tr>').join("")+'</tbody></table>'+pager(ctx, "offP", E.offP, X.total));
+}
+/* correctif 41 : fiche imprimable d'un événement (impression tracée par le serveur) */
+function imprimer(ctx){
+  const D = ctx.etat.detail, e = D.evenement, esc = ctx.esc, lg = (k, v) => '<tr><th>'+esc(k)+'</th><td>'+esc(v == null || v === "" ? "—" : String(v))+'</td></tr>';
+  const html = '<div class="pdoc" dir="'+(ctx.lang === "ar" ? "rtl" : "ltr")+'"><div class="phead"><h1>'+esc(T(ctx,"fiche"))+'</h1><div class="pmeta">'+esc(T(ctx,"editeLe")+" "+ctx.dateAff(auj()))+'</div></div><table class="ptbl">'+
+    lg(T(ctx,"type"), T(ctx,"t_"+e.type))+lg(T(ctx,"date"), ctx.dateAff(e.d)+(e.heure ? " "+e.heure : ""))+lg(T(ctx,"site"), e.site_nom || "")+lg(T(ctx,"lieu"), e.lieu)+lg(T(ctx,"salarie"), e.mat ? e.victime+" · "+e.mat : "")+
+    lg(T(ctx,"gravite"), e.gravite)+lg(T(ctx,"arret"), T(ctx, e.arret ? "oui" : "non"))+lg(T(ctx,"jours"), e.arret ? e.jours_arret : "")+lg(T(ctx,"description"), e.description)+lg(T(ctx,"cause"), e.cause)+
+    lg(T(ctx,"statut"), T(ctx,"s_"+e.statut))+lg(T(ctx,"declarant"), e.declarant)+lg(T(ctx,"closLe"), e.clos_le ? ctx.dateAff(String(e.clos_le).slice(0, 10)) : "")+
+    lg(T(ctx,"cnam"), e.cnam ? ctx.dateAff(e.cnam.declaree_le)+(e.cnam.reference ? " · "+e.cnam.reference : "") : "")+'</table>'+
+    (D.actions.length ? '<h2>'+esc(T(ctx,"actions"))+'</h2><table class="ptbl"><tbody>'+D.actions.map(a=>'<tr><td>'+esc(a.titre)+'</td><td>'+esc(a.responsable || "")+'</td><td>'+esc(ctx.dateAff(a.echeance))+'</td><td>'+esc(a.statut === "faite" ? T(ctx,"faite") : a.statut === "annulee" ? T(ctx,"annulee") : T(ctx,"s_a_faire"))+'</td></tr>').join("")+'</tbody></table>' : '')+
+    '<div class="pfoot">FIWAKTI</div></div>';
+  const z = document.getElementById("fwprint"); if (!z) return;
+  z.innerHTML = html; document.body.classList.add("printing");
+  const fin = () => { document.body.classList.remove("printing"); z.innerHTML = ""; };
+  setTimeout(()=>{ try { window.print(); } catch(x){} setTimeout(fin, 300); }, 60);
+}
+/* correctif 41 : recherche du salarié par nom ou matricule (liste proposée sous le champ) */
+let RECH = null;
+function rechercheSalarie(ctx, el){
+  const v = String(el.value || "").trim(); if (v.length < 2) return; clearTimeout(RECH);
+  RECH = setTimeout(()=>{ ctx.api("api/v1/hse/salaries?q="+encodeURIComponent(v)).then(j=>{ const dl = document.getElementById("fwhSalL"); if (!dl) return;
+    dl.innerHTML = (j.lignes || []).map(x=>'<option value="'+ctx.esc(String(x.mat))+'">'+ctx.esc(x.nom+(x.sorti ? " ("+T(ctx,"sorti")+")" : ""))+'</option>').join(""); }).catch(()=>{}); }, 250);
 }
 function focusSur(id){ setTimeout(()=>{ const x = document.getElementById(id); if (x) x.focus(); }, 80); }
 function ouvrir(ctx, id, focus){ return ctx.api("api/v1/hse/evenements/"+encodeURIComponent(id)).then(j=>{ ctx.etat.detail = j; ctx.rendre(); focusSur(focus || "fwhDT"); }); }
 const LISTES = {offE:"EV", offA:"A", offR:"R", offP:"P"};
 FIWAKTI_MODULES.enregistrer({
   id:"FW-HSE",
-  mount(ctx){ charger(ctx); },
+  mount(ctx){ charger(ctx);
+    /* correctif 41 : liste de salariés proposée pendant la saisie d'un matricule ou d'un nom */
+    if (ctx.ecouter) ctx.ecouter(document, "input", ev=>{ const t = ev.target; if (t && /^(fwhM|fwhEM|fwhPM)$/.test(t.id || "") || (t && t.dataset && t.dataset.fwmc === "fE:mat")) rechercheSalarie(ctx, t); }); },
   unmount(ctx){},
   render(vue, ctx){
     charger(ctx); const E = ctx.etat;
@@ -218,7 +274,7 @@ FIWAKTI_MODULES.enregistrer({
     const corps = E.onglet === "evenements" ? vueEvenements(ctx) : E.onglet === "actions" ? vueActions(ctx) : E.onglet === "risques" ? vueRisques(ctx) : E.onglet === "epi" ? vueEpi(ctx) : vueBord(ctx);
     return '<div class="fw-module fwh"><div class="fw-hero fw-hero-mod"><div class="fw-hero-main"><div class="fw-hero-kicker">'+ctx.esc(window.HERO_KICKER || "FIWAKTI")+'</div><h1>'+ctx.esc(T(ctx,"titre"))+'</h1><p class="fw-hero-lede">'+ctx.esc(T(ctx,"lede"))+'</p></div></div>'+
       '<div class="fw-stabs" role="tablist">'+ong.map(([k, l])=>'<button type="button" role="tab" id="fwhTab-'+k+'" aria-controls="fwhPan" tabindex="'+(E.onglet === k ? 0 : -1)+'" class="'+k+(E.onglet === k ? ' on' : '')+'" aria-selected="'+(E.onglet === k)+'" data-act="fwm:onglet" data-o="'+k+'">'+ctx.esc(T(ctx,l))+'</button>').join("")+'</div>'+
-      '<div style="margin-top:12px" id="fwhPan" role="tabpanel" aria-labelledby="fwhTab-'+E.onglet+'">'+corps+'</div></div>';
+      '<div style="margin-top:12px" id="fwhPan" role="tabpanel" aria-labelledby="fwhTab-'+E.onglet+'">'+corps+'</div><datalist id="fwhSalL"></datalist></div>';
   },
   action(a, el, ctx){
     const E = ctx.etat, ok = () => ctx.flash(T(ctx,"enregistre"), "ok"), ko = e => ctx.flash(msgErr(ctx, e), "err"), tout = () => { E.I = E.EV = E.A = E.R = E.P = null; E.IErr = E.EVErr = E.AErr = E.RErr = E.PErr = null; };
@@ -235,7 +291,7 @@ FIWAKTI_MODULES.enregistrer({
       return verrou(()=>ctx.api("api/v1/hse/evenements", {corps}).then(j=>{ ok(); vider(CHAMPS_EVT("fwh")); tout(); return ouvrir(ctx, j.id); })); }
     if (a === "edit"){ E.edit = true; vider(CHAMPS_EVT("fwhE")); ctx.rendre(); return focusSur("fwhEType"); }
     if (a === "finEdit"){ E.edit = false; vider(CHAMPS_EVT("fwhE")); return ctx.rendre(); }
-    if (a === "majEvt"){ const corps = corpsEvt("fwhE");
+    if (a === "majEvt"){ const corps = Object.assign(corpsEvt("fwhE"), {version:E.detail.evenement.version});
       return verrou(()=>ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid()), {corps}).then(()=>{ ok(); E.edit = false; vider(CHAMPS_EVT("fwhE")); return ouvrir(ctx, eid()); })); }
     if (a === "analyser"){ const corps = {cause:val("fwhCause")}; if (document.getElementById("fwhJ2")) corps.joursArret = val("fwhJ2");
       return verrou(()=>ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid())+"/analyse", {corps}).then(()=>{ ok(); vider(["fwhCause","fwhJ2"]); return ouvrir(ctx, eid()); })); }
@@ -247,7 +303,7 @@ FIWAKTI_MODULES.enregistrer({
     if (a === "faite"){ const idA = el.dataset.id; return verrou(()=>ctx.api("api/v1/hse/actions/"+encodeURIComponent(idA)+"/faite", {corps:{}}).then(()=>{ ok(); return apresAction(); })); }
     if (a === "editA"){ E.editA = el.dataset.id; vider(["fwhXT","fwhXR","fwhXE"]); ctx.rendre(); return focusSur("fwhXT"); }
     if (a === "finEditA"){ E.editA = null; vider(["fwhXT","fwhXR","fwhXE"]); return ctx.rendre(); }
-    if (a === "majAction"){ const idA = el.dataset.id, corps = {titre:val("fwhXT"), responsable:val("fwhXR"), echeance:val("fwhXE")};
+    if (a === "majAction"){ const idA = el.dataset.id, ac = ((E.detail || {}).actions || (E.A || {}).lignes || []).find(x=>x.id === idA) || {}, corps = {titre:val("fwhXT"), responsable:val("fwhXR"), echeance:val("fwhXE"), version:ac.version};
       return verrou(()=>ctx.api("api/v1/hse/actions/"+encodeURIComponent(idA), {corps}).then(()=>{ ok(); E.editA = null; vider(["fwhXT","fwhXR","fwhXE"]); return apresAction(); })); }
     if (a === "annulerA"){ const idA = el.dataset.id;
       return ctx.confirmer({titre:T(ctx,"annulerAction"), message:T(ctx,"annulerActionQ").replace("{n}", el.dataset.n || ""), motif:true, motifObligatoire:true, motifLabel:T(ctx,"motif"), danger:true}).then(r=>{ if (!r.ok) return;
@@ -256,10 +312,17 @@ FIWAKTI_MODULES.enregistrer({
       return verrou(()=>ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid())+"/cloturer", {corps:{}}).then(()=>{ ok(); return ouvrir(ctx, eid()); })); });
     if (a === "rouvrir") return ctx.confirmer({titre:T(ctx,"rouvrir"), message:T(ctx,"rouvrirQ"), motif:true, motifObligatoire:true, motifLabel:T(ctx,"motif")}).then(r=>{ if (!r.ok) return;
       return verrou(()=>ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid())+"/rouvrir", {corps:{motif:r.motif || ""}}).then(()=>{ ok(); return ouvrir(ctx, eid()); })); });
+    /* correctif 41 : annulation d'un événement ou d'une dotation (motif), fiche imprimable */
+    if (a === "annulerEvt") return ctx.confirmer({titre:T(ctx,"annulerEvt"), message:T(ctx,"annulerEvtQ"), motif:true, motifObligatoire:true, motifLabel:T(ctx,"motif"), danger:true}).then(r=>{ if (!r.ok) return;
+      return verrou(()=>ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid())+"/annuler", {corps:{motif:r.motif || ""}}).then(()=>{ ok(); tout(); return ouvrir(ctx, eid()); })); });
+    if (a === "annulerEpi"){ const idP = el.dataset.id;
+      return ctx.confirmer({titre:T(ctx,"annulerEpi"), message:T(ctx,"annulerEpiQ").replace("{n}", el.dataset.n || ""), motif:true, motifObligatoire:true, motifLabel:T(ctx,"motif"), danger:true}).then(r=>{ if (!r.ok) return;
+        return verrou(()=>ctx.api("api/v1/hse/epi/"+encodeURIComponent(idP)+"/annuler", {corps:{motif:r.motif || ""}}).then(()=>{ ok(); E.P = null; })); }); }
+    if (a === "imprimer") return ctx.api("api/v1/hse/evenements/"+encodeURIComponent(eid())+"/imprime", {corps:{}}).then(()=>imprimer(ctx)).catch(ko);
     const CHR = ["fwhRU","fwhRD","fwhRS","fwhRG","fwhRP","fwhRM"];
     if (a === "editR"){ E.editR = el.dataset.id; vider(CHR); ctx.rendre(); return focusSur("fwhRU"); }
     if (a === "finEditR"){ E.editR = null; vider(CHR); return ctx.rendre(); }
-    if (a === "risque"){ const corps = {unite:val("fwhRU"), danger:val("fwhRD"), siteId:val("fwhRS"), gravite:Number(val("fwhRG")), probabilite:Number(val("fwhRP")), mesures:val("fwhRM")}, idR = E.editR;
+    if (a === "risque"){ const idR = E.editR, rq = idR ? ((E.R || {}).lignes || []).find(x=>x.id === idR) || {} : {}, corps = {unite:val("fwhRU"), danger:val("fwhRD"), siteId:val("fwhRS"), gravite:Number(val("fwhRG")), probabilite:Number(val("fwhRP")), mesures:val("fwhRM"), version:rq.version};
       return verrou(()=>ctx.api("api/v1/hse/risques"+(idR ? "/"+encodeURIComponent(idR) : ""), {corps}).then(()=>{ ok(); E.editR = null; vider(CHR); E.R = null; focusSur("fwhRU"); })); }
     if (a === "epi"){ const corps = {mat:val("fwhPM"), type:val("fwhPT"), remisLe:val("fwhPR"), renouvelerLe:val("fwhPN")};
       return verrou(()=>ctx.api("api/v1/hse/epi", {corps}).then(()=>{ ok(); vider(["fwhPM","fwhPT","fwhPR","fwhPN"]); E.P = null; focusSur("fwhPM"); })); }
@@ -268,6 +331,8 @@ FIWAKTI_MODULES.enregistrer({
     const E = ctx.etat;
     if (k.indexOf("f:") === 0){ E.form[k.slice(2)] = el.type === "checkbox" ? el.checked : el.value; return; }
     if (k === "stE"){ E.stE = el.value; E.offE = 0; E.EV = null; E.EVErr = null; return ctx.rendre(); }
+    if (k.indexOf("fE:") === 0){ E.fE[k.slice(3)] = el.value.trim(); E.offE = 0; E.EV = null; E.EVErr = null; return ctx.rendre(); }
+    if (k === "exDu" || k === "exAu"){ E[k] = el.value; return ctx.rendre(); }
     if (k === "stA"){ E.stA = el.value; E.offA = 0; E.A = null; E.AErr = null; return ctx.rendre(); }
     if (k === "filtreP"){ E.filtreP = el.value; E.offP = 0; E.P = null; E.PErr = null; return ctx.rendre(); }
   }

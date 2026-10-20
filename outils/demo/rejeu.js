@@ -324,6 +324,15 @@
   const langue = () => { try { return ui.lang === "en" ? 1 : ui.lang === "ar" ? 2 : 0; } catch(e){ return 0; } };
   const MD = {
     declaration:["Type, date réelle et description obligatoires.","Type, a real date and a description are required.","النوع والتاريخ والوصف إجبارية."],
+    gravite:["Gravité : nombre entier de 1 à 4.","Severity: whole number from 1 to 4.","الخطورة: عدد صحيح من 1 إلى 4."],
+    jours:["Jours d'arrêt : nombre entier de 0 à 3650.","Days lost: whole number from 0 to 3650.","أيام التوقف: عدد صحيح من 0 إلى 3650."],
+    heure:["Heure attendue au format hh:mm.","Time expected as hh:mm.","الساعة بصيغة سس:دد."],
+    site:["Site inconnu ou hors périmètre.","Unknown site or outside your scope.","موقع غير معروف أو خارج نطاقك."],
+    pasAccident:["Seul un accident se déclare à la CNAM.","Only an accident is declared to the CNAM.","يصرح بالحوادث فقط."],
+    cnamExiste:["Accident déjà déclaré à la CNAM : type, salarié et date ne peuvent plus changer.","Accident already declared to the CNAM: type, employee and date can no longer change.","حادث مصرح به: لا يمكن تغيير النوع والأجير والتاريخ."],
+    joursArretRequis:["Arrêt de travail sans jour d'arrêt : indiquez le nombre de jours (analyse) avant de clore.","Lost time without days: enter the number of days (analysis) before closing.","توقف بلا أيام: أدخل عدد الأيام قبل الإغلاق."],
+    epiEntree:["Date de remise antérieure à l'entrée du salarié.","Issue date before the employee's start date.","تاريخ التسليم سابق للانتداب."],
+    doublonEpi:["Cette dotation est déjà enregistrée (même salarié, équipement et date).","This issue is already recorded (same employee, equipment and date).","هذا التسليم مسجل مسبقا."],
     futur:["La date ne peut pas être dans le futur.","The date cannot be in the future.","لا يمكن أن يكون التاريخ في المستقبل."],
     victime:["Un accident désigne le salarié concerné.","An accident names the employee concerned.","الحادث يحدد الأجير المعني."],
     arret:["Un arrêt de travail concerne un accident avec un salarié désigné.","Lost time requires an accident with a named employee.","التوقف يخص حادثا لأجير محدد."],
@@ -367,7 +376,7 @@
       epi:copie((REP[HS+"/epi?limit=200&filtre="] || {lignes:[]}).lignes), decl:{}, journal:[], heures:+I.heures || 0};
     return HSD;
   }
-  const HDROITS = {creer:true, modifier:true, valider:true, exporter:false, sensibles:true};
+  const HDROITS = {creer:true, modifier:true, modifierFaits:true, valider:true, supprimer:true, imprimer:true, cnam:true, exporter:false, sensibles:true};
   function hseIndicateurs(h){
     const au = aujL(), du = jPlus(au, -364), ev = h.ev.filter(e => e.d >= du && e.d <= au);
     const acc = ev.filter(e => e.type === "accident"), aa = acc.filter(e => +e.arret), j = aa.reduce((s, e) => s + (+e.jours_arret || 0), 0), parMois = [];
@@ -385,6 +394,10 @@
     if (mat && !empDe(mat)) return {err:"salarie"};
     if (!mat && (b.type === "accident" || b.type === "accident_trajet")) return {err:"victime"};
     const arret = b.arret === true; if (arret && (!mat || (b.type !== "accident" && b.type !== "accident_trajet"))) return {err:"arret"};
+    const g = b.gravite == null || b.gravite === "" ? 1 : Number(b.gravite), j = !arret ? 0 : b.joursArret == null || b.joursArret === "" ? 0 : Number(b.joursArret);
+    if (!(Number.isInteger(g) && g >= 1 && g <= 4)) return {err:"gravite"}; if (!(Number.isInteger(j) && j >= 0 && j <= 3650)) return {err:"jours"};
+    if (b.heure && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(b.heure))) return {err:"heure"};
+    if (b.siteId && !sitesDemo().some(z => z.id === b.siteId)) return {err:"site"};
     const e = empDe(mat);
     return {type:b.type, d:b.d, heure:String(b.heure || ""), site_id:b.siteId || (e && e.siteId) || null, lieu:String(b.lieu || ""), mat:mat || null, victime:mat ? nomDe(mat) : "", gravite:+b.gravite || 1, arret:arret ? 1 : 0, jours_arret:arret ? Math.max(0, Math.floor(+b.joursArret || 0)) : 0, description:desc};
   }
@@ -394,30 +407,40 @@
     const detail = id => { const e = h.ev.find(x => x.id === id); if (!e) return null; return {evenement:Object.assign(copie(e), {cnam:h.decl[id] ? copie(h.decl[id]) : null}), actions:copie(h.actions.filter(x => x.evenement_id === id)), journal:copie(h.journal.filter(j => j.objet_id === id)), droits:HDROITS, sites:sitesDemo()}; };
     if (methode === "GET"){
       if (p === HS+"/indicateurs") return hseIndicateurs(h);
-      if (p === HS+"/evenements"){ const st = q.get("statut") || "", l = h.ev.filter(e => st === "tous" ? true : st === "clos" ? e.statut === "clos" : e.statut !== "clos").sort((x, y) => (y.d+(y.heure||"")).localeCompare(x.d+(x.heure||"")));
+      if (p === HS+"/salaries"){ const s = String(q.get("q") || "").trim().toLowerCase(); let l = []; try { l = s.length < 2 ? [] : (db.emps || []).filter(e => String(e.mat).toLowerCase().indexOf(s) === 0 || ((e.nom||"")+" "+(e.prenom||"")).toLowerCase().indexOf(s) >= 0).slice(0, 15); } catch(e){}
+        return {lignes:l.map(e => ({mat:e.mat, nom:nomDe(e.mat), sorti:!!(e.sortie && e.sortie < a)}))}; }
+      if (p === HS+"/evenements"){ const st = q.get("statut") || "", fm = q.get("mat") || "", fd = q.get("du") || "", fa = q.get("au") || "", fs = q.get("site") || "", l = h.ev.filter(e => (st === "tous" ? true : st === "clos" || st === "annule" ? e.statut === st : e.statut !== "clos" && e.statut !== "annule") && (!fm || e.mat === fm) && (!fd || e.d >= fd) && (!fa || e.d <= fa) && (!fs || e.site_id === fs)).sort((x, y) => (y.d+(y.heure||"")).localeCompare(x.d+(x.heure||"")));
         return Object.assign(pagine(l.map(e => Object.assign({}, e, {cnam:h.decl[e.id] ? {declaree_le:h.decl[e.id].declaree_le} : null})), q), {droits:HDROITS, sites:sitesDemo()}); }
       if ((m = /^\/api\/v1\/hse\/evenements\/([^/]+)$/.exec(p))){ const d = detail(m[1]); return d || Promise.reject(Object.assign(new Error("Introuvable."), {status:404})); }
       if (p === HS+"/actions"){ const st = q.get("statut") || "", l = h.actions.filter(x => st ? x.statut === st : x.statut !== "faite" && x.statut !== "annulee").map(x => { const e = h.ev.find(z => z.id === x.evenement_id), r = h.risques.find(z => z.id === x.risque_id); return Object.assign({}, x, {evtype:e ? e.type : null, evd:e ? e.d : null, danger:r ? r.danger : null}); }).sort((x, y) => x.echeance.localeCompare(y.echeance));
         return Object.assign(pagine(l, q), {droits:HDROITS}); }
       if (p === HS+"/risques") return Object.assign(pagine(h.risques.map(r => Object.assign({}, r, {criticite:r.gravite * r.probabilite})).sort((x, y) => y.criticite - x.criticite), q), {droits:HDROITS, sites:sitesDemo()});
       if (p === HS+"/epi"){ const f = q.get("filtre") || "", s30 = jPlus(a, 30);
-        const cour = h.epi.filter(x => f === "historique" || !h.epi.some(z => z !== x && z.mat === x.mat && z.type === x.type && z.remis_le > x.remis_le));
+        const cour = h.epi.filter(x => f === "historique" || (!x.annule && !h.epi.some(z => z !== x && !z.annule && z.mat === x.mat && z.type === x.type && z.remis_le > x.remis_le)));
         const l = cour.filter(x => f !== "renouveler" || (x.renouveler_le && x.renouveler_le <= s30)).sort((x, y) => (x.renouveler_le || "9999").localeCompare(y.renouveler_le || "9999"));
-        return Object.assign(pagine(l.map(x => Object.assign({}, x, {aRenouveler:!!(x.renouveler_le && x.renouveler_le <= s30)})), q), {droits:HDROITS}); }
+        return Object.assign(pagine(l.map(x => Object.assign({}, x, {aRenouveler:!x.annule && !!(x.renouveler_le && x.renouveler_le <= s30)})), q), {droits:HDROITS}); }
       if (p === HS+"/export") return refus("export", 404);
       return undefined;
     }
     if (p === HS+"/evenements"){ const v = hseLireEvt(b); if (v.err) return refus(v.err);
       const it = Object.assign({id:nouvelId("he"), cause:"", statut:"ouvert", declare_par:"admin", cree:maint(), clos_le:null}, v); h.ev.unshift(it); return {ok:true, demo:true, id:it.id}; }
-    if ((m = /^\/api\/v1\/hse\/evenements\/([^/]+)(?:\/(analyse|cloturer|rouvrir|cnam))?$/.exec(p))){
+    if ((m = /^\/api\/v1\/hse\/evenements\/([^/]+)(?:\/(analyse|cloturer|rouvrir|cnam|annuler|imprime))?$/.exec(p))){
       const e = h.ev.find(x => x.id === m[1]); if (!e) return Promise.reject(Object.assign(new Error("Introuvable."), {status:404}));
-      if (!m[2]){ if (e.statut === "clos") return refus("clos", 409); const v = hseLireEvt(b); if (v.err) return refus(v.err); Object.assign(e, v); return {ok:true, demo:true}; }
-      if (m[2] === "cnam"){ if (!dOk(b.declareeLe) || b.declareeLe < e.d || b.declareeLe > a) return refus("cnam"); h.decl[e.id] = {declaree_le:b.declareeLe, reference:String(b.reference || "")}; return {ok:true, demo:true}; }
+      if (m[2] === "imprime") return {ok:true, demo:true};
+      if (m[2] === "annuler"){ if (!String(b.motif || "").trim()) return refus("motif"); if (e.statut === "annule") return refus("clos", 409); e.statut = "annule";
+        h.actions.forEach(x => { if (x.evenement_id === e.id && x.statut !== "faite") x.statut = "annulee"; }); h.journal.unshift({objet_id:e.id, nature:"annulation", le:maint(), par:"admin", motif:String(b.motif).trim()}); return {ok:true, demo:true}; }
+      if (e.statut === "annule") return refus("clos", 409);
+      if (!m[2]){ if (e.statut === "clos") return refus("clos", 409); const v = hseLireEvt(b); if (v.err) return refus(v.err);
+        const dc = h.decl[e.id]; if (dc && ((v.type !== "accident" && v.type !== "accident_trajet") || v.mat !== e.mat || v.d > dc.declaree_le)) return refus("cnamExiste", 409);
+        const avant = {}; ["type","d","heure","site_id","lieu","mat","gravite","arret","jours_arret","description"].forEach(k => { if (String(e[k] == null ? "" : e[k]) !== String(v[k] == null ? "" : v[k])) avant[k] = e[k]; });
+        if (Object.keys(avant).length) h.journal.unshift({objet_id:e.id, nature:"modification", le:maint(), par:"admin", motif:"", avant}); Object.assign(e, v); return {ok:true, demo:true}; }
+      if (m[2] === "cnam"){ if ((e.type !== "accident" && e.type !== "accident_trajet") || !e.mat) return refus("pasAccident"); if (!dOk(b.declareeLe) || b.declareeLe < e.d || b.declareeLe > a) return refus("cnam"); h.decl[e.id] = {declaree_le:b.declareeLe, reference:String(b.reference || "")}; return {ok:true, demo:true}; }
       if (m[2] === "rouvrir"){ if (!String(b.motif || "").trim()) return refus("motif"); if (e.statut !== "clos") return refus("clos", 409); e.statut = "en_analyse"; e.clos_le = null; h.journal.unshift({objet_id:e.id, nature:"reouverture", le:maint(), par:"admin", motif:String(b.motif).trim()}); return {ok:true, demo:true}; }
       if (e.statut === "clos") return refus("clos", 409);
       if (m[2] === "analyse"){ const cause = b.cause == null ? String(e.cause || "").trim() : String(b.cause).trim(); if (!cause) return refus("cause");
         e.cause = cause; e.statut = "en_analyse"; if (+e.arret && b.joursArret != null && b.joursArret !== "") e.jours_arret = Math.max(0, Math.floor(+b.joursArret || 0)); return {ok:true, demo:true}; }
       if (!String(e.cause || "").trim()) return refus("causeAvant", 409);
+      if (+e.arret && !(+e.jours_arret > 0)) return refus("joursArretRequis", 409);
       const n = h.actions.filter(x => x.evenement_id === e.id && x.statut !== "faite" && x.statut !== "annulee").length; if (n) return refus("actionsOuvertes", 409, {n});
       e.statut = "clos"; e.clos_le = maint(); return {ok:true, demo:true};
     }
@@ -433,12 +456,15 @@
       return {ok:true, demo:true}; }
     if ((m = /^\/api\/v1\/hse\/risques(?:\/([^/]+))?$/.exec(p))){ const u = String(b.unite || "").trim(), d = String(b.danger || "").trim(), g = +b.gravite, pr = +b.probabilite;
       if (!u || !d || !(Number.isInteger(g) && g >= 1 && g <= 4) || !(Number.isInteger(pr) && pr >= 1 && pr <= 4)) return refus("risque");
+      if (b.siteId && !sitesDemo().some(z => z.id === b.siteId)) return refus("site");
       const v = {unite:u, danger:d, gravite:g, probabilite:pr, mesures:String(b.mesures || ""), site_id:b.siteId || null, revise_le:a, maj:maint(), par:"admin"};
       if (m[1]){ const r = h.risques.find(z => z.id === m[1]); if (r) Object.assign(r, v); return {ok:true, demo:true, id:m[1]}; }
       const it = Object.assign({id:nouvelId("hr")}, v); h.risques.push(it); return {ok:true, demo:true, id:it.id}; }
     if (p === HS+"/epi"){ const mat = String(b.mat || "").trim(), t = String(b.type || "").trim(); if (!mat || !t || !dOk(b.remisLe) || b.remisLe > a) return refus("epi");
-      if (!empDe(mat)) return refus("salarie", 404); if (b.renouvelerLe && (!dOk(b.renouvelerLe) || b.renouvelerLe <= b.remisLe)) return refus("renouv");
+      const em = empDe(mat); if (!em) return refus("salarie", 404); if (b.renouvelerLe && (!dOk(b.renouvelerLe) || b.renouvelerLe <= b.remisLe)) return refus("renouv");
+      if (em.entree && b.remisLe < em.entree) return refus("epiEntree"); if (h.epi.some(z => !z.annule && z.mat === mat && z.type.toLowerCase() === t.toLowerCase() && z.remis_le === b.remisLe)) return refus("doublonEpi", 409);
       const it = {id:nouvelId("hp"), mat, type:t, remis_le:b.remisLe, renouveler_le:b.renouvelerLe || null, nom:nomDe(mat)}; h.epi.push(it); return {ok:true, demo:true, id:it.id}; }
+    if ((m = /^\/api\/v1\/hse\/epi\/([^/]+)\/annuler$/.exec(p))){ if (!String(b.motif || "").trim()) return refus("motif"); const x = h.epi.find(z => z.id === m[1]); if (x){ x.annule = true; x.annule_le = maint(); } return {ok:true, demo:true}; }
     return undefined;
   }
   const MED = "/api/v1/medical";

@@ -166,7 +166,7 @@ function creer(o){
   /* routeur du module (appelé par le socle pour /api/v1/competences…, uniquement si le module est actif) */
   async function traiter(req, res, x){
     const {p, C, admin, P, u, json, corpsJson, ip} = x;
-    const L = (()=>{ const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
+    const L = (()=>{ /* correctif 41 : langue de l'écran (en-tête X-Langue envoyé par l'application) en priorité */ const l = String((req.headers || {})["x-langue"] || u.searchParams.get("lang") || (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2)).slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
     const m = (k, v) => { let t = (MSG[k] || [k])[L] || MSG[k][0]; Object.keys(v || {}).forEach(z=>{ t = t.split("{"+z+"}").join(v[z]); }); return t; };
     const err = (st, k, v) => json(res, st, {message:m(k, v), code:k});
     const txt = (b, k, max) => { const v = b[k]; if (v == null) return ""; if (typeof v !== "string" && typeof v !== "number") throw Object.assign(new Error("texte"), {champ:k}); return String(v).trim().slice(0, max); };

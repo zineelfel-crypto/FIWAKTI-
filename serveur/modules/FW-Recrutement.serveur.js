@@ -188,7 +188,7 @@ function creer(o){
     courrielPris:["Un autre candidat porte déjà ce courriel.", "Another candidate already has this email.", "مترشح آخر يحمل هذا البريد."],
     introuvable:["Introuvable.", "Not found.", "غير موجود."]
   };
-  const langueDe = (P, req) => { const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; };
+  const langueDe = (P, req) => { /* correctif 41 : langue de l'écran (en-tête X-Langue envoyé par l'application) en priorité */ const l = String((req.headers || {})["x-langue"] || u.searchParams.get("lang") || (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2)).slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; };
   const sansAccent = v => String(v || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
   const csvCel = v => { let x = v == null ? "" : String(v); if (/^[=+\-@\t\r]/.test(x)) x = "'"+x; return /[";\n\r]/.test(x) ? '"'+x.replace(/"/g, '""')+'"' : x; };
   const nbr = l => l.map(r=>{ ["cv","candidatures","retenus","retenu","nb","note"].forEach(k=>{ if (r[k] != null) r[k] = Number(r[k]); }); return r; });

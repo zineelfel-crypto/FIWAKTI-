@@ -16,3 +16,7 @@
 .fwh-pyr .niv{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 12px; border-radius:8px; color:#fff; font-size:12.5px; min-width:140px;}
 .fwh-pyr .niv b{font-size:16px;}
 .fwh-mois .fwh-ko{color:#be123c; font-weight:700;}
+/* correctif 41 : accident de trajet, événement ou dotation annulés */
+.fwh-accident_trajet{background:#F1E8FB; color:#5B2A86;}
+.fwh-annule td{color:var(--text-2); text-decoration:line-through;}
+.fwh-annule td:last-child{text-decoration:none;}

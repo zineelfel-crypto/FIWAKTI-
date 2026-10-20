@@ -2,7 +2,7 @@
   "id": "FW-Formation",
   "nom": "Formation et habilitations",
   "categorie": "metier",
-  "version": "1.4",
+  "version": "1.5",
   "deps": [
     "FW-Core",
     "FW-RH"

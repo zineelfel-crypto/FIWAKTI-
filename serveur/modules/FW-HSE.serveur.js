@@ -6,7 +6,11 @@
    périmètre, victime et faits masqués sans accès aux données sensibles, contrôles stricts (types, dates réelles, entiers,
    heure), verrous et mises à jour conditionnelles (PostgreSQL), heures recalculées quand les journées changent,
    déclaration CNAM (48 h), réouverture motivée, modification d'une déclaration, actions modifiables et annulables,
-   risques rattachés à un site et révisés, dotation remplacée soldée, messages trilingues, jour local. */
+   risques rattachés à un site et révisés, dotation remplacée soldée, messages trilingues, jour local.
+   Correctif 41 : profil sans données sensibles en lecture seule sur les faits, déclaration CNAM verrouillée (type, date,
+   salarié), données validées protégées d'un profil « saisie », versions contre les écrasements, historique complet,
+   annulation d'un événement ou d'une dotation, fiche imprimable, recherche du salarié par nom, filtres de liste,
+   doublons refusés, CNAM en retard distinguée, registre borné et complet, langue de l'écran, Pilotage aligné. */
 "use strict";
 /* v56.23 : périmètre appliqué dans la requête SQL (tableau de matricules), jamais par filtrage en mémoire */
 const perimSql = (B, P, col) => P.set === null ? {sql:"", a:[]} : (B.type === "pg" ? {sql:" AND "+col+" = ANY(?)", a:[Array.from(P.set)]} : {sql:" AND "+col+" IN (SELECT value FROM json_each(?))", a:[JSON.stringify(Array.from(P.set))]});
@@ -24,21 +28,23 @@ const ddl = {pg:[
   /* correctif 40 : déclaration à la CNAM, site et date de révision des risques, motifs (réouverture, annulation) */
   "CREATE TABLE IF NOT EXISTS hse_declarations (evenement_id TEXT PRIMARY KEY, declaree_le TEXT NOT NULL, reference TEXT, par TEXT, maj TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS hse_risques_sites (risque_id TEXT PRIMARY KEY, site_id TEXT, revise_le TEXT)",
-  "CREATE TABLE IF NOT EXISTS hse_journal (id TEXT PRIMARY KEY, objet_id TEXT NOT NULL, nature TEXT NOT NULL, le TEXT NOT NULL, par TEXT, motif TEXT)"]};
+  "CREATE TABLE IF NOT EXISTS hse_journal (id TEXT PRIMARY KEY, objet_id TEXT NOT NULL, nature TEXT NOT NULL, le TEXT NOT NULL, par TEXT, motif TEXT)",
+  /* correctif 41 : dotations annulées (saisie erronée) */
+  "CREATE TABLE IF NOT EXISTS hse_epi_annul (epi_id TEXT PRIMARY KEY, le TEXT NOT NULL, par TEXT, motif TEXT)"]};
 ddl.pg.push("CREATE INDEX IF NOT EXISTS hse_evenements_statut ON hse_evenements(statut, d)","CREATE INDEX IF NOT EXISTS hse_actions_evt ON hse_actions(evenement_id, echeance)",
   "CREATE INDEX IF NOT EXISTS hse_actions_risque ON hse_actions(risque_id)", "CREATE INDEX IF NOT EXISTS hse_epi_mat_type ON hse_epi(mat, type, remis_le)", "CREATE INDEX IF NOT EXISTS hse_journal_objet ON hse_journal(objet_id, le)");
 ddl.sqlite = ddl.pg;
-const tables = {hse_evenements:"id", hse_actions:"id", hse_risques:"id", hse_epi:"id", hse_declarations:"evenement_id", hse_risques_sites:"risque_id", hse_journal:"id"};
+const tables = {hse_evenements:"id", hse_actions:"id", hse_risques:"id", hse_epi:"id", hse_declarations:"evenement_id", hse_risques_sites:"risque_id", hse_journal:"id", hse_epi_annul:"epi_id"};
 /* l'accident de trajet est un accident du travail au sens de la CNAM, mais il est exclu du taux de fréquence */
 const TYPES = ["accident", "accident_trajet", "incident", "presque_accident"], ACC = ["accident", "accident_trajet"];
 function ajoutJours(k, n){ const d = new Date(k+"T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 const LIB = {
   type:{accident:["Accident du travail","Work accident","حادث شغل"], accident_trajet:["Accident de trajet","Commuting accident","حادث طريق"], incident:["Incident","Incident","حادث عرضي"], presque_accident:["Presque-accident","Near miss","حادث وشيك"]},
-  statut:{ouvert:["Ouvert","Open","مفتوح"], en_analyse:["En analyse","Under analysis","قيد التحليل"], clos:["Clos","Closed","مغلق"]},
+  statut:{ouvert:["Ouvert","Open","مفتوح"], en_analyse:["En analyse","Under analysis","قيد التحليل"], clos:["Clos","Closed","مغلق"], annule:["Annulé","Cancelled","ملغى"]},
   oui:["Oui","Yes","نعم"], non:["Non","No","لا"],
-  entete:[["Date","Heure","Type","Site","Lieu","Matricule","Salarié","Gravité","Arrêt","Jours d'arrêt","Statut","Déclaration CNAM","Référence CNAM"],
-    ["Date","Time","Type","Site","Place","Employee ID","Employee","Severity","Lost time","Days lost","Status","CNAM declaration","CNAM reference"],
-    ["التاريخ","الساعة","النوع","الموقع","المكان","المعرف","الأجير","الخطورة","توقف","أيام التوقف","الحالة","التصريح للصندوق","المرجع"]]
+  entete:[["Date","Heure","Type","Site","Lieu","Matricule","Salarié","Gravité","Arrêt","Jours d'arrêt","Statut","Déclaration CNAM","Référence CNAM","Description","Cause","Déclaré par","Clos le"],
+    ["Date","Time","Type","Site","Place","Employee ID","Employee","Severity","Lost time","Days lost","Status","CNAM declaration","CNAM reference","Description","Cause","Reported by","Closed on"],
+    ["التاريخ","الساعة","النوع","الموقع","المكان","المعرف","الأجير","الخطورة","توقف","أيام التوقف","الحالة","التصريح للصندوق","المرجع","الوصف","السبب","صرّح به","أغلق في"]]
 };
 const MSG = {
   droitEmp:["Droit de consultation des salariés requis.", "Employee viewing right required.", "يلزم حق الاطلاع على الأجراء."],
@@ -81,7 +87,17 @@ const MSG = {
   periode:["Période invalide : dates réelles, début ≤ fin, deux ans au plus.", "Invalid period: real dates, start ≤ end, two years at most.", "فترة غير صالحة."],
   cnam:["Date de déclaration réelle, entre la date de l'accident et aujourd'hui.", "Declaration date must be real, between the accident date and today.", "تاريخ التصريح بين تاريخ الحادث واليوم."],
   pasAccident:["Seul un accident se déclare à la CNAM.", "Only an accident is declared to the CNAM.", "يصرح بالحوادث فقط."],
-  introuvable:["Introuvable.", "Not found.", "غير موجود."]
+  introuvable:["Introuvable.", "Not found.", "غير موجود."],
+  sensibles:["Votre profil n'a pas accès aux données sensibles : modification des faits refusée.", "Your profile has no access to sensitive data: changing the facts is refused.", "ملفك لا يخول الاطلاع على المعطيات الحساسة: تعديل الوقائع مرفوض."],
+  cnamExiste:["Accident déjà déclaré à la CNAM le {d} : type, salarié et date (au plus tard celle de la déclaration) ne peuvent plus changer.", "Accident already declared to the CNAM on {d}: type, employee and date (no later than the declaration) can no longer change.", "حادث مصرح به في {d}: لا يمكن تغيير النوع والأجير والتاريخ."],
+  joursArretRequis:["Arrêt de travail sans jour d'arrêt : indiquez le nombre de jours (analyse) avant de clore.", "Lost time without days: enter the number of days (analysis) before closing.", "توقف بلا أيام: أدخل عدد الأيام قبل الإغلاق."],
+  annule:["Événement annulé.", "Event cancelled.", "الحدث ملغى."],
+  echeancePassee:["Nouvelle échéance réelle, à partir d'aujourd'hui et postérieure à l'événement.", "New due date must be real, from today and after the event.", "أجل جديد ابتداء من اليوم ولاحق للحدث."],
+  siteCommun:["Risque commun à toute l'entreprise : un compte limité à un site ne peut pas le rattacher à un site.", "Company-wide risk: an account limited to a site cannot attach it to a site.", "خطر مشترك: لا يمكن لحساب محدود ربطه بموقع."],
+  doublonRisque:["Ce risque existe déjà pour ce site.", "This risk already exists for this site.", "هذا الخطر موجود لهذا الموقع."],
+  doublonEpi:["Cette dotation est déjà enregistrée (même salarié, équipement et date).", "This issue is already recorded (same employee, equipment and date).", "هذا التسليم مسجل مسبقا."],
+  epiAvantEntree:["Date de remise antérieure à l'entrée du salarié ({d}).", "Issue date before the employee's start date ({d}).", "تاريخ التسليم سابق لانتداب الأجير ({d})."],
+  epiIntrouvable:["Dotation introuvable ou déjà annulée.", "Issue not found or already cancelled.", "تسليم غير موجود أو ملغى."]
 };
 function creer(o){
   const {B, D, audit} = o, pg = B.type === "pg", actif = o.moduleActif || (()=>true);
@@ -95,14 +111,21 @@ function creer(o){
   const entier = v => typeof v === "number" ? (Number.isInteger(v) ? v : NaN) : (typeof v === "string" && /^\d+$/.test(v.trim()) ? +v.trim() : NaN);
   const dans = (P, m) => P.set === null || (P.set && P.set.has(String(m)));
   const n_ = r => !!(r && (r.n || r.changes || r.rowCount));
+  /* correctif 41 : version d'un élément (empreinte de ses champs) — une modification faite depuis un état périmé est refusée */
+  const ver = (r, champs) => crypto.createHash("sha1").update(JSON.stringify(champs.map(k=>r[k] == null ? null : String(r[k])))).digest("hex").slice(0, 16);
+  const CH_EV = ["type","d","heure","site_id","lieu","mat","gravite","arret","jours_arret","description","cause","statut"], CH_AC = ["titre","responsable","echeance","statut"], CH_RQ = ["unite","danger","gravite","probabilite","mesures","maj"];
+  /* correctif 41 : toute écriture prévient les autres modules (le Pilotage vide son cache) */
+  const publie = () => { try { if (o.publier) o.publier("hse.maj", {}); } catch(e){} };
   const RANG = {aucun:0, lecture:1, saisie:2, validation:3, config:4};
-  /* correctif 40 : matrice de l'écran « hse » (menu masqué ou en lecture ; actions lire / créer / modifier / valider / exporter) */
+  /* correctif 40 : matrice de l'écran « hse » (menu masqué ou en lecture ; actions lire / créer / modifier / valider /
+     exporter) ; correctif 41 : supprimer (annulation d'un événement ou d'une dotation) et imprimer */
   function droitsEcran(admin, P){
     const rang = admin ? 4 : (RANG[((P.profil||{}).droits||{}).EMP] || 0);
     const pr = admin ? {} : (P.profil || {}), menu = (pr.menus || {}).hse, act = (pr.actions || {}).hse || {};
     const voir = rang >= 1 && menu !== "masque" && act.lire !== false, ro = menu === "lecture";
     return {rang, voir, sens:!PERIM.masquePerso(P), creer:voir && !ro && rang >= 2 && act.creer !== false, modifier:voir && !ro && rang >= 2 && act.modifier !== false,
-      valider:voir && !ro && rang >= 3 && act.valider !== false, exporter:voir && rang >= 2 && act.exporter !== false};
+      valider:voir && !ro && rang >= 3 && act.valider !== false, supprimer:voir && !ro && rang >= 3 && act.supprimer !== false, exporter:voir && rang >= 2 && act.exporter !== false,
+      imprimer:voir && act.imprimer !== false};
   }
   async function contexte(P){
     const emps = await D.employes(), parMat = new Map(emps.map(e=>[String(e.mat), e]));
@@ -123,8 +146,9 @@ function creer(o){
   const actionSql = (P, cx, login) => { if (P.set === null) return {sql:"", a:[]}; const ve = visibleSql(P, cx, login, "e."), vr = risqueSql(P, cx, "rs.");
     return {sql:" AND ((a.evenement_id IS NOT NULL AND e.id IS NOT NULL"+ve.sql+") OR (a.evenement_id IS NULL AND a.risque_id IS NOT NULL AND r.id IS NOT NULL"+vr.sql+"))", a:[...ve.a, ...vr.a]}; };
   const JOINT_A = " FROM hse_actions a LEFT JOIN hse_evenements e ON e.id=a.evenement_id LEFT JOIN hse_risques r ON r.id=a.risque_id LEFT JOIN hse_risques_sites rs ON rs.risque_id=a.risque_id";
-  /* dotation en cours : aucune remise plus récente du même équipement au même salarié (une nouvelle remise solde l'ancienne) */
-  const EPI_COURANT = " AND NOT EXISTS (SELECT 1 FROM hse_epi z WHERE z.mat=hse_epi.mat AND z.type=hse_epi.type AND (z.remis_le > hse_epi.remis_le OR (z.remis_le = hse_epi.remis_le AND z.id > hse_epi.id)))";
+  /* dotation en cours : non annulée, et aucune remise plus récente (non annulée) du même équipement au même salarié */
+  const EPI_VALIDE = " AND NOT EXISTS (SELECT 1 FROM hse_epi_annul x WHERE x.epi_id=hse_epi.id)";
+  const EPI_COURANT = EPI_VALIDE+" AND NOT EXISTS (SELECT 1 FROM hse_epi z WHERE z.mat=hse_epi.mat AND z.type=hse_epi.type AND (z.remis_le > hse_epi.remis_le OR (z.remis_le = hse_epi.remis_le AND z.id > hse_epi.id)) AND NOT EXISTS (SELECT 1 FROM hse_epi_annul y WHERE y.epi_id=z.id))";
   /* indicateurs : taux de fréquence (accidents du travail avec arrêt × 1 000 000 / heures travaillées) et taux de
      gravité (jours d'arrêt × 1 000 / heures travaillées) ; heures lues dans les journées calculées par FW-Time.
      Correctif 40 : journées calculées avant lecture, cache invalidé à chaque changement des journées (génération),
@@ -148,7 +172,7 @@ function creer(o){
   const SEUIL_HEURES = 1000;
   async function indicateurs(P, du, au, login){
     const cx = await contexte(P), vs = visibleSql(P, cx, login, "");
-    const ev = await B.all("SELECT type, d, mat, site_id, arret, jours_arret, declare_par FROM hse_evenements WHERE d>=? AND d<=?"+vs.sql, du, au, ...vs.a);
+    const ev = await B.all("SELECT type, d, mat, site_id, arret, jours_arret, declare_par FROM hse_evenements WHERE d>=? AND d<=? AND statut<>'annule'"+vs.sql, du, au, ...vs.a);
     let hv; try { hv = await heuresPeriode(P, du, au); } catch(e){ (o.journal||console.log)("hse : heures travaillées : "+e.message); hv = {h:0, indisponible:true}; }
     const heures = hv.h, sig = !hv.indisponible && heures >= SEUIL_HEURES;
     const acc = ev.filter(e=>e.type === "accident"), avecArret = acc.filter(e=>Number(e.arret)), jours = avecArret.reduce((s, e)=>s + (Number(e.jours_arret)||0), 0);
@@ -163,7 +187,10 @@ function creer(o){
       tg:sig ? Math.round(jours * 1e3 / heures * 100) / 100 : null, actionsOuvertes:actions.length, actionsRetard:actions.filter(a=>a.echeance < auj()).length,
       parMois:Object.keys(parMois).sort().map(m=>Object.assign({mois:m}, parMois[m]))};
   }
-  /* correctif 40 : « À traiter » limité au périmètre et à la matrice de l'écran ; déclarations CNAM (48 h) */
+  /* délai légal de déclaration CNAM : 48 heures après l'accident (heure inconnue : début de journée) */
+  const horsDelai = e => Date.now() - new Date(e.d+"T"+(e.heure || "00:00")+":00").getTime() > 48 * 3600e3;
+  /* correctif 40 : « À traiter » limité au périmètre et à la matrice de l'écran ; correctif 41 : déclarations CNAM
+     en retard (plus de 48 h) séparées de celles encore dans le délai, sans limite d'ancienneté, événements annulés exclus */
   async function aTraiter(x){
     const dr = droitsEcran(x.admin, x.P), out = [], a = auj(); if (!dr.voir) return out;
     const cx = await contexte(x.P), login = x.C ? x.C.login : "", vs = visibleSql(x.P, cx, login, "");
@@ -175,8 +202,12 @@ function creer(o){
       if (ac) out.push({domaine:"sante", cle:"hse-actions-retard", nombre:ac, urgence:2, vue:"hse"});
     }
     if (dr.modifier){
-      const cn = Number((await B.get("SELECT COUNT(*) n FROM hse_evenements WHERE type IN ('accident','accident_trajet') AND mat IS NOT NULL AND d>=? AND NOT EXISTS (SELECT 1 FROM hse_declarations c WHERE c.evenement_id=hse_evenements.id)"+vs.sql, ajoutJours(a, -365), ...vs.a)).n);
-      if (cn) out.push({domaine:"sante", cle:"hse-cnam", nombre:cn, urgence:3, vue:"hse"});
+      const nd = " FROM hse_evenements WHERE type IN ('accident','accident_trajet') AND mat IS NOT NULL AND statut<>'annule' AND NOT EXISTS (SELECT 1 FROM hse_declarations c WHERE c.evenement_id=hse_evenements.id)"+vs.sql;
+      const anciens = Number((await B.get("SELECT COUNT(*) n"+nd+" AND d<?", ...vs.a, ajoutJours(a, -2))).n);
+      const recents = await B.all("SELECT d, heure"+nd+" AND d>=?", ...vs.a, ajoutJours(a, -2));
+      const retard = anciens + recents.filter(horsDelai).length, delai = recents.length - recents.filter(horsDelai).length;
+      if (retard) out.push({domaine:"sante", cle:"hse-cnam-retard", nombre:retard, urgence:3, vue:"hse"});
+      if (delai) out.push({domaine:"sante", cle:"hse-cnam", nombre:delai, urgence:2, vue:"hse"});
       const pm = perimSql(B, x.P, "mat"), act = await sortisSql(a);
       const e = Number((await B.get("SELECT COUNT(*) n FROM hse_epi WHERE renouveler_le IS NOT NULL AND renouveler_le <= ?"+EPI_COURANT+act.sql+pm.sql, ajoutJours(a, 30), ...act.a, ...pm.a)).n);
       if (e) out.push({domaine:"sante", cle:"hse-epi", nombre:e, urgence:1, vue:"hse"});
@@ -189,15 +220,27 @@ function creer(o){
   async function fiche360(x){
     const dr = droitsEcran(x.admin, x.P); if (!dr.voir || !dans(x.P, x.mat)) return null;
     const m = String(x.mat), a = auj();
-    const acc = Number((await B.get("SELECT COUNT(*) n FROM hse_evenements WHERE mat=? AND type IN ('accident','accident_trajet') AND d>=?", m, ajoutJours(a, -365))).n);
+    /* correctif 41 : accidents du travail seulement (les accidents de trajet sont exclus des taux), annulés exclus */
+    const acc = Number((await B.get("SELECT COUNT(*) n FROM hse_evenements WHERE mat=? AND type='accident' AND statut<>'annule' AND d>=?", m, ajoutJours(a, -365))).n);
     const epi = await B.all("SELECT type, renouveler_le FROM hse_epi WHERE mat=?"+EPI_COURANT+" ORDER BY remis_le DESC", m);
     if (!acc && !epi.length) return null;
     const ar = epi.filter(e=>e.renouveler_le && e.renouveler_le <= ajoutJours(a, 30)).length;
     return {cle:"hse", vue:"hse", lignes:[{k:"hseAccidents12", v:dr.sens ? String(acc) : "•••", alerte:dr.sens && acc > 0}, {k:"hseEpi", v:epi.length ? Array.from(new Set(epi.map(e=>e.type))).join(", ") : "—"}, {k:"hseEpiRenouv", v:String(ar), alerte:ar > 0}]};
   }
+  /* correctif 41 : bloc « santé et sécurité » du Pilotage — mêmes règles que l'écran (annulés exclus, accidents du travail,
+     taux non significatifs sous 1 000 heures) ; filtre selon la matrice de l'écran du demandeur */
+  function pilotage(evs, heures){
+    const ok = evs.filter(e=>e.statut !== "annule"), aa = ok.filter(e=>e.type === "accident" && Number(e.arret)), j = aa.reduce((s, e)=>s + (+e.jours_arret||0), 0), sig = heures >= SEUIL_HEURES;
+    return {accidents:ok.filter(e=>e.type === "accident").length, avecArret:aa.length, joursArret:j, presqueAccidents:ok.filter(e=>e.type === "presque_accident").length,
+      tf:sig ? Math.round(aa.length * 1e6 / heures * 100) / 100 : null, tg:sig ? Math.round(j * 1e3 / heures * 100) / 100 : null, nonSignificatif:!sig};
+  }
+  function filtrePilotage(admin, P, hse){ if (!hse) return hse; const dr = droitsEcran(admin, P); if (!dr.voir) return undefined;
+    return dr.sens ? hse : Object.assign({}, hse, {joursArret:null, tg:null}); }
+  const service = {droitsEcran, pilotage, filtrePilotage};
   async function traiter(req, res, x){
     const {p, C, admin, P, u, json, corpsJson, ip} = x;
-    const L = (()=>{ const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
+    /* correctif 41 : langue de l'écran (en-tête X-Langue envoyé par l'application, ou ?lang= pour un lien d'export) */
+    const L = (()=>{ const l = String((req.headers || {})["x-langue"] || u.searchParams.get("lang") || (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2)).slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
     const m = (k, v) => { let t = (MSG[k] || [k])[L] || MSG[k][0]; Object.keys(v || {}).forEach(z=>{ t = t.split("{"+z+"}").join(v[z]); }); return t; };
     /* correctif 40 : err renvoie true — « if (e) return e » après tx() arrêtait le traitement seulement en apparence
        (json renvoie undefined : l'audit et une seconde réponse suivaient un refus) */
@@ -213,16 +256,21 @@ function creer(o){
     if (dr.rang < 1) return err(403, "droitEmp");
     if (!dr.voir) return err(403, "masque");
     const refuse = () => err(403, "refuse");
-    const droits = {creer:dr.creer, modifier:dr.modifier, valider:dr.valider, exporter:dr.exporter, sensibles:dr.sens};
+    const droits = {creer:dr.creer, modifier:dr.modifier, modifierFaits:dr.modifier && dr.sens, valider:dr.valider, supprimer:dr.supprimer, exporter:dr.exporter, imprimer:dr.imprimer, sensibles:dr.sens, cnam:dr.modifier};
     const q = Object.fromEntries(u.searchParams.entries()), off = Math.min(1e7, Math.max(0, Math.floor(Number(q.offset)) || 0)), lim = Math.min(200, Math.max(1, Math.floor(Number(q.limit)) || 50));
     const verrou = async cle => { if (pg) await B.get("SELECT pg_advisory_xact_lock(hashtext(?))", cle); };
     const ko = (st, k, v) => Object.assign(new Error(k), {st, v});
-    const tx = async f => { try { await B.transaction(f); return null; } catch(e){ if (e && e.st && MSG[e.message]) return err(e.st, e.message, e.v); if (/unique|duplicate|constraint/i.test((e && e.message) || "")) return err(409, "concurrence"); throw e; } };
-    const journal = (objet, nature, motif) => B.run("INSERT INTO hse_journal(id,objet_id,nature,le,par,motif) VALUES(?,?,?,?,?,?)", id("hj"), objet, nature, maint(), C.login, motif || null);
-    const sitesDe = async cx => { const ref = await (D.referentielLecture || D.referentiel)() || {}; return (ref.sites||[]).filter(s=>s && (cx.sites === null || cx.sites.has(s.id))).map(s=>({id:s.id, nom:s.nom || s.id})); };
+    const tx = async f => { try { await B.transaction(f); publie(); return null; } catch(e){ if (e && e.st && MSG[e.message]) return err(e.st, e.message, e.v); if (/unique|duplicate|constraint/i.test((e && e.message) || "")) return err(409, "concurrence"); throw e; } };
+    /* journal : motif libre et, pour une modification, valeurs précédentes (JSON) */
+    const journal = (objet, nature, motif, avant) => B.run("INSERT INTO hse_journal(id,objet_id,nature,le,par,motif) VALUES(?,?,?,?,?,?)", id("hj"), objet, nature, maint(), C.login,
+      avant ? JSON.stringify({motif:motif || "", avant}) : (motif || null));
+    const lireJournal = j => { let motif = j.motif || "", avant = null; if (motif.charAt(0) === "{") try { const z = JSON.parse(motif); motif = z.motif || ""; avant = z.avant || null; } catch(e){}
+      return {nature:j.nature, le:j.le, par:j.par, motif:dr.sens ? motif : (motif ? MQ : ""), avant:dr.sens ? avant : null}; };
+    const ref0 = async () => await (D.referentielLecture || D.referentiel)() || {};
+    const sitesDe = async (cx, plus) => { const ref = await ref0(); return (ref.sites||[]).filter(s=>s && (cx.sites === null || cx.sites.has(s.id) || s.id === plus)).map(s=>({id:s.id, nom:s.nom || s.id})); };
     /* victime et faits masqués pour un profil sans accès aux données sensibles */
     const MQ = "•••";
-    const presente = (e, cx, decl) => { const o2 = Object.assign({}, e, {victime:e.mat ? cx.nom(e.mat) : "", cnam:decl || null});
+    const presente = (e, cx, decl, noms) => { const o2 = Object.assign({}, e, {victime:e.mat ? cx.nom(e.mat) : "", cnam:decl || null, version:ver(e, CH_EV), site_nom:noms ? noms.get(e.site_id) || "" : undefined});
       if (!dr.sens){ if (o2.mat){ o2.victime = MQ; o2.mat = MQ; } o2.description = MQ; o2.cause = o2.cause ? MQ : ""; o2.jours_arret = null; o2.masque = true; }
       o2.gravite = e.gravite == null ? null : Number(e.gravite); o2.arret = Number(e.arret) ? 1 : 0; if (o2.jours_arret != null) o2.jours_arret = Number(e.jours_arret) || 0; return o2; };
     /* contrôle d'une déclaration (création ou modification) */
@@ -240,8 +288,9 @@ function creer(o){
       const arret = b.arret === true;
       if (arret && (ACC.indexOf(type) < 0 || !mat)) throw ko(400, "arretVictime");
       const j = !arret ? 0 : b.joursArret == null || b.joursArret === "" ? 0 : entier(b.joursArret); if (!(j >= 0 && j <= 3650)) throw ko(400, "jours");
-      const siteId = txt(b, "siteId", 60) || (mat ? (cx.parMat.get(mat) || {}).siteId || null : null) || (avant ? avant.site_id : null);
-      if (txt(b, "siteId", 60)){ const ref = await (D.referentielLecture || D.referentiel)() || {};
+      const demande = txt(b, "siteId", 60), siteId = demande || (mat ? (cx.parMat.get(mat) || {}).siteId || null : null) || (avant ? avant.site_id : null);
+      /* correctif 41 : le site déjà enregistré est conservé même hors du périmètre (mission sur un autre site) ; seul un changement est contrôlé */
+      if (demande && !(avant && demande === avant.site_id)){ const ref = await ref0();
         if (!(ref.sites||[]).some(z=>z.id === siteId) || (cx.sites !== null && !cx.sites.has(siteId))) throw ko(400, "site"); }
       return {type, d, heure, siteId, lieu:txt(b, "lieu", 120), mat:mat || null, g, arret, j, desc};
     };
@@ -250,16 +299,26 @@ function creer(o){
       if (!dateOk(au) || !dateOk(du) || du > au || ajoutJours(du, 731) < au) return err(400, "periode");
       return json(res, 200, Object.assign(await indicateurs(P, du, au, C.login), {droits}));
     }
+    /* correctif 41 : recherche d'un salarié du périmètre par nom ou matricule (formulaires) */
+    if (p === "/api/v1/hse/salaries" && req.method === "GET"){
+      const s = String(q.q || "").trim().toLowerCase().slice(0, 60), a = auj(); if (s.length < 2) return json(res, 200, {lignes:[]});
+      const l = (await D.employes()).filter(e=>dans(P, e.mat) && (!e.sortie || e.sortie >= ajoutJours(a, -365)) && (String(e.mat).toLowerCase().indexOf(s) === 0 || ((e.nom||"")+" "+(e.prenom||"")).toLowerCase().indexOf(s) >= 0)).slice(0, 15);
+      return json(res, 200, {lignes:l.map(e=>({mat:e.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), sorti:!!(e.sortie && e.sortie < a)}))});
+    }
     if (p === "/api/v1/hse/evenements" && req.method === "GET"){
-      const cx = await contexte(P), st = q.statut === "tous" ? null : (q.statut === "clos" ? "clos" : "ouvert_analyse");
-      /* v56.23 : filtres, visibilité (salarié du périmètre, site du périmètre ou déclarant) et pagination en SQL */
+      const cx = await contexte(P), st = ["tous","clos","annule"].indexOf(q.statut) >= 0 ? q.statut : "";
+      /* v56.23 : filtres, visibilité (salarié du périmètre, site du périmètre ou déclarant) et pagination en SQL ;
+         correctif 41 : filtres salarié, période et site ; événements annulés à part */
       let w = " WHERE 1=1", a = [];
-      if (st) w += st === "clos" ? " AND ev.statut='clos'" : " AND ev.statut <> 'clos'";
+      if (st === "clos" || st === "annule"){ w += " AND ev.statut=?"; a.push(st); } else if (!st) w += " AND ev.statut NOT IN ('clos','annule')";
       if (TYPES.indexOf(q.type) >= 0){ w += " AND ev.type=?"; a.push(q.type); }
+      if (q.mat){ w += " AND ev.mat=?"; a.push(String(q.mat).slice(0, 40)); }
+      if (dateOk(q.du)){ w += " AND ev.d>=?"; a.push(q.du); } if (dateOk(q.au)){ w += " AND ev.d<=?"; a.push(q.au); }
+      if (q.site){ w += " AND ev.site_id=?"; a.push(String(q.site).slice(0, 60)); }
       const vs = visibleSql(P, cx, C.login, "ev."); w += vs.sql; a.push(...vs.a);
       const total = Number((await B.get("SELECT COUNT(*) n FROM hse_evenements ev"+w, ...a)).n);
       const l = await B.all("SELECT ev.id, ev.type, ev.d, ev.heure, ev.site_id, ev.lieu, ev.mat, ev.gravite, ev.arret, ev.jours_arret, ev.description, ev.cause, ev.statut, ev.declare_par, c.declaree_le cnam_le FROM hse_evenements ev LEFT JOIN hse_declarations c ON c.evenement_id=ev.id"+w+" ORDER BY ev.d DESC, ev.heure DESC, ev.id LIMIT "+lim+" OFFSET "+off, ...a);
-      return json(res, 200, {total, offset:off, limit:lim, droits, sites:await sitesDe(cx), lignes:l.map(e=>presente(e, cx, e.cnam_le ? {declaree_le:e.cnam_le} : null))});
+      return json(res, 200, {total, offset:off, limit:lim, droits, sites:await sitesDe(cx), lignes:l.map(e=>Object.assign(presente(e, cx, e.cnam_le ? {declaree_le:e.cnam_le} : null), {cnamRetard:ACC.indexOf(e.type) >= 0 && !!e.mat && !e.cnam_le && e.statut !== "annule" && horsDelai(e)}))});
     }
     if (p === "/api/v1/hse/evenements" && req.method === "POST"){
       if (!dr.creer) return refuse();
@@ -271,35 +330,69 @@ function creer(o){
       /* journal minimal : ni matricule ni description */
       await audit(C.login, "hse.evenement.declare", i, ip); return json(res, 200, {ok:true, id:i});
     }
-    const me = /^\/api\/v1\/hse\/evenements\/([^/]+)(?:\/(analyse|cloturer|rouvrir|cnam))?$/.exec(p);
+    const me = /^\/api\/v1\/hse\/evenements\/([^/]+)(?:\/(analyse|cloturer|rouvrir|cnam|annuler|imprime))?$/.exec(p);
     if (me){
       const cx = await contexte(P), e = await B.get("SELECT * FROM hse_evenements WHERE id=?", me[1]);
       if (!e || !visible(P, cx, e, C.login)) return err(404, "evenement");
       if (!me[2] && req.method === "GET"){
-        const decl = await B.get("SELECT declaree_le, reference FROM hse_declarations WHERE evenement_id=?", e.id);
+        const decl = await B.get("SELECT declaree_le, reference FROM hse_declarations WHERE evenement_id=?", e.id), ref = await ref0(), noms = new Map((ref.sites||[]).map(s=>[s.id, s.nom || s.id]));
         const jr = await B.all("SELECT nature, le, par, motif FROM hse_journal WHERE objet_id=? ORDER BY le DESC", e.id);
-        return json(res, 200, {evenement:presente(e, cx, decl), droits, sites:await sitesDe(cx), journal:jr.map(j=>Object.assign(j, {motif:dr.sens ? j.motif : (j.motif ? MQ : "")})),
-          actions:(await B.all("SELECT * FROM hse_actions WHERE evenement_id=? ORDER BY (statut IN ('faite','annulee')), echeance, id", e.id))});
+        const acts = await B.all("SELECT * FROM hse_actions WHERE evenement_id=? ORDER BY (statut IN ('faite','annulee')), echeance, id", e.id);
+        return json(res, 200, {evenement:Object.assign(presente(e, cx, decl, noms), {declarant:e.declare_par, clos_le:e.clos_le, cnamRetard:ACC.indexOf(e.type) >= 0 && !!e.mat && !decl && e.statut !== "annule" && horsDelai(e)}),
+          droits, sites:await sitesDe(cx, e.site_id), journal:jr.map(lireJournal), actions:acts.map(a=>Object.assign(a, {version:ver(a, CH_AC)}))});
       }
       if (req.method !== "POST") return err(404, "introuvable");
       const b = await corpsJson(req);
-      /* modification d'une déclaration tant qu'elle n'est pas close */
+      /* fiche imprimable : consultation tracée */
+      if (me[2] === "imprime"){ if (!dr.imprimer) return refuse(); await audit(C.login, "hse.evenement.imprime", e.id, ip); return json(res, 200, {ok:true}); }
+      /* modification d'une déclaration tant qu'elle n'est pas close ; correctif 41 : refusée sans accès aux données
+         sensibles (le profil voyait « ••• » et l'enregistrait), version contrôlée, données validées (gravité, arrêt, jours)
+         gardées pour un profil sans droit de validation, déclaration CNAM respectée, valeurs précédentes journalisées */
       if (!me[2]){
-        if (!dr.modifier) return refuse();
-        const r = await tx(async ()=>{ await verrou("hse:"+e.id); const v = await lireEvenement(b, cx, e);
-          const n = await B.run("UPDATE hse_evenements SET type=?, d=?, heure=?, site_id=?, lieu=?, mat=?, gravite=?, arret=?, jours_arret=? , description=? WHERE id=? AND statut<>'clos'",
-            v.type, v.d, v.heure, v.siteId, v.lieu, v.mat, v.g, v.arret ? 1 : 0, v.j, v.desc, e.id);
-          if (!n_(n)) throw ko(409, "clos"); });
-        if (r) return r; await audit(C.login, "hse.evenement.modifie", e.id, ip); return json(res, 200, {ok:true});
+        if (!dr.modifier) return refuse(); if (!dr.sens) return err(403, "sensibles");
+        let changes = null;
+        const r = await tx(async ()=>{ await verrou("hse:"+e.id);
+          const cur = await B.get("SELECT * FROM hse_evenements WHERE id=?", e.id); if (!cur) throw ko(404, "evenement");
+          if (cur.statut === "clos") throw ko(409, "clos"); if (cur.statut === "annule") throw ko(409, "annule");
+          if (b.version !== ver(cur, CH_EV)) throw ko(409, "concurrence");
+          const v = await lireEvenement(b, cx, cur);
+          if (!dr.valider && cur.statut !== "ouvert"){ v.g = Number(cur.gravite) || 1; v.arret = !!Number(cur.arret); v.j = Number(cur.jours_arret) || 0;
+            if (v.arret && (ACC.indexOf(v.type) < 0 || !v.mat)) throw ko(400, "arretVictime"); }
+          const decl = await B.get("SELECT declaree_le FROM hse_declarations WHERE evenement_id=?", e.id);
+          if (decl && (ACC.indexOf(v.type) < 0 || v.mat !== cur.mat || v.d > decl.declaree_le)) throw ko(409, "cnamExiste", {d:jj(decl.declaree_le)});
+          const nv = {type:v.type, d:v.d, heure:v.heure, site_id:v.siteId, lieu:v.lieu, mat:v.mat, gravite:v.g, arret:v.arret ? 1 : 0, jours_arret:v.j, description:v.desc};
+          const avant = {}; Object.keys(nv).forEach(k=>{ if (String(cur[k] == null ? "" : cur[k]) !== String(nv[k] == null ? "" : nv[k])) avant[k] = cur[k]; });
+          changes = Object.keys(avant).length; if (!changes) return;
+          const n = await B.run("UPDATE hse_evenements SET type=?, d=?, heure=?, site_id=?, lieu=?, mat=?, gravite=?, arret=?, jours_arret=?, description=? WHERE id=? AND statut NOT IN ('clos','annule')",
+            nv.type, nv.d, nv.heure, nv.site_id, nv.lieu, nv.mat, nv.gravite, nv.arret, nv.jours_arret, nv.description, e.id);
+          if (!n_(n)) throw ko(409, "concurrence");
+          await journal(e.id, "modification", "", avant); });
+        if (r) return r; if (changes) await audit(C.login, "hse.evenement.modifie", e.id, ip); return json(res, 200, {ok:true, inchange:!changes});
       }
       if (me[2] === "cnam"){
         if (!dr.modifier) return refuse();
-        if (ACC.indexOf(e.type) < 0) return err(400, "pasAccident");
-        const le = b.declareeLe, ref = txt(b, "reference", 60); if (!dateOk(le) || le < e.d || le > auj()) return err(400, "cnam");
-        await B.run("INSERT INTO hse_declarations(evenement_id,declaree_le,reference,par,maj) VALUES(?,?,?,?,?) ON CONFLICT(evenement_id) DO UPDATE SET declaree_le=excluded.declaree_le, reference=excluded.reference, par=excluded.par, maj=excluded.maj", e.id, le, ref, C.login, maint());
-        await audit(C.login, "hse.evenement.cnam", e.id, ip); return json(res, 200, {ok:true});
+        const le = b.declareeLe, refc = txt(b, "reference", 60);
+        const r = await tx(async ()=>{ await verrou("hse:"+e.id);
+          const cur = await B.get("SELECT type, d, mat, statut FROM hse_evenements WHERE id=?", e.id);
+          if (!cur || ACC.indexOf(cur.type) < 0 || !cur.mat) throw ko(400, "pasAccident"); if (cur.statut === "annule") throw ko(409, "annule");
+          if (!dateOk(le) || le < cur.d || le > auj()) throw ko(400, "cnam");
+          const prec = await B.get("SELECT declaree_le, reference FROM hse_declarations WHERE evenement_id=?", e.id);
+          await B.run("INSERT INTO hse_declarations(evenement_id,declaree_le,reference,par,maj) VALUES(?,?,?,?,?) ON CONFLICT(evenement_id) DO UPDATE SET declaree_le=excluded.declaree_le, reference=excluded.reference, par=excluded.par, maj=excluded.maj", e.id, le, refc, C.login, maint());
+          await journal(e.id, "cnam", "", prec ? {declaree_le:prec.declaree_le, reference:prec.reference || ""} : {declaree_le:null}); });
+        if (r) return r; await audit(C.login, "hse.evenement.cnam", e.id, ip); return json(res, 200, {ok:true});
+      }
+      /* correctif 41 : annulation d'un événement saisi par erreur (motif, conservé au registre, exclu des taux) */
+      if (me[2] === "annuler"){
+        if (!dr.supprimer) return refuse();
+        const motif = txt(b, "motif", 500); if (!motif) return err(400, "motif");
+        const r = await tx(async ()=>{ await verrou("hse:"+e.id);
+          const n = await B.run("UPDATE hse_evenements SET statut='annule' WHERE id=? AND statut<>'annule'", e.id); if (!n_(n)) throw ko(409, "annule");
+          await B.run("UPDATE hse_actions SET statut='annulee' WHERE evenement_id=? AND statut NOT IN ('faite','annulee')", e.id);
+          await journal(e.id, "annulation", motif); });
+        if (r) return r; await audit(C.login, "hse.evenement.annule", e.id, ip); return json(res, 200, {ok:true});
       }
       if (!dr.valider) return refuse();
+      if (e.statut === "annule") return err(409, "annule");
       if (me[2] === "rouvrir"){
         const motif = txt(b, "motif", 500); if (!motif) return err(400, "motif");
         const r = await tx(async ()=>{ await verrou("hse:"+e.id);
@@ -308,21 +401,29 @@ function creer(o){
         if (r) return r; await audit(C.login, "hse.evenement.rouvert", e.id, ip); return json(res, 200, {ok:true});
       }
       if (me[2] === "analyse"){
+        /* correctif 41 : refusée sans accès aux données sensibles (cause et jours écrasés à l'aveugle) */
+        if (!dr.sens) return err(403, "sensibles");
         const cause = b.cause == null ? String(e.cause||"").trim() : txt(b, "cause", 2000); if (!cause) return err(400, "cause");
-        let j = Number(e.jours_arret) || 0;
+        let j = null;
         if (b.joursArret != null && b.joursArret !== ""){ j = entier(b.joursArret); if (!(j >= 0 && j <= 3650)) return err(400, "jours"); }
         const r = await tx(async ()=>{ await verrou("hse:"+e.id);
-          const n = await B.run("UPDATE hse_evenements SET cause=?, statut='en_analyse', jours_arret=CASE WHEN arret=1 THEN ? ELSE 0 END WHERE id=? AND statut<>'clos'", cause, j, e.id);
-          if (!n_(n)) throw ko(409, "clos"); });
+          const cur = await B.get("SELECT cause, jours_arret, statut FROM hse_evenements WHERE id=?", e.id); if (!cur || cur.statut === "clos" || cur.statut === "annule") throw ko(409, "clos");
+          const jn = j == null ? Number(cur.jours_arret) || 0 : j;
+          const n = await B.run("UPDATE hse_evenements SET cause=?, statut='en_analyse', jours_arret=CASE WHEN arret=1 THEN ? ELSE 0 END WHERE id=? AND statut NOT IN ('clos','annule')", cause, jn, e.id);
+          if (!n_(n)) throw ko(409, "clos");
+          const avant = {}; if (String(cur.cause||"") !== cause) avant.cause = cur.cause || ""; if (j != null && Number(cur.jours_arret) !== j) avant.jours_arret = Number(cur.jours_arret) || 0;
+          if (Object.keys(avant).length) await journal(e.id, "analyse", "", avant); });
         if (r) return r; await audit(C.login, "hse.evenement.analyse", e.id, ip); return json(res, 200, {ok:true});
       }
       if (me[2] === "cloturer"){
         const r = await tx(async ()=>{ await verrou("hse:"+e.id);
-          const e2 = await B.get("SELECT statut, cause FROM hse_evenements WHERE id=?", e.id); if (!e2 || e2.statut === "clos") throw ko(409, "clos");
+          const e2 = await B.get("SELECT statut, cause, arret, jours_arret FROM hse_evenements WHERE id=?", e.id); if (!e2 || e2.statut === "clos") throw ko(409, "clos");
           if (!String(e2.cause||"").trim()) throw ko(409, "causeAvant");
+          /* correctif 41 : un arrêt de travail compte dans le taux de fréquence — au moins un jour d'arrêt à la clôture */
+          if (Number(e2.arret) && !(Number(e2.jours_arret) > 0)) throw ko(409, "joursArretRequis");
           const ouvertes = Number((await B.get("SELECT COUNT(*) n FROM hse_actions WHERE evenement_id=? AND statut NOT IN ('faite','annulee')", e.id)).n);
           if (ouvertes) throw ko(409, "actionsOuvertes", {n:ouvertes});
-          const n = await B.run("UPDATE hse_evenements SET statut='clos', clos_le=? WHERE id=? AND statut<>'clos' AND NOT EXISTS (SELECT 1 FROM hse_actions WHERE evenement_id=? AND statut NOT IN ('faite','annulee'))", maint(), e.id, e.id);
+          const n = await B.run("UPDATE hse_evenements SET statut='clos', clos_le=? WHERE id=? AND statut NOT IN ('clos','annule') AND NOT EXISTS (SELECT 1 FROM hse_actions WHERE evenement_id=? AND statut NOT IN ('faite','annulee'))", maint(), e.id, e.id);
           if (!n_(n)) throw ko(409, "concurrence"); });
         if (r) return r; await audit(C.login, "hse.evenement.clos", e.id, ip); return json(res, 200, {ok:true});
       }
@@ -333,7 +434,7 @@ function creer(o){
       const va = actionSql(P, await contexte(P), C.login), w = " WHERE "+st+va.sql;
       const total = Number((await B.get("SELECT COUNT(*) n"+JOINT_A+w, ...va.a)).n);
       const l = await B.all("SELECT a.id, a.evenement_id, a.risque_id, a.titre, a.responsable, a.echeance, a.statut, a.faite_le, e.type evtype, e.d evd, r.danger"+JOINT_A+w+" ORDER BY a.echeance"+(q.statut === "faite" ? " DESC" : "")+", a.id LIMIT "+lim+" OFFSET "+off, ...va.a);
-      return json(res, 200, {total, offset:off, limit:lim, droits, lignes:l});
+      return json(res, 200, {total, offset:off, limit:lim, droits, lignes:l.map(a=>Object.assign(a, {version:ver(a, CH_AC)}))});
     }
     if (p === "/api/v1/hse/actions" && req.method === "POST"){
       if (!dr.valider) return refuse();
@@ -342,7 +443,7 @@ function creer(o){
       if (!evId && !rqId) return err(400, "origine");
       const cx = await contexte(P), i = id("ha");
       const r = await tx(async ()=>{
-        if (evId){ await verrou("hse:"+evId); const e = await B.get("SELECT * FROM hse_evenements WHERE id=? AND statut <> 'clos'", evId);
+        if (evId){ await verrou("hse:"+evId); const e = await B.get("SELECT * FROM hse_evenements WHERE id=? AND statut NOT IN ('clos','annule')", evId);
           if (!e || !visible(P, cx, e, C.login)) throw ko(400, "evtClos"); if (ech < e.d) throw ko(400, "echeanceEvt"); }
         if (rqId){ const rq = await B.get("SELECT r.id, rs.site_id FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE r.id=?", rqId);
           if (!rq || (cx.sites !== null && rq.site_id && !cx.sites.has(rq.site_id))) throw ko(400, "risque"); }
@@ -357,20 +458,26 @@ function creer(o){
       const a = await B.get("SELECT a.*"+JOINT_A+" WHERE a.id=?"+va.sql, ma[1], ...va.a); if (!a) return err(404, "actionIntrouvable");
       const b = await corpsJson(req);
       const r = await tx(async ()=>{ await verrou(a.evenement_id ? "hse:"+a.evenement_id : "hsea:"+a.id);
-        if (a.evenement_id){ const e = await B.get("SELECT statut, d FROM hse_evenements WHERE id=?", a.evenement_id); if (e && e.statut === "clos") throw ko(409, "clos"); }
+        const ev = a.evenement_id ? await B.get("SELECT statut, d FROM hse_evenements WHERE id=?", a.evenement_id) : null; if (ev && (ev.statut === "clos" || ev.statut === "annule")) throw ko(409, ev.statut === "clos" ? "clos" : "annule");
         if (op === "faite"){ const n = await B.run("UPDATE hse_actions SET statut='faite', faite_le=? WHERE id=? AND statut NOT IN ('faite','annulee')", maint(), a.id); if (!n_(n)) throw ko(409, "actionFaite"); return; }
         if (op === "annuler"){ const motif = txt(b, "motif", 500); if (!motif) throw ko(400, "motif");
           const n = await B.run("UPDATE hse_actions SET statut='annulee' WHERE id=? AND statut NOT IN ('faite','annulee')", a.id); if (!n_(n)) throw ko(409, "actionFaite"); await journal(a.id, "annulation", motif); return; }
-        const titre = b.titre == null ? a.titre : txt(b, "titre", 200), resp = b.responsable == null ? (a.responsable || "") : txt(b, "responsable", 80), ech = b.echeance == null ? a.echeance : b.echeance;
+        const cur = await B.get("SELECT * FROM hse_actions WHERE id=?", a.id); if (!cur || cur.statut === "faite" || cur.statut === "annulee") throw ko(409, "actionFaite");
+        if (b.version !== ver(cur, CH_AC)) throw ko(409, "concurrence");
+        const titre = b.titre == null ? cur.titre : txt(b, "titre", 200), resp = b.responsable == null ? (cur.responsable || "") : txt(b, "responsable", 80), ech = b.echeance == null ? cur.echeance : b.echeance;
         if (!titre || !dateOk(ech)) throw ko(400, "action");
-        const n = await B.run("UPDATE hse_actions SET titre=?, responsable=?, echeance=? WHERE id=? AND statut NOT IN ('faite','annulee')", titre, resp, ech, a.id); if (!n_(n)) throw ko(409, "actionFaite"); });
+        /* correctif 41 : une nouvelle échéance n'est ni passée ni antérieure à l'événement */
+        if (ech !== cur.echeance && (ech < auj() || (ev && ech < ev.d))) throw ko(400, "echeancePassee");
+        const n = await B.run("UPDATE hse_actions SET titre=?, responsable=?, echeance=? WHERE id=? AND statut NOT IN ('faite','annulee')", titre, resp, ech, a.id); if (!n_(n)) throw ko(409, "actionFaite");
+        const avant = {}; if (cur.titre !== titre) avant.titre = cur.titre; if ((cur.responsable||"") !== resp) avant.responsable = cur.responsable || ""; if (cur.echeance !== ech) avant.echeance = cur.echeance;
+        if (Object.keys(avant).length) await journal(a.evenement_id || a.id, "action", titre, avant); });
       if (r) return r; await audit(C.login, {faite:"hse.action.faite", annuler:"hse.action.annulee", modifier:"hse.action.modifiee"}[op], a.id, ip); return json(res, 200, {ok:true});
     }
     if (p === "/api/v1/hse/risques" && req.method === "GET"){
       const cx = await contexte(P), vr = risqueSql(P, cx, "rs.");
       const total = Number((await B.get("SELECT COUNT(*) n FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE 1=1"+vr.sql, ...vr.a)).n);
       const l = await B.all("SELECT r.*, rs.site_id, rs.revise_le, r.gravite * r.probabilite criticite FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE 1=1"+vr.sql+" ORDER BY r.gravite * r.probabilite DESC, r.unite, r.id LIMIT "+lim+" OFFSET "+off, ...vr.a);
-      return json(res, 200, {total, offset:off, limit:lim, droits, sites:await sitesDe(cx), lignes:l.map(z=>Object.assign(z, {gravite:Number(z.gravite), probabilite:Number(z.probabilite), criticite:Number(z.criticite)}))});
+      return json(res, 200, {total, offset:off, limit:lim, droits, sites:await sitesDe(cx), lignes:l.map(z=>Object.assign(z, {gravite:Number(z.gravite), probabilite:Number(z.probabilite), criticite:Number(z.criticite), version:ver(z, CH_RQ)}))});
     }
     const mr = /^\/api\/v1\/hse\/risques(?:\/([^/]+))?$/.exec(p);
     if (mr && req.method === "POST"){
@@ -379,24 +486,35 @@ function creer(o){
       if (!unite || !danger) return err(400, "risqueChamps");
       const g = entier(b.gravite), pr = entier(b.probabilite); if (!(g >= 1 && g <= 4)) return err(400, "gravite"); if (!(pr >= 1 && pr <= 4)) return err(400, "probabilite");
       const cx = await contexte(P);
-      if (siteId){ const ref = await (D.referentielLecture || D.referentiel)() || {}; if (!(ref.sites||[]).some(z=>z.id === siteId) || (cx.sites !== null && !cx.sites.has(siteId))) return err(400, "site"); }
-      else if (cx.sites !== null) return err(400, "site");
+      if (siteId){ const ref = await ref0(); if (!(ref.sites||[]).some(z=>z.id === siteId) || (cx.sites !== null && !cx.sites.has(siteId))) return err(400, "site"); }
+      else if (cx.sites !== null && !mr[1]) return err(400, "site");
       const i = mr[1] || id("hr");
       const r = await tx(async ()=>{
-        if (mr[1]){ await verrou("hsr:"+i); const vr = risqueSql(P, cx, "rs."); const ex = await B.get("SELECT r.id FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE r.id=?"+vr.sql, i, ...vr.a); if (!ex) throw ko(404, "risque");
-          await B.run("UPDATE hse_risques SET unite=?, danger=?, gravite=?, probabilite=?, mesures=?, maj=?, par=? WHERE id=?", unite, danger, g, pr, mesures, maint(), C.login, i); }
+        await verrou("hsr:liste");
+        let avant = null;
+        if (mr[1]){ const vr = risqueSql(P, cx, "rs."); const ex = await B.get("SELECT r.*, rs.site_id FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE r.id=?"+vr.sql, i, ...vr.a); if (!ex) throw ko(404, "risque");
+          if (b.version !== ver(ex, CH_RQ)) throw ko(409, "concurrence");
+          /* correctif 41 : un risque commun reste commun quand un compte limité à un site le révise */
+          if (cx.sites !== null && !ex.site_id && siteId) throw ko(400, "siteCommun");
+          if (cx.sites !== null && ex.site_id && !siteId) throw ko(400, "site");
+          avant = {unite:ex.unite, danger:ex.danger, gravite:Number(ex.gravite), probabilite:Number(ex.probabilite), mesures:ex.mesures || "", site_id:ex.site_id || null}; }
+        /* correctif 41 : même unité, même danger et même site = doublon */
+        const dup = await B.get("SELECT r.id FROM hse_risques r LEFT JOIN hse_risques_sites rs ON rs.risque_id=r.id WHERE lower(r.unite)=lower(?) AND lower(r.danger)=lower(?) AND COALESCE(rs.site_id,'')=? AND r.id<>?", unite, danger, siteId || "", i);
+        if (dup) throw ko(409, "doublonRisque");
+        if (mr[1]) await B.run("UPDATE hse_risques SET unite=?, danger=?, gravite=?, probabilite=?, mesures=?, maj=?, par=? WHERE id=?", unite, danger, g, pr, mesures, maint(), C.login, i);
         else await B.run("INSERT INTO hse_risques(id,unite,danger,gravite,probabilite,mesures,maj,par) VALUES(?,?,?,?,?,?,?,?)", i, unite, danger, g, pr, mesures, maint(), C.login);
-        await B.run("INSERT INTO hse_risques_sites(risque_id,site_id,revise_le) VALUES(?,?,?) ON CONFLICT(risque_id) DO UPDATE SET site_id=excluded.site_id, revise_le=excluded.revise_le", i, siteId, auj()); });
+        await B.run("INSERT INTO hse_risques_sites(risque_id,site_id,revise_le) VALUES(?,?,?) ON CONFLICT(risque_id) DO UPDATE SET site_id=excluded.site_id, revise_le=excluded.revise_le", i, siteId, auj());
+        if (avant) await journal(i, "revision", "", avant); });
       if (r) return r; await audit(C.login, mr[1] ? "hse.risque.revise" : "hse.risque", i, ip); return json(res, 200, {ok:true, id:i});
     }
     if (p === "/api/v1/hse/epi" && req.method === "GET"){
       const cx = await contexte(P), a = auj();
       /* correctif 40 : dotations en cours seulement (historique sur demande), salariés sortis exclus du filtre « à renouveler » */
-      const pm = perimSql(B, P, "mat"), ren = q.filtre === "renouveler", so = ren ? await sortisSql(a) : {sql:"", a:[]};
-      const w = " WHERE 1=1"+(q.filtre === "historique" ? "" : EPI_COURANT)+(ren ? " AND renouveler_le IS NOT NULL AND renouveler_le <= ?" : "")+so.sql+pm.sql, aa = (ren ? [ajoutJours(a, 30)] : []).concat(so.a, pm.a);
+      const pm = perimSql(B, P, "mat"), ren = q.filtre === "renouveler", hist = q.filtre === "historique", so = ren ? await sortisSql(a) : {sql:"", a:[]};
+      const w = " WHERE 1=1"+(hist ? "" : EPI_COURANT)+(ren ? " AND renouveler_le IS NOT NULL AND renouveler_le <= ?" : "")+(q.mat ? " AND mat=?" : "")+so.sql+pm.sql, aa = (ren ? [ajoutJours(a, 30)] : []).concat(q.mat ? [String(q.mat).slice(0, 40)] : [], so.a, pm.a);
       const total = Number((await B.get("SELECT COUNT(*) n FROM hse_epi"+w, ...aa)).n);
-      const l = await B.all("SELECT id, mat, type, remis_le, renouveler_le FROM hse_epi"+w+" ORDER BY renouveler_le IS NULL, renouveler_le, mat, id LIMIT "+lim+" OFFSET "+off, ...aa);
-      return json(res, 200, {total, offset:off, limit:lim, droits, lignes:l.map(r=>{ const e = cx.parMat.get(String(r.mat)) || {}; return Object.assign(r, {nom:cx.nom(r.mat), sorti:!!(e.sortie && e.sortie < a), aRenouveler:!!(r.renouveler_le && r.renouveler_le <= ajoutJours(a, 30))}); })});
+      const l = await B.all("SELECT id, mat, type, remis_le, renouveler_le, (SELECT x.le FROM hse_epi_annul x WHERE x.epi_id=hse_epi.id) annule_le FROM hse_epi"+w+" ORDER BY "+(hist ? "remis_le DESC" : "renouveler_le IS NULL, renouveler_le")+", mat, id LIMIT "+lim+" OFFSET "+off, ...aa);
+      return json(res, 200, {total, offset:off, limit:lim, droits, lignes:l.map(r=>{ const e = cx.parMat.get(String(r.mat)) || {}; return Object.assign(r, {nom:cx.nom(r.mat), sorti:!!(e.sortie && e.sortie < a), annule:!!r.annule_le, aRenouveler:!r.annule_le && !!(r.renouveler_le && r.renouveler_le <= ajoutJours(a, 30))}); })});
     }
     if (p === "/api/v1/hse/epi" && req.method === "POST"){
       if (!dr.creer) return refuse();
@@ -405,24 +523,41 @@ function creer(o){
       let rn = null; if (b.renouvelerLe != null && b.renouvelerLe !== ""){ if (!dateOk(b.renouvelerLe) || b.renouvelerLe <= rl) return err(400, "renouv"); rn = b.renouvelerLe; }
       const e = dans(P, mat) ? (await contexte(P)).parMat.get(mat) : null; if (!e) return err(404, "salarie");
       if (e.sortie && e.sortie < auj()) return err(409, "sorti");
-      const i = id("hp"); await B.run("INSERT INTO hse_epi(id,mat,type,remis_le,renouveler_le,par) VALUES(?,?,?,?,?,?)", i, mat, type, rl, rn, C.login);
-      await audit(C.login, "hse.epi", i, ip); return json(res, 200, {ok:true, id:i});
+      if (e.entree && rl < e.entree) return err(400, "epiAvantEntree", {d:jj(e.entree)});
+      const i = id("hp");
+      /* correctif 41 : même salarié, même équipement, même date = doublon (sous verrou) */
+      const r = await tx(async ()=>{ await verrou("hse:epi:"+mat+"|"+type.toLowerCase());
+        if (await B.get("SELECT 1 FROM hse_epi WHERE mat=? AND lower(type)=lower(?) AND remis_le=?"+EPI_VALIDE, mat, type, rl)) throw ko(409, "doublonEpi");
+        await B.run("INSERT INTO hse_epi(id,mat,type,remis_le,renouveler_le,par) VALUES(?,?,?,?,?,?)", i, mat, type, rl, rn, C.login); });
+      if (r) return r; await audit(C.login, "hse.epi", i, ip); return json(res, 200, {ok:true, id:i});
     }
-    /* correctif 40 : registre des accidents et événements (CSV, tracé), dates jj/mm/aaaa, libellés traduits */
+    /* correctif 41 : annulation d'une dotation saisie par erreur (motif) */
+    const mp = /^\/api\/v1\/hse\/epi\/([^/]+)\/annuler$/.exec(p);
+    if (mp && req.method === "POST"){
+      if (!dr.supprimer) return refuse();
+      const b = await corpsJson(req), motif = txt(b, "motif", 500); if (!motif) return err(400, "motif");
+      const pm = perimSql(B, P, "mat"), ep = await B.get("SELECT id FROM hse_epi WHERE id=?"+pm.sql+EPI_VALIDE, mp[1], ...pm.a); if (!ep) return err(404, "epiIntrouvable");
+      const r = await tx(async ()=>{ await B.run("INSERT INTO hse_epi_annul(epi_id,le,par,motif) VALUES(?,?,?,?)", ep.id, maint(), C.login, motif); });
+      if (r) return r; await audit(C.login, "hse.epi.annule", ep.id, ip); return json(res, 200, {ok:true});
+    }
+    /* correctif 40 : registre des accidents et événements (CSV, tracé), dates jj/mm/aaaa, libellés traduits ;
+       correctif 41 : période bornée à deux ans et notée au journal, description, cause, déclarant et clôture */
     if (p === "/api/v1/hse/export" && req.method === "GET"){
       if (!dr.exporter) return refuse();
-      const au = q.au || auj(), du = q.du || (dateOk(au) ? ajoutJours(au, -364) : ""); if (!dateOk(au) || !dateOk(du) || du > au) return err(400, "periode");
-      const cx = await contexte(P), vs = visibleSql(P, cx, C.login, "ev."), ref = await (D.referentielLecture || D.referentiel)() || {}, nomSite = new Map((ref.sites||[]).map(s=>[s.id, s.nom || s.id]));
+      const au = q.au || auj(), du = q.du || (dateOk(au) ? ajoutJours(au, -364) : ""); if (!dateOk(au) || !dateOk(du) || du > au || ajoutJours(du, 731) < au) return err(400, "periode");
+      const cx = await contexte(P), vs = visibleSql(P, cx, C.login, "ev."), ref = await ref0(), nomSite = new Map((ref.sites||[]).map(s=>[s.id, s.nom || s.id]));
       const l = await B.all("SELECT ev.*, c.declaree_le cnam_le, c.reference cnam_ref FROM hse_evenements ev LEFT JOIN hse_declarations c ON c.evenement_id=ev.id WHERE ev.d>=? AND ev.d<=?"+vs.sql+" ORDER BY ev.d, ev.heure, ev.id", du, au, ...vs.a);
-      await audit(C.login, "hse.export", l.length+" événement(s)", ip);
+      await audit(C.login, "hse.export", l.length+" événement(s) du "+jj(du)+" au "+jj(au), ip);
       const cel = c => { let s = String(c == null ? "" : c); if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+([.,]\d+)?$/.test(s)) s = "'"+s; return '"'+s.replace(/"/g, '""')+'"'; };
-      const csv = [LIB.entete[L].map(cel).join(";")].concat(l.map(e=>[jj(e.d), e.heure || "", lib("type", e.type), nomSite.get(e.site_id) || "", e.lieu || "", dr.sens ? e.mat || "" : (e.mat ? MQ : ""), dr.sens ? (e.mat ? cx.nom(e.mat) : "") : (e.mat ? MQ : ""),
-        e.gravite == null ? "" : Number(e.gravite), Number(e.arret) ? LIB.oui[L] : LIB.non[L], dr.sens ? Number(e.jours_arret) || 0 : "", lib("statut", e.statut), jj(e.cnam_le), e.cnam_ref || ""].map(cel).join(";"))).join("\r\n");
+      const sx = v => dr.sens ? v : (v ? MQ : "");
+      const csv = [LIB.entete[L].map(cel).join(";")].concat(l.map(e=>[jj(e.d), e.heure || "", lib("type", e.type), nomSite.get(e.site_id) || "", e.lieu || "", sx(e.mat || ""), sx(e.mat ? cx.nom(e.mat) : ""),
+        e.gravite == null ? "" : Number(e.gravite), Number(e.arret) ? LIB.oui[L] : LIB.non[L], dr.sens ? Number(e.jours_arret) || 0 : "", lib("statut", e.statut), jj(e.cnam_le), e.cnam_ref || "",
+        sx(e.description || ""), sx(e.cause || ""), e.declare_par || "", jj(String(e.clos_le || "").slice(0, 10))].map(cel).join(";"))).join("\r\n");
       res.writeHead(200, {"Content-Type":"text/csv; charset=utf-8", "Content-Disposition":"attachment; filename=\"fiwakti-registre-hse.csv\"", "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"}); return res.end("﻿"+csv);
     }
     return err(404, "introuvable");
     }
   }
-  return {traiter, aTraiter, fiche360};
+  return {traiter, aTraiter, fiche360, service};
 }
 module.exports = {ddl, tables, creer};

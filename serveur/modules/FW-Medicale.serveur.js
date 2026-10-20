@@ -165,6 +165,16 @@ function creer(o){
     if (retard) out.push({domaine:"sante", cle:"med-retard", nombre:retard, urgence:2, vue:"medical"});
     if (sansEmb) out.push({domaine:"sante", cle:"med-embauche", nombre:sansEmb, urgence:2, vue:"medical"});
     if (dues) out.push({domaine:"sante", cle:"med-periodiques", nombre:dues, urgence:1, vue:"medical"});
+    /* correctif 41 : reprise après un arrêt pour accident (FW-HSE) — fin d'arrêt passée ou dans les 7 jours (60 derniers
+       jours au plus), aucune visite de reprise ou de pré-reprise planifiée ou réalisée depuis l'accident */
+    if ((o.moduleActif || (()=>false))("FW-HSE")) try {
+      const pa = perimSql(B, x.P, "mat"), arr = await B.all("SELECT mat, d, jours_arret FROM hse_evenements WHERE type IN ('accident','accident_trajet') AND arret=1 AND jours_arret>0 AND statut<>'annule' AND d>=?"+pa.sql, ajoutJours(a, -365), ...pa.a);
+      const sans = new Set(), presents = new Set(emps.map(z=>String(z.mat)));
+      for (const r of arr){ const fin = ajoutJours(r.d, Number(r.jours_arret)); if (fin > ajoutJours(a, 7) || fin < ajoutJours(a, -60) || sans.has(String(r.mat))) continue;
+        if (!presents.has(String(r.mat))) continue;
+        if (!await B.get("SELECT 1 FROM med_visites WHERE mat=? AND type IN ('reprise','pre_reprise') AND statut<>'annulee' AND COALESCE(realisee_le, prevue_le)>=?", String(r.mat), r.d)) sans.add(String(r.mat)); }
+      if (sans.size) out.push({domaine:"sante", cle:"med-reprise", nombre:sans.size, urgence:2, vue:"medical"});
+    } catch(e){}
     return out;
   }
   async function fiche360(x){
@@ -179,7 +189,7 @@ function creer(o){
     if (VUS.size > 5000) VUS.clear(); await audit(login, "medical.dossier.consulte", mat, ip); }
   async function traiter(req, res, x){
     const {p, C, admin, P, u, json, corpsJson, ip} = x;
-    const L = (()=>{ const l = (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
+    const L = (()=>{ /* correctif 41 : langue de l'écran (en-tête X-Langue envoyé par l'application) en priorité */ const l = String((req.headers || {})["x-langue"] || u.searchParams.get("lang") || (P && P.u && P.u.langue) || String((req.headers || {})["accept-language"] || "").slice(0, 2)).slice(0, 2); return l === "en" ? 1 : l === "ar" ? 2 : 0; })();
     const m = (k, v) => { let t = (MSG[k] || [k])[L] || MSG[k][0]; Object.keys(v || {}).forEach(z=>{ t = t.split("{"+z+"}").join(v[z]); }); return t; };
     /* correctif 40 : err renvoie true — « if (e) return e » après tx() arrêtait le traitement seulement en apparence
        (json renvoie undefined : l'audit et une seconde réponse suivaient un refus) */

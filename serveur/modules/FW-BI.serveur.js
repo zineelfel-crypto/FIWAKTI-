@@ -96,10 +96,13 @@ function creer(o){
     /* santé et sécurité (aucune donnée médicale) */
     if (actif("FW-HSE")) await domaine("santé et sécurité", async ()=>{
       out.sources.push("FW-HSE");
-      const evs = (await B.all("SELECT type, mat, site_id, arret, jours_arret FROM hse_evenements WHERE d>=? AND d<=?", du, au)).filter(e=>e.mat ? set.has(String(e.mat)) : (P.set === null && !q.dept && !q.fonction && (!q.site || e.site_id === q.site)));
-      const aa = evs.filter(e=>e.type === "accident" && e.arret), j = aa.reduce((s, e)=>s + (+e.jours_arret||0), 0), h = out.temps ? out.temps.heuresPresence : 0;
-      out.hse = {accidents:evs.filter(e=>e.type === "accident").length, avecArret:aa.length, joursArret:j, presqueAccidents:evs.filter(e=>e.type === "presque_accident").length,
-        tf:h ? Math.round(aa.length * 1e6 / h * 100) / 100 : null, tg:h ? Math.round(j * 1e3 / h * 100) / 100 : null};
+      const evs = (await B.all("SELECT type, mat, site_id, arret, jours_arret, statut FROM hse_evenements WHERE d>=? AND d<=?", du, au)).filter(e=>e.mat ? set.has(String(e.mat)) : (P.set === null && !q.dept && !q.fonction && (!q.site || e.site_id === q.site)));
+      const h = out.temps ? out.temps.heuresPresence : 0, sv = o.service && o.service("FW-HSE");
+      /* correctif 41 : mêmes règles que l'écran Santé et sécurité (annulés exclus, taux non significatifs sous 1 000 h) */
+      if (sv && sv.service && sv.service.pilotage) out.hse = sv.service.pilotage(evs, h);
+      else { const ok = evs.filter(e=>e.statut !== "annule"), aa = ok.filter(e=>e.type === "accident" && +e.arret), j = aa.reduce((s, e)=>s + (+e.jours_arret||0), 0);
+        out.hse = {accidents:ok.filter(e=>e.type === "accident").length, avecArret:aa.length, joursArret:j, presqueAccidents:ok.filter(e=>e.type === "presque_accident").length,
+          tf:h >= 1000 ? Math.round(aa.length * 1e6 / h * 100) / 100 : null, tg:h >= 1000 ? Math.round(j * 1e3 / h * 100) / 100 : null, nonSignificatif:h < 1000}; }
     });
     /* v56.21 : suivi médical — taux et nombres par service seulement (masqués sous 5 salariés), jamais de détail */
     if (actif("FW-Medicale") && o.service){ const m = o.service("FW-Medicale");
@@ -167,7 +170,7 @@ function creer(o){
       const l = du > auT ? [] : global ? await B.all(sel+" GROUP BY mat", du, auT) : await enLots(Array.from(parMat.keys()), x=>B.all(sel+" AND mat IN ("+ph(x)+") GROUP BY mat", du, auT, ...x));
       l.forEach(r=>{ const k = parMat.get(String(r.mat)); if (k === undefined) return; const g = grp(k); g.jours += +r.j||0; g.hp += +r.hp||0; g.ht += +r.ht||0; g.hs += +r.hs||0; g.abs += +r.abs||0; g.ret += +r.ret||0; });
     }
-    if (actif("FW-HSE")) (await B.all("SELECT mat FROM hse_evenements WHERE type='accident' AND d>=? AND d<=? AND mat IS NOT NULL", du, au)).forEach(r=>{ const k = parMat.get(String(r.mat)); if (k !== undefined) grp(k).accidents++; });
+    if (actif("FW-HSE")) (await B.all("SELECT mat FROM hse_evenements WHERE type='accident' AND statut<>'annule' AND d>=? AND d<=? AND mat IS NOT NULL", du, au)).forEach(r=>{ const k = parMat.get(String(r.mat)); if (k !== undefined) grp(k).accidents++; });
     /* correctif 17 : groupe de moins de 5 salariés masqué (indicateurs individuels reconnaissables) */
     const lignes = Array.from(G.values()).map(g=>g.effectif < SEUIL ? {cle:g.cle, nom:g.nom, effectif:g.effectif, masque:true} : ({cle:g.cle, nom:g.nom, effectif:g.effectif, tauxPresence:g.ht ? r1(100 * g.hp / g.ht) : null, absenteisme:g.jours ? r1(100 * g.abs / g.jours) : null,
       heuresSup:r1(g.hs), joursRetard:g.ret, accidents:g.accidents})).sort((a, b)=>b.effectif - a.effectif);
@@ -186,6 +189,12 @@ function creer(o){
     /* correctif 17 : recalcul forcé (« Actualiser ») réservé au paramétrage des états ; pour les autres, le cache est déjà
        invalidé dès qu'une donnée change */
     if (q.frais && rang < 4) delete q.frais;
+    /* correctif 41 : le bloc « santé et sécurité » suit la matrice de l'écran Santé et sécurité du demandeur (écran masqué :
+       aucune donnée ; sans accès aux données sensibles : ni jours d'arrêt ni taux de gravité) — le cache est partagé par périmètre */
+    const svH = actif("FW-HSE") && o.service ? o.service("FW-HSE") : null, fH = svH && svH.service && svH.service.filtrePilotage;
+    const filtreHse = r => { if (r.hse && fH){ const h = fH(admin, P, r.hse); if (h === undefined){ delete r.hse; r.sources = (r.sources || []).filter(s=>s !== "FW-HSE"); } else r.hse = h; } return r; };
+    const voitHse = !fH || !!(svH.service.droitsEcran(admin, P).voir);
+    const filtreVent = r => { if (!voitHse && Array.isArray(r.lignes)) r.lignes = r.lignes.map(l=>{ const z = Object.assign({}, l); delete z.accidents; return z; }); return r; };
     try { periode(q); } catch(e){ if (p === "/api/v1/bi/tableau" || p === "/api/v1/bi/ventilation" || p === "/api/v1/bi/export") return erreur(res, e.code || 400, e.message); }
     /* correctif 17 : export contrôlé par la matrice des droits et tracé (le fichier était fabriqué dans le navigateur) */
     if (p === "/api/v1/bi/export" && req.method === "POST"){
@@ -197,13 +206,13 @@ function creer(o){
       /* 56.32 : cache partagé par périmètre (tous les utilisateurs à périmètre global lisent le même résultat), gardé
          30 min, préchauffé en tâche de fond : premier affichage mesuré à 39 s pour 60 000 salariés, désormais servi du cache */
       const cle = cleCache(P, C, q), c = CACHE.get(cle);
-      if (c && Date.now() - c.t < TTL && !q.frais) return json(res, 200, Object.assign({}, c.r, {cache:true}));
-      try { const r = await calculUnique(cle, ()=>tableau(C, P, q)); return json(res, 200, r); } catch(e){ return erreur(res, e.code || 500, e.message); }
+      if (c && Date.now() - c.t < TTL && !q.frais) return json(res, 200, filtreHse(Object.assign({}, c.r, {cache:true})));
+      try { const r = await calculUnique(cle, ()=>tableau(C, P, q)); return json(res, 200, filtreHse(Object.assign({}, r))); } catch(e){ return erreur(res, e.code || 500, e.message); }
     }
     if (p === "/api/v1/bi/ventilation" && req.method === "GET"){
       const cle = "V|"+cleCache(P, C, q)+"|"+(q.axe||""), c = CACHE.get(cle);
-      if (c && Date.now() - c.t < TTL && !q.frais) return json(res, 200, Object.assign({}, c.r, {cache:true}));
-      try { const r = await calculUnique(cle, ()=>ventilation(C, P, q)); return json(res, 200, r); } catch(e){ return erreur(res, e.code || 500, e.message); }
+      if (c && Date.now() - c.t < TTL && !q.frais) return json(res, 200, filtreVent(Object.assign({}, c.r, {cache:true})));
+      try { const r = await calculUnique(cle, ()=>ventilation(C, P, q)); return json(res, 200, filtreVent(Object.assign({}, r))); } catch(e){ return erreur(res, e.code || 500, e.message); }
     }
     if (p === "/api/v1/bi/config" && req.method === "GET"){ const cf = await configLire(); delete cf.par; return json(res, 200, Object.assign({objectifs:{}, choix:null}, cf, {modifiable:rang >= 4})); }
     if (p === "/api/v1/bi/config" && (req.method === "PUT" || req.method === "POST")){

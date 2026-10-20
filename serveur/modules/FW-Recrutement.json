@@ -2,7 +2,7 @@
   "id": "FW-Recrutement",
   "nom": "Recrutement",
   "categorie": "metier",
-  "version": "1.4",
+  "version": "1.5",
   "deps": [
     "FW-Core",
     "FW-RH"
@@ -40,7 +40,7 @@
     "css_ko": 6
   },
   "integrite": {
-    "js": "sha384-y3ElZcTiAamoU3pelX6GDr7Nhs1lyaxFYoW5bJdraPRuCN5nm1K1LPKCgpXuw2As",
+    "js": "sha384-YNTmYr0edRXk3H6hAT+Dkl3ogZ02a9U3EUe1WEmqZwsuhb/uFeOdDDEoQ7+pVewE",
     "css": "sha384-uaZnyEZaIsgGyiX4wPrgJ+C9XDFuBpBsmvYYv+upQHZKaiQdE0kR682a6PWDqM6r"
   }
 }

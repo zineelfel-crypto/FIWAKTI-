@@ -122,7 +122,7 @@ function vuePipe(ctx){
   const po = (E.pipe && E.pipe.poste) || null, opts = (E.ouverts || []).slice();
   if (po && !opts.some(x=>x.id === po.id)) opts.unshift(po);
   let h = '<div class="fw-toolbar"><select data-fwmc="poste" aria-label="'+ctx.esc(T(ctx,"choisirPoste"))+'"><option value="">'+ctx.esc(T(ctx,"choisirPoste"))+'</option>'+opts.map(x=>'<option value="'+ctx.esc(x.id)+'"'+(E.poste === x.id ? ' selected' : '')+'>'+ctx.esc(x.intitule+(x.statut === "clos" ? " — "+T(ctx,"posteClos") : ""))+'</option>').join("")+'</select>'+
-    (E.poste && dr.exporter ? '<a class="fw-btn sm" href="api/v1/recrutement/export?poste='+encodeURIComponent(E.poste)+'">'+ctx.esc(T(ctx,"exporter"))+'</a>' : '')+'</div>';
+    (E.poste && dr.exporter ? '<a class="fw-btn sm" href="api/v1/recrutement/export?lang='+encodeURIComponent(ctx.lang||"fr")+'&poste='+encodeURIComponent(E.poste)+'">'+ctx.esc(T(ctx,"exporter"))+'</a>' : '')+'</div>';
   if (!E.poste) return h;
   if (!E.pipe){ if (!E.piEnCours){ E.piEnCours = true; ctx.api("api/v1/recrutement/candidatures?limit=200&poste="+encodeURIComponent(E.poste)).then(j=>{ E.pipe = j; E.piEnCours = false; ctx.rendre(); }).catch(e=>{ E.piEnCours = false; ctx.flash(msgErr(ctx, e), "err"); }); } return h+'<div class="fw-hint">'+ctx.esc(T(ctx,"chargement"))+'</div>'; }
   const P = E.pipe.poste || {}, ouvert = !E.pipe.poste || P.statut === "ouvert", peut = dr.modifier && ouvert, dis = E.envoi ? ' disabled' : '';
