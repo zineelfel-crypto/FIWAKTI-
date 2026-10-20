@@ -2445,3 +2445,23 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-42.zip (cumulatif : correctifs 2 à 41 inclus ; 55 fichiers avec la feuille de style du suivi médical).
+
+## Version 56.33.12 — version de référence
+
+La 56.33.12 regroupe la 56.33.11, le correctif final et les correctifs 2 à 42 : le code est identique à celui d'un
+serveur 56.33.11 sur lequel ces correctifs sont installés. Seul le numéro de version change (`serveur/version.json`,
+`package.json`, `package-lock.json`, manifeste FW-BI). Elle sert de base aux installations neuves et aux mises à jour
+suivantes.
+
+Livraison : `livraison/FIWAKTI-56.33.12-installation.zip` (12,4 Mo, 2 350 fichiers avec SHA256SUMS.txt), construite par
+`node outils/construire-paquet.js`. Le paquet de mise à jour depuis l'application (`FIWAKTI-maj-56.33.12.fwk`) se
+construit de la même façon et doit être signé par l'éditeur (`--cle`).
+
+Vérifié :
+- code de la version livrée identique au dépôt (app, public, serveur) ; empreintes du paquet correctes ;
+- installation neuve avec le lanceur de référence : assistant complet (licence, administrateur, base SQLite), sauvegarde
+  vérifiée, modules Santé et sécurité, Suivi médical et Talents activés et ouverts sans erreur JavaScript ;
+- mise à jour par `installer-maj.js` d'une installation 56.33.11 (archive d'origine) avec ses données : contrôles,
+  bascule, essai confirmé ; comptes et salariés conservés ; 11 tables ajoutées ; journées calculées effacées puis
+  recalculées (moteur modifié, comportement prévu) ;
+- retour à la 56.33.11 (`--retour`) : en service sur la base mise à niveau.

@@ -2,7 +2,7 @@
 
 Plateforme RH « FIWAKTI Enterprise » : pointage et gestion du temps de travail conforme à la
 réglementation tunisienne (conventions collectives), étendue par des modules « FW- » activés par licence.
-Version de ce dépôt : **56.33.11** (voir `serveur/version.json`).
+Version de ce dépôt : **56.33.12** (voir `serveur/version.json`).
 
 ## Structure
 - `serveur/` — serveur Node.js (≥ 22.13), point d'entrée `principal.js`, sans framework.
@@ -55,6 +55,8 @@ voir INSTALLATION.md). Scripts livrés : `outils/livraison/installer-maj.js` (mi
 `outils/livraison/lanceur.js` (lanceur de référence : code 75, versions/essai.txt).
 Les fichiers `FIWAKTI-maj-*.fwk` sont du JSON signé (`format: fiwakti-maj-1`) contenant chaque fichier en base64
 avec son SHA-256. Ce dépôt a été extrait du paquet 56.33.10 (1 339 fichiers, empreintes vérifiées).
+Correctifs PowerShell (livraison/FIWAKTI-<version>-correctif-N.zip) : ils visent `versions\<version du dépôt>` ; depuis la
+56.33.12 (qui intègre le correctif final et les correctifs 2 à 42), leur paramètre `-Version` par défaut doit être 56.33.12.
 Un paquet modifié doit être re-signé avec la clé privée de l'éditeur (absente de ce dépôt) pour être accepté.
 
 ## Version de démonstration autonome
