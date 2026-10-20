@@ -11,10 +11,11 @@
     var reduit = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches, fin = Date.now() + 60000, raf = 0;
     var bandeau = document.createElement("div");
     bandeau.setAttribute("role", "status"); bandeau.setAttribute("aria-live", "polite");
-    bandeau.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:2147483000;max-width:min(560px,92vw);background:#fff;color:#0F172A;border:1px solid #E2E8F0;" +
+    bandeau.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:2147483000;max-width:min(560px,92vw);background:var(--paper,#fff);color:var(--text,#0F172A);border:1px solid var(--line,#E2E8F0);" +
       "border-radius:14px;box-shadow:0 20px 48px rgba(15,23,42,.18);padding:14px 16px;display:flex;gap:12px;align-items:center;font:15px/1.45 system-ui,-apple-system,'Segoe UI',sans-serif;" +
       "border-top:4px solid #059669;opacity:0;transition:opacity .2s ease, transform .2s ease;";
     var texte = document.createElement("div"); texte.style.flex = "1";
+    if (lang === "ar") bandeau.dir = "rtl";
     var lignes = lang ? [MSG[lang]] : [MSG.fr, MSG.ar, MSG.en];
     lignes.forEach(function(l, i){ var p = document.createElement("div"); p.textContent = (i === 0 && nom && lang !== "ar" ? l.replace(/\s?!$/, lang === "en" ? ", "+nom+"!" : ", "+nom+" !") : l); if (i === 0 && lang !== "ar") p.style.fontWeight = "600";
       if (/[\u0600-\u06ff]/.test(l)) { p.dir = "rtl"; } texte.appendChild(p); });
@@ -22,7 +23,7 @@
     var bFermer = document.createElement("button"); bFermer.type = "button"; bFermer.textContent = FERMER[lang || "fr"];
     bFermer.style.cssText = "background:#047857;color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;";
     var bJamais = document.createElement("button"); bJamais.type = "button"; bJamais.textContent = NEPLUS[lang || "fr"];
-    bJamais.style.cssText = "background:none;border:0;color:#596779;font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;";
+    bJamais.style.cssText = "background:none;border:0;color:var(--text-2,#596779);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;";
     actions.appendChild(bFermer); actions.appendChild(bJamais); bandeau.appendChild(texte); bandeau.appendChild(actions);
     document.body.appendChild(bandeau); requestAnimationFrame(function(){ bandeau.style.opacity = "1"; });
     var toile = null, ctx = null, parts = [];
@@ -51,7 +52,8 @@
     function fermer(){ if (ferme) return; ferme = true; cancelAnimationFrame(raf); if (toile && toile.parentNode) toile.parentNode.removeChild(toile);
       bandeau.style.opacity = "0"; setTimeout(function(){ if (bandeau.parentNode) bandeau.parentNode.removeChild(bandeau); }, 220); }
     bFermer.addEventListener("click", fermer);
-    bJamais.addEventListener("click", function(){ try { localStorage.setItem("fwk_anniv_non", "1"); } catch(e){} if (o.desactiver) o.desactiver(); fermer(); });
+    /* correctif 43 : le choix « Ne plus afficher » est enregistré par l'application, pour le compte connecté */
+    bJamais.addEventListener("click", function(){ if (o.desactiver) o.desactiver(); else try { localStorage.setItem("fwk_anniv_non", "1"); } catch(e){} fermer(); });
     return {fermer:fermer};
   };
 })();

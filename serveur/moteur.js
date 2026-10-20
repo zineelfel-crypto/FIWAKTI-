@@ -43,6 +43,10 @@ function chargerMoteur(fichierApp){
 let B = null, E = null;
 async function init(){
   B = await bd.ouvrir(workerData.base, workerData.dossier);
+  /* correctif 43 : table des invalidations créée avant tout calcul. Sous PostgreSQL, la requête de « perimes » sur une table
+     absente faisait échouer toute la transaction (l'erreur interceptée ne la sauve pas) : aucune journée n'était jamais
+     enregistrée sur une base neuve tant qu'aucune invalidation n'avait eu lieu. */
+  try { await B.run("CREATE TABLE IF NOT EXISTS calc_invalidations (mat TEXT NOT NULL, d TEXT NOT NULL, ts TEXT NOT NULL, PRIMARY KEY(mat, d))"); } catch(e){}
   E = chargerMoteur(workerData.app);
 }
 const plage = (du, au) => { const out = []; let k = du, g = 0; while (k <= au && g++ < 1000){ out.push(k); k = E.M.dAjout(k, 1); } return out; };

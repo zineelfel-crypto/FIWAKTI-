@@ -2595,18 +2595,25 @@ async function traiter(req, res){
     const rang = c => admin ? 4 : ({aucun:0, lecture:1, saisie:2, validation:3, config:4}[(pr.droits||{})[c]] || 0);
     const dans = m => P.set === null || P.set.has(String(m));
     const items = [];
+    /* correctif 43 : matrice des écrans respectée (écran masqué ou action refusée = rien à proposer) ; comptages en SQL
+       (avant : toute la collection des demandes lue à chaque calcul) ; même fenêtre que l'écran Validation (30 jours) ;
+       demandes réservées au droit de validation des absences (ABS ≥ 3, comme la décision côté serveur) */
+    const prof = P.profil || pr, menuOk = v => admin || (prof.menus||{})[v] !== "masque";
+    const acteOk = (v, acte) => admin || (menuOk(v) && (prof.menus||{})[v] !== "lecture" && ((prof.actions||{})[v]||{})[acte] !== false);
+    const fP = D.filtreMat(P.set);
     if (!MOD || MOD.estActif("FW-Time")){
-      if (rang("PTG") >= 2){
-        const du = ajoutJours(aujourdhui(), -62), et = {};
-        /* v56.14 : périmètre global → comptage direct par la base (plus de lecture ligne à ligne) */
-        if (P.set === null) (await B.all("SELECT etat, COUNT(*) n FROM day_states WHERE d>=? AND etat IN ('ANOMALIE','CORRIGEE','APPROUVEE_MANAGER') GROUP BY etat", du)).forEach(r=>{ et[r.etat] = Number(r.n); });
-        else (await B.all("SELECT mat, etat FROM day_states WHERE d>=? AND etat IN ('ANOMALIE','CORRIGEE','APPROUVEE_MANAGER')", du)).forEach(r=>{ if (dans(r.mat)) et[r.etat] = (et[r.etat]||0) + 1; });
+      if (rang("PTG") >= 2 && acteOk("valj", "valider")){
+        const du = ajoutJours(aujourdhui(), -30), et = {};
+        (await B.all("SELECT etat, COUNT(*) n FROM day_states WHERE d>=? AND etat IN ('ANOMALIE','CORRIGEE','APPROUVEE_MANAGER')"+fP.sql+" GROUP BY etat", du, ...fP.a)).forEach(r=>{ et[r.etat] = Number(r.n); });
         if (et.ANOMALIE) items.push({domaine:"temps", module:"FW-Time", cle:"journees-anomalie", nombre:et.ANOMALIE, urgence:2, vue:"valj"});
         const aValider = (et.CORRIGEE||0) + (rang("PTG") >= 3 ? (et.APPROUVEE_MANAGER||0) : 0);
         if (aValider) items.push({domaine:"temps", module:"FW-Time", cle:"journees-a-valider", nombre:aValider, urgence:1, vue:"valj"});
       }
-      const dm = (await B.all("SELECT mat, data FROM enreg WHERE coll='dmd'")).filter(r=>dans(r.mat)).map(r=>JSON.parse(r.data)).filter(d=>(d.etat||"attente") === "attente");
-      if (dm.length && rang("PTG") >= 2) items.push({domaine:"temps", module:"FW-Time", cle:"demandes", nombre:dm.length, urgence:1, vue:"dmd"});
+      if (rang("ABS") >= 3 && acteOk("dmd", "valider")){
+        const n = (await B.all("SELECT mat, data FROM enreg WHERE coll='dmd' AND (data LIKE ? OR data NOT LIKE ?)"+fP.sql, '%"etat":"attente"%', '%"etat":%', ...fP.a))
+          .filter(r=>dans(r.mat)).map(r=>JSON.parse(r.data)).filter(d=>(d.etat||"attente") === "attente").length;
+        if (n) items.push({domaine:"temps", module:"FW-Time", cle:"demandes", nombre:n, urgence:1, vue:"dmd"});
+      }
     }
     for (const x of MODS_SERVEUR){
       if (!x.inst || !x.inst.aTraiter || (MOD && !MOD.estActif(x.id))) continue;
@@ -2956,7 +2963,7 @@ async function traiter(req, res){
   if (p === "/api/v1/metriques"){ if (!admin) return erreur(res, 403, "Réservé aux administrateurs."); return json(res, 200, await metriques()); }
 
   /* ---- calculs du serveur (grands effectifs) ---- */
-  if (/^\/api\/v1\/calcul\/(journees|anomalies|synthese|presences|preaudit)$/.test(p) && !(await droitLire(C, admin, ["PTG","ETA"], ["ptg","anomalies","dash","suivi","etats","cloture"]))) return erreur(res, 403, "Droit de consultation des pointages ou des états requis.");
+  if (/^\/api\/v1\/calcul\/(journees|anomalies|synthese|presences|preaudit|accueil)$/.test(p) && !(await droitLire(C, admin, ["PTG","ETA"], ["ptg","anomalies","dash","suivi","etats","cloture"]))) return erreur(res, 403, "Droit de consultation des pointages ou des états requis.");
   if (p.startsWith("/api/v1/calcul/")){
     const q = Object.fromEntries(u.searchParams.entries());
     const a = aujourdhui();

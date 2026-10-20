@@ -171,6 +171,8 @@ function creer(B, D, opts){
      une correction ou un badgeage arrivé pendant un calcul de fond pouvait être recouvert par l'ancien résultat. */
   let INV_PRET = null, INV_PURGE = 0;
   const INV_DDL = "CREATE TABLE IF NOT EXISTS calc_invalidations (mat TEXT NOT NULL, d TEXT NOT NULL, ts TEXT NOT NULL, PRIMARY KEY(mat, d))";
+  /* correctif 43 : créée dès le démarrage (voir moteur.js, init) */
+  INV_PRET = B.run(INV_DDL).catch(()=>{ INV_PRET = null; });
   async function noterInvalidations(paires){
     if (!INV_PRET) INV_PRET = B.run(INV_DDL).catch(e=>{ INV_PRET = null; throw e; });
     await INV_PRET; const ts = new Date().toISOString();
@@ -401,10 +403,13 @@ function creer(B, D, opts){
     const r = {compte:await compteAnomalies(login, {du, au:a})};
     const {emps, global, mats} = await selection(login, {});
     try { await assurer(mats, a, a); } catch(e){}
-    const f = global ? {sql:"", a:[]} : D.filtreMat(new Set(emps.map(e=>String(e.mat))));
-    const pres = await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d=? AND hp>0"+f.sql, a, ...f.a);
-    const att = await B.get("SELECT COUNT(*) n FROM calc_jour WHERE d=? AND ht>0"+f.sql, a, ...f.a);
-    return {anomalies:r.compte, presents:Number(pres.n), attendus:Number(att.n), effectif:emps.length, recalcul:partiel()};
+    /* v56.33.12-c43 : seuls les salariés déjà entrés sont attendus ; un salarié est présent dès son premier
+       badgeage (nmv>0) : hp reste nul tant que la sortie n'est pas pointée */
+    const entres = emps.filter(e=>!(e.entree && e.entree > a));
+    const f = global && entres.length === emps.length ? {sql:"", a:[]} : D.filtreMat(new Set(entres.map(e=>String(e.mat))));
+    const n = await B.get("SELECT SUM(CASE WHEN ht>0 THEN 1 ELSE 0 END) att, SUM(CASE WHEN ht>0 AND (nmv>0 OR hp>0) THEN 1 ELSE 0 END) pres FROM calc_jour WHERE d=?"+f.sql, a, ...f.a);
+    const anomalies = Object.assign({}, r.compte); delete anomalies[""];
+    return {anomalies, presents:Number(n.pres)||0, attendus:Number(n.att)||0, effectif:entres.length, recalcul:partiel()};
   }
   /* v47 : pré-audit calculé en SQL (colonnes nmv, jid, reel, hsmin) : plus de lecture ligne à ligne */
   const CACHE_PA = new Map();

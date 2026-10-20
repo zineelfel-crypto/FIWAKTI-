@@ -79,6 +79,21 @@ function estValideur(ref, emps, P, v, emp){
   if (v.profilId){ const pr = P.profil || {}; return pr.id === v.profilId && (RANG[(pr.droits || {}).ABS] || 0) >= 3 && (P.set === null || P.set.has(String(emp.mat))); }
   return false;
 }
+/* correctif 43 : disposition de l'accueil — liste d'identifiants de widgets ; gouvernance de l'administrateur (widgets
+   imposés et autorisés par rôle). Une valeur mal formée faisait échouer l'accueil de tous les comptes. */
+const WIDGET_ID = /^[a-z_]{1,40}$/;
+function homeLayoutOk(v){ return v == null || (Array.isArray(v) && v.length <= 40 && v.every(x=>typeof x === "string" && WIDGET_ID.test(x))); }
+function controleHomeAdmin(v){
+  if (v == null) return "";
+  if (typeof v !== "object" || Array.isArray(v)) return "objet attendu";
+  if (Object.keys(v).some(k=>k !== "fixed" && k !== "allowed")) return "rubrique inconnue";
+  if (v.fixed !== undefined && !homeLayoutOk(v.fixed)) return "widgets imposés invalides";
+  if (v.allowed !== undefined){
+    if (!v.allowed || typeof v.allowed !== "object" || Array.isArray(v.allowed)) return "widgets autorisés invalides";
+    if (Object.keys(v.allowed).some(r=>["admin","mgr","emp"].indexOf(r) < 0 || !homeLayoutOk(v.allowed[r]))) return "widgets autorisés invalides";
+  }
+  return (JSON.stringify(v) || "").length > 16384 ? "trop volumineux" : "";
+}
 function decisionDmd(avant, x, P, login, admin, ctx){
   const ea = avant ? (avant.etat || "attente") : null, en = x.etat || "attente";
   if (ETATS_DMD.indexOf(en) < 0) return {refus:"état inconnu"};
@@ -491,6 +506,7 @@ function creer(B, PERIM){
              l'ouverture de chacun) ; date de dernière connexion jamais reprise du navigateur */
           if (moi){ const p0 = pick(moi, ["ntfVus","langue","prefs","homeLayout"]);
             if ("langue" in p0 && LANGUES_U.indexOf(p0.langue) < 0){ delete p0.langue; ignores.push("users (langue non prévue)"); }
+            if ("homeLayout" in p0 && !homeLayoutOk(p0.homeLayout)){ delete p0.homeLayout; ignores.push("users (disposition de l'accueil invalide)"); }
             [["prefs", 32768], ["homeLayout", 32768], ["ntfVus", 262144]].forEach(([c, max])=>{ if (c in p0 && (JSON.stringify(p0[c] === undefined ? null : p0[c]) || "").length > max){ delete p0[c]; ignores.push("users ("+c+" trop volumineux)"); } });
             ref.users = (ref.users||[]).map(u=>u.id !== P.u.id ? u : Object.assign({}, u, p0)); refModifie = true; }
           /* correctif 23 : toute autre modification des comptes est réservée à un administrateur — elle était ignorée sans
@@ -590,6 +606,7 @@ function creer(B, PERIM){
         /* correctif 22 : les profils ne se modifient que par un administrateur (comme l'écran) — un compte « Système
            configuration » de niveau RH élargissait par l'API un profil attribué (périmètre, écrans, matrice) */
         if (k === "profils" && !admin){ ignores.push("profils (réservé à un administrateur)"); continue; }
+        if (k === "homeAdmin"){ const motif = controleHomeAdmin(r.homeAdmin); if (motif){ ignores.push("homeAdmin ("+motif+")"); continue; } }
         if (k === "profils"){ const motif = controleProfils(ref.profils || [], r.profils, P, admin, peutK("users") ? r.users : ref.users, PERIM.niveauProfil) || validerProfils(ref.profils || [], r.profils, ref) || (admin ? "" : controleProfilsFins(ref.profils || [], r.profils, P, await sitesP(), ref)); if (motif){ ignores.push("profils ("+motif+")"); continue; } }
         if (admin || (Array.isArray(r[k]) && PERIM.peutEcrire(P.profil, k))){
           /* correctif 31 : élément de paramétrage retiré → corbeille, quel que soit le compte (un compte sans droit Système
@@ -1047,6 +1064,7 @@ function controleUsers(avant, apres, emps, refs){
     if (u.empId && !empIds.has(u.empId)) return "compte "+lib(u)+" rattaché à un salarié inexistant";
     if (u.langue !== undefined && u.langue !== "" && LANGUES_U.indexOf(u.langue) < 0) return "langue de "+lib(u)+" non prévue (fr, en, ar)";
     for (const [c, max] of [["prefs", 32768], ["homeLayout", 32768], ["ntfVus", 262144]]) if (u[c] !== undefined && (JSON.stringify(u[c]) || "").length > max) return c+" de "+lib(u)+" trop volumineux";
+    if (ch && !homeLayoutOk(u.homeLayout)) return "disposition de l'accueil de "+lib(u)+" invalide";
     if (u.deleg !== undefined && !Array.isArray(u.deleg)) return "délégations de "+lib(u)+" invalides";
     const dl = (u.deleg || []).slice().sort((a, b)=>String((a || {}).du) < String((b || {}).du) ? -1 : 1);
     for (let i = 0; i < dl.length; i++){ const d = dl[i] || {};

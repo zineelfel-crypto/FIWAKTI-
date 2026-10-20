@@ -2465,3 +2465,66 @@ Vérifié :
   bascule, essai confirmé ; comptes et salariés conservés ; 11 tables ajoutées ; journées calculées effacées puis
   recalculées (moteur modifié, comportement prévu) ;
 - retour à la 56.33.11 (`--retour`) : en service sur la base mise à niveau.
+
+## Correctif 43 — Accueil
+
+Analyse du menu Accueil, sur la version de référence 56.33.12 : widgets, « À traiter », indicateur de présence du
+serveur, personnalisation et gouvernance, affichage mobile, anniversaire. Tests menés :
+- sur le serveur réel, en SQLite puis en PostgreSQL 16 ;
+- avec les comptes administrateur, RH, responsable, lecture seule, matrices restreintes et sans droit de pointage ;
+- à 20 000 salariés, avec un périmètre limité à 903 salariés (mode courant) ;
+- dans Chromium (bureau et mobile 360 px, fr / ar, mode sombre) et dans la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| A0 | PostgreSQL, base neuve ou migrée : aucune journée calculée (accueil à 0 présent / 0 attendu, anomalies vides). Le fil de calcul interroge `calc_invalidations` dans sa transaction ; la table n'étant créée qu'à la première invalidation, l'erreur annulait toute la transaction (sous PostgreSQL, l'intercepter ne la sauve pas) : 18 millions de lignes écrites puis annulées en 20 minutes sur le banc de 20 000 salariés. Défaut présent depuis la 56.33.11 | critique | table créée au démarrage du fil de calcul (`moteur.js`, `init`) et du serveur (`calcul.js`) |
+| A1 | Périmètre limité de 151 à 1 000 salariés : boucle de préchauffage sans fin (`homeChauffer` → `render` → signature changée), processeur du poste occupé à 95 % | critique | signature calculée sur le tableau complet des salariés (`jvRef(empsTous())`) et non sur la copie filtrée par `avecPerimetre` |
+| A2 | Grand effectif : présent seulement si `hp>0` (heures nulles tant que la sortie n'est pas pointée : 18 % au lieu de 59 % en matinée) ; salariés pas encore entrés attendus ; clé vide dans les anomalies | haute | présent = `ht>0 AND (nmv>0 OR hp>0)` ; attendus et effectif limités aux salariés entrés ; une seule requête ; clé vide retirée |
+| A3 | Effectif courant : présence calculée sur les seuls badgeages du jour (calendrier, repos, fériés, date d'entrée et absences ignorés) ; retard à 09:15 fixe ; retard et pause dans la même pastille | haute | statuts du moteur (`suiviJours` + `statutJour`, comme le Suivi) pour les salariés entrés et actifs du périmètre ; pastilles En poste / En retard / En pause ou sorti / Congé ou télétravail / Attendus / Absents ; couverture prévue = attendus / planifiés |
+| A4 | « À traiter » : toute la collection des demandes lue et analysée à chaque calcul (près de 3 s avec 300 000 demandes) ; `day_states` lu ligne à ligne pour un périmètre limité | haute | comptages en SQL avec le filtre du périmètre (`D.filtreMat`), demandes présélectionnées par la base |
+| A5 | « À traiter » : demandes proposées au droit de pointage (`PTG`) au lieu du droit de validation des absences ; écrans Validation des journées et Demandes masqués, en lecture ou action « valider » refusée : éléments quand même proposés | haute | demandes si `ABS ≥ validation` et `dmd.valider` permis ; journées si `PTG ≥ saisie` et `valj.valider` permis |
+| A6 | `/api/v1/calcul/accueil` servi sans contrôle du droit de consultation | haute | même contrôle que les autres calculs (`droitLire` PTG / ETA) ; le navigateur affiche « indicateur réservé » sur 403 sans réessayer en boucle |
+| A7 | « À traiter » : « Rien à traiter » affiché sur une erreur 500 ; 401 sans retour à la connexion ; `aria-busy` sans fin hors connexion ; liste jamais actualisée après une écriture | moyenne | message d'erreur avec « Réessayer » (ou liste précédente signalée non actualisée), `apiSessionPerdue`, `atPerime()` après chaque synchronisation, écriture de module et validation de journées |
+| A8 | Fenêtre de 62 jours contre 30 dans l'écran Validation des journées ; total global additionnant des journées, des demandes et des accidents | moyenne | 30 jours ; total retiré, filtres comptant les rubriques ; domaine « Accès » libellé (`atD_acces`) |
+| A9 | Disposition gardée seulement dans le navigateur ; valeurs corrompues non contrôlées ; `homeAdmin` mal formé (`{fixed:5}`) faisant échouer l'accueil de tous les comptes | moyenne | disposition dans le compte (`users[].homeLayout`, déjà prévu par le serveur) ; serveur : `homeLayoutOk` (≤ 40 identifiants `[a-z_]`) et `controleHomeAdmin` ; navigateur : identifiants filtrés (`homeIds`), configuration reconstruite |
+| A10 | Mobile (≤ 600 px) : un responsable recevait le portail équipe, vide en grand effectif et tronqué à 300 salariés, sans « À traiter » | moyenne | portail seulement en mode courant pour ≤ 300 salariés, précédé de « À traiter » ; sinon accueil complet |
+| A11 | Menu Accueil « masqué » sans effet ; widgets avec des boutons vers des écrans non autorisés | moyenne | « masqué » : aucun widget ; « lecture » : pas de personnalisation ; boutons filtrés par `ecranAutorise` (`homeFiltreVues`) ; lignes de présence ouvrant le Suivi seulement s'il est autorisé |
+| A12 | « Mes demandes » d'un compte sans fiche : demandes de tout le monde ; dates aaaa-mm-jj ; « Pointage du jour » : compteurs d'équipe à un salarié, sens E / S bruts | moyenne | message « compte sans fiche » ; `dateAff`, état par `etatDmd` ; compteurs pour les responsables seulement, sens traduits |
+| A13 | Planning illisible en mode sombre (1,26:1) ; nom de journée coupé (« Demi-jou ») ; « min » et « h » non traduits | basse | texte `var(--text)`, nom complet avec points de suspension et infobulle, jour courant marqué ; `fmtMin` traduit |
+| A14 | Accessibilité : titres de widgets non sémantiques ; boutons ⋮⋮ ↑ ↓ × sans nom traduit ; barres de couverture lues ; lignes de présence à la souris seulement ; double pastille | basse | `role="heading"` et `aria-labelledby` ; `aria-label` « Monter : <widget> » ; barres `aria-hidden` ; lignes `role="button"` au clavier ; pastille unique |
+| A15 | Pas d'actualisation : présence figée tant que la page n'est pas rechargée | basse | rendu toutes les minutes sur l'accueil visible (sauf saisie, personnalisation ou fenêtre ouverte) |
+| A16 | Bouton « Terminer » de la gouvernance disparaissant après ouverture | basse | bouton affiché aussi en mode gouvernance |
+| A17 | Anniversaire : « Ne plus afficher » commun à tous les comptes du navigateur ; jour marqué avant la réponse du serveur ; couleurs fixes en mode sombre | basse | clé par compte (`fwk_anniv_non_<login>`, via `desactiver`) ; jour marqué après réponse ; couleurs du thème, sens RTL |
+
+Non traité, à décider ou sans effet :
+- les deux erreurs de la console (401 de la page de connexion avant identification, 404 d'une préférence d'affichage
+  absente) sont des réponses attendues, déjà traitées par l'application ;
+- les widgets « Demandes à valider », « Résolution » et « Santé temporelle » restent calculés dans le navigateur sur les
+  données chargées (périmètre courant) ; en grand effectif, « À traiter » et le Suivi donnent les chiffres du serveur ;
+- fuseau horaire : le jour est celui du serveur pour les indicateurs du serveur et celui du poste pour les widgets.
+
+Vérifié :
+- **SQLite.**
+  - `t43.js` : demande en attente visible par l'administrateur ; Validation des journées et Demandes masquées : rien ;
+    en lecture ou « valider » refusé : rien ; ABS « saisie » : pas de demandes ; PTG et ETA « aucun » : 403 sur
+    `/calcul/accueil`, demandes seules dans « À traiter » ; `homeAdmin` mal formé refusé, valide enregistré ; disposition
+    mal formée ignorée, valide enregistrée dans le compte.
+  - Comptes du banc : accueil et « À traiter » pour 21 profils (lecture, matrices masquées, médecin…).
+- **PostgreSQL 16.** Mêmes contrôles (`t43.js`) ; défaut A0 reproduit avec le code d'avant le correctif (0 journée), puis
+  corrigé (journées enregistrées, 14 attendus sur la petite base).
+- **20 000 salariés** (SQLite et PostgreSQL, mêmes résultats) :
+  - accueil du serveur : 11 480 présents sur 19 412 attendus (59 %, au lieu de 18 %) ; 3 826 / 6 471 pour un site ;
+  - « À traiter » avec 300 000 demandes historiques : 150 à 270 ms au premier calcul (près de 3 s avant) ;
+  - périmètre limité à 903 salariés : 2 préchauffages au lieu d'une boucle continue ; processeur 0 % sur 20 s (95 % avant) ;
+    517 présents sur 874 attendus, identiques entre le résumé, « Pointage du jour » et « Présence de l'équipe » ;
+    dimanche : aucun attendu.
+- **Chromium.** Administrateur, RH, responsable, lecture seule, bureau et mobile 360 px, fr / ar, mode sombre : titres de
+  widgets et boutons de personnalisation nommés ; ajout d'un widget enregistré sur le serveur et retrouvé dans un second
+  navigateur ; réinitialisation enregistrée ; valeurs corrompues filtrées ; erreur 500 de « À traiter » affichée puis
+  « Réessayer » ; responsable mobile en grand effectif : accueil complet avec « À traiter » ; aucune erreur JavaScript.
+- **Démonstration.** Accueil, « À traiter », présence et « Mes demandes » (compte sans fiche) en fr et ar, sans erreur.
+- **Non-régression.** `t53.js` sans erreur JavaScript ; `t4b.js` : seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.12-correctif-43.zip, pour la version de référence 56.33.12 (`-Version 56.33.12` par défaut ;
+cumulatif : correctifs 2 à 42 inclus ; 56 fichiers avec `public/anniversaire.js`). Sur une 56.33.11 avec le correctif
+final : `-Version 56.33.11`.
