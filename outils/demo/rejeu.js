@@ -271,14 +271,59 @@
       return {ok:true, demo:true}; }
     return undefined;
   }
+  /* correctif 39 : compétences — jeu de démonstration avec fonctions et exigences, matrice filtrée et paginée, écarts
+     recalculés, niveaux (avec contrôle du niveau affiché), historique, catalogue (ajout, modification, retrait, réactivation) */
+  const CP = "/api/v1/competences";
+  let CPD = null;
+  function cpDonnees(){
+    if (CPD) return CPD;
+    const C = REP[CP+"/catalogue"] || {competences:[]}, M = REP[CP+"/matrice?offset=0&limit=100&q=&fonction="] || {lignes:[]};
+    const code = k => (C.competences.find(c => c.code === k) || {}).id;
+    const FCT = ["Opérateur de production", "Technicien qualité", "Réceptionniste"];
+    const lignes = copie(M.lignes).map((l, i) => Object.assign(l, {fonction:l.fonction || FCT[i % FCT.length], niveaux:l.niveaux || {}}));
+    const exigences = [["Opérateur de production","SOU",3],["Opérateur de production","SST",2],["Technicien qualité","QUA",3],["Technicien qualité","EXC",2],["Réceptionniste","ACC",3]].filter(x => code(x[1])).map(x => ({fonction:x[0], competence_id:code(x[1]), niveau:x[2]}));
+    CPD = {competences:copie(C.competences).filter(c => c.actif !== 0), retirees:[], exigences, lignes, hist:[]};
+    return CPD;
+  }
+  const cpRequis = (d, f) => { const r = {}; d.exigences.filter(x => x.fonction === f).forEach(x => { r[x.competence_id] = x.niveau; }); return r; };
+  const cpLigne = (d, l) => { const r = cpRequis(d, l.fonction); return Object.assign({}, l, {requis:r, ecarts:Object.keys(r).filter(c => (l.niveaux[c] || 0) < r[c]).length}); };
+  function competences(methode, c, b){
+    const p = sansQ(c); if (p.indexOf(CP+"/") !== 0) return undefined; b = b || {};
+    const d = cpDonnees(), q = qp(c), fonctions = Array.from(new Set(d.lignes.map(l => l.fonction))).sort();
+    const droits = {modifier:true, parametrer:true, exporter:false};
+    let m;
+    if (methode === "GET"){
+      if (p === CP+"/catalogue") return {competences:copie(d.competences), retirees:copie(d.retirees), exigences:copie(d.exigences), fonctions, fonctionsParam:fonctions, niveaux:[0,1,2,3,4], droits};
+      if (p === CP+"/matrice"){ const s = String(q.get("q") || "").trim().toLowerCase(), f = q.get("fonction") || "", off = +q.get("offset") || 0, lim = +q.get("limit") || 100;
+        const l = d.lignes.filter(x => (!f || x.fonction === f) && (s.length < 2 || (x.nom+" "+x.mat).toLowerCase().indexOf(s) >= 0));
+        return {total:l.length, offset:off, competences:d.competences.map(z => ({id:z.id, code:z.code, nom:z.nom, domaine:z.domaine})), lignes:l.slice(off, off + lim).map(x => cpLigne(d, x)), droits}; }
+      if (p === CP+"/ecarts"){ const agg = {}; d.competences.forEach(k => { agg[k.id] = {id:k.id, code:k.code, nom:k.nom, concernes:0, conformes:0, ecarts:0}; }); let se = 0;
+        d.lignes.forEach(l => { const r = cpRequis(d, l.fonction); let e = false; Object.keys(r).forEach(cid => { const a = agg[cid]; if (!a) return; a.concernes++; if ((l.niveaux[cid] || 0) >= r[cid]) a.conformes++; else { a.ecarts++; e = true; } }); if (e) se++; });
+        return {salaries:d.lignes.length, salariesEcart:se, competences:Object.values(agg).map(a => Object.assign(a, {taux:a.concernes ? Math.round(100*a.conformes/a.concernes) : null})).sort((x, y) => y.ecarts - x.ecarts)}; }
+      if (p === CP+"/historique"){ const mat = q.get("mat"), l = d.hist.filter(h => h.mat === mat).slice().reverse(); return {total:l.length, historique:l}; }
+      return undefined;
+    }
+    if (p === CP+"/niveau"){ const l = d.lignes.find(x => x.mat === b.mat); if (!l) return {ok:true, demo:true};
+      const av = l.niveaux[b.competenceId] || 0; if (b.avant !== undefined && +b.avant !== av) return Promise.reject(Object.assign(new Error("Niveau modifié entre-temps (actuellement "+av+") : actualisez."), {statut:409}));
+      l.niveaux[b.competenceId] = +b.niveau; const z = d.competences.find(k => k.id === b.competenceId) || {};
+      d.hist.push({id:nouvelId("ch"), mat:b.mat, competence_id:b.competenceId, code:z.code, nom:z.nom, avant:av, apres:+b.niveau, par:"admin", motif:b.motif || "", ts:maint()}); return {ok:true, demo:true, avant:av, apres:+b.niveau}; }
+    if (p === CP+"/exigence"){ d.exigences = d.exigences.filter(x => !(x.fonction === b.fonction && x.competence_id === b.competenceId)); if (+b.niveau > 0) d.exigences.push({fonction:b.fonction, competence_id:b.competenceId, niveau:+b.niveau}); return {ok:true, demo:true}; }
+    if (p === CP+"/catalogue"){ const it = {id:nouvelId("cp"), code:b.code, nom:b.nom, domaine:b.domaine || "", actif:1, cree:maint()}; d.competences.push(it); return {ok:true, demo:true, id:it.id}; }
+    if ((m = /^\/api\/v1\/competences\/catalogue\/([^/]+)(?:\/(retirer|reactiver))?$/.exec(p))){
+      if (m[2] === "retirer"){ const k = d.competences.find(z => z.id === m[1]); if (k){ d.competences = d.competences.filter(z => z.id !== m[1]); d.retirees.push(k); } }
+      else if (m[2] === "reactiver"){ const k = d.retirees.find(z => z.id === m[1]); if (k){ d.retirees = d.retirees.filter(z => z.id !== m[1]); d.competences.push(k); } }
+      else { const k = d.competences.find(z => z.id === m[1]); if (k) Object.assign(k, {code:b.code, nom:b.nom, domaine:b.domaine}); }
+      return {ok:true, demo:true}; }
+    return undefined;
+  }
   return function(chemin, o){
     const c = "/"+String(chemin || "").replace(/^\.?\//, "");
     const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
     if (methode !== "GET"){
-      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = formation(methode, c, o && o.corps); if (r === undefined) r = evaluation(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
+      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = formation(methode, c, o && o.corps); if (r === undefined) r = evaluation(methode, c, o && o.corps); if (r === undefined) r = competences(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
       return new Promise(ok => setTimeout(() => ok(r), 150));
     }
-    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr === undefined) rr = formation("GET", c); if (rr === undefined) rr = evaluation("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
+    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr === undefined) rr = formation("GET", c); if (rr === undefined) rr = evaluation("GET", c); if (rr === undefined) rr = competences("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
     const p = sansQ(c), parent = p.replace(/\/[^/]+$/, "/"), cles = chemins();
     let k = REP[c] !== undefined ? c : cles.find(x => sansQ(x) === p);
     if (!k) k = cles.find(x => { const y = sansQ(x); return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });

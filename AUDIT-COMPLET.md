@@ -2230,3 +2230,33 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-38.zip (cumulatif : correctifs 2 à 37 inclus).
+
+## Correctif 39 — Talents › Compétences (FW-Competences, analyse approfondie)
+
+Analyse de l'écran après les correctifs 34 et 37, sur le serveur réel en SQLite puis en PostgreSQL 16, avec des comptes à menu masqué, en lecture, à actions refusées et un paramétreur limité à un site, à 20 000 salariés × 30 compétences, dans Chromium (fr / ar) et la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| K1 | Matrice de l'écran ignorée : menu masqué → lecture et écriture ; menu en lecture et actions refusées → écriture ; 162 cellules actives en lecture ; « À traiter » et fiche 360° affichés | **critique** | `droitsEcran` sur toutes les routes, « À traiter » et la fiche 360° ; droits renvoyés à l'écran (cellules `aria-disabled`) |
+| K2 | Un compte limité à un site créait des compétences et changeait l'exigence d'une fonction pour toute l'entreprise | haute | paramétrage réservé à un compte sans limite de périmètre |
+| K3 | Index des niveaux faux après l'annulation d'une transaction d'un autre module (niveau jamais enregistré gardé jusqu'au redémarrage) | haute | index oublié si la transaction est annulée ; écriture versionnée pendant le chargement de l'index |
+| K4 | PostgreSQL : codes en double (jusqu'à 4 fois) ; saisies simultanées → historique rompu, « inchangé » à tort | haute | code unique sans casse sous verrou (vérifié : un seul 200 sur 5, trois fois) ; écriture des niveaux sous verrou dans une transaction, relecture du niveau précédent (vérifié : 30 saisies simultanées, aucune chaîne rompue) |
+| K5 | Saisie d'un autre utilisateur écrasée en silence (l'écran envoyait le niveau suivant sans dire ce qu'il affichait) ; baisse sans motif | haute | niveau affiché envoyé, 409 « modifié entre-temps » ; motif obligatoire pour une baisse (confirmation à l'écran) |
+| K6 | Matricule changé : niveaux et historique perdus ; matricule réutilisé : niveaux et historique (y compris d'évaluation) donnés au nouvel embauché | haute | rattachement des matricules et des lignes d'historique à la fiche ; tâche horaire « matricules » (suivi du changement, retrait des niveaux de l'ancien titulaire) ; historique lu par fiche |
+| K7 | JSON invalide → 500 ; messages en français ; champs objets (« [object Object] »), fonction de 5 000 caractères | moyenne | 400 ; messages trilingues ; champs texte stricts et bornés |
+| K8 | Démonstration inutilisable (aucune fonction ni exigence, écarts vides, ajout et saisie perdus, recherche sans effet) | moyenne | jeu de démonstration (fonctions, exigences) et rejeu propre aux compétences |
+| K9 | Cache du tableau de pilotage non invalidé par les saisies et le paramétrage | moyenne | événements « competences.niveau » et « competences.parametrage » publiés |
+| K10 | Réponse d'un filtre précédent affichée ; grille sans navigation clavier (144 tabulations), focus perdu, rôles incomplets ; exigence refusée affichée à la nouvelle valeur ; ajout sans verrou ni saisie conservée | moyenne | requêtes numérotées ; tabulation itinérante et flèches / Début / Fin / pages ; focus rétabli ; `columnheader`, `aria-rowcount`, `aria-rowindex`, onglets `tabpanel` ; valeur rétablie ; verrou et saisie conservée |
+| K11 | Catalogue incomplet : ni modification, ni retrait, ni réactivation ; « abc » et « ABC » coexistent ; exigence sur une compétence inactive ou une fonction inexistante ; niveau 0 sur une exigence absente journalisé | moyenne | routes et écran correspondants (retrait refusé tant qu'une fonction l'exige) ; code sans casse ; compétence active, fonction occupée ; rien d'écrit ni de journalisé sans changement |
+| K12 | Aucun export ; historique sans écran, sans pagination, motifs d'évaluation visibles en lecture | moyenne | export CSV ; historique à l'écran (clic sur le nom), paginé, motifs masqués sans accès aux données sensibles |
+| K13 | « À traiter » = somme salarié × compétence (125 199 à 20 000) ; futurs entrants comptés et modifiables ; sortie comparée en UTC | basse | nombre de salariés en écart ; population commune (présents : ni sortis, ni pas encore entrés, jour local) ; fonctions de toute l'entreprise proposées au paramétrage |
+
+Non traité : anonymisation de l'historique des salariés supprimés (l'historique reste immuable) ; motif « évaluation » visible au tableau de pilotage.
+
+Vérifié :
+- **SQLite.** JSON invalide, code objet → 400 ; trois codes simultanés `200,409,409`, casse → 409 ; paramétreur limité → 403 ; fonction inconnue 400, exigence inchangée sans écriture ; retrait d'une compétence exigée 409, modification, retrait, réactivation ; matrice (masqué, lecture, actions → 403 ; « À traiter » masqué vide) ; futur entrant 404 ; niveau affiché obsolète 409 ; baisse sans motif 400 ; historique cohérent ; motifs ; « À traiter » = 1 salarié ; export ; matricule changé (niveaux suivis), matricule réutilisé (rien hérité) ; message anglais ; Formation (clôture → niveau reporté et historisé) et Évaluations rejouées.
+- **PostgreSQL 16.** Codes simultanés : un seul 200 sur cinq, trois fois ; 30 saisies simultanées : historique sans rupture, niveau final cohérent ; nombres ; JSON invalide 400.
+- **Chromium.** Une seule cellule tabulable, flèches et Fin, focus conservé après une saisie au clavier, recherche, historique, saisie conservée après refus, édition du catalogue, compte en lecture sans modification possible, arabe ; démonstration : 3 fonctions, recherche, niveau conservé, écarts, ajout au catalogue ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-39.zip (cumulatif : correctifs 2 à 38 inclus ; 47 fichiers avec la feuille de style des Compétences).

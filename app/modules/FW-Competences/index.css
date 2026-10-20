@@ -15,3 +15,6 @@
 .fwc-n1{background:#e8f3f1;} .fwc-n2{background:#cfe8e3;} .fwc-n3{background:#9fd3c9;} .fwc-n4{background:#5fb3a5; color:#fff;}
 .fwc-n.fwc-ecart{outline:2px solid #dc2626; outline-offset:-2px;}
 .fwc-n:focus-visible{outline:2px solid #047857; outline-offset:1px;}
+/* correctif 39 : cellule de grille contenant un bouton (navigation au clavier) */
+.fwc-g{display:flex; height:28px;} .fwc-g .fwc-n{width:100%;}
+.fwc-nom .fw-link{max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:start;}
