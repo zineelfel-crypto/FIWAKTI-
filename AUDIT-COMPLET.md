@@ -2199,3 +2199,34 @@ Vérifié :
 - **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
 
 Livraison : FIWAKTI-56.33.11-correctif-37.zip (cumulatif : correctifs 2 à 36 inclus).
+
+## Correctif 38 — Talents › Évaluations (FW-Evaluation, analyse approfondie)
+
+Analyse de l'écran après les correctifs 34 et 36, sur le serveur réel en SQLite puis en PostgreSQL 16, avec des comptes à menu masqué, en lecture, à actions refusées, un valideur sans accès aux données sensibles, un évaluateur et un manager sorti, à 20 000 salariés, dans Chromium (fr / ar) et la démonstration autonome.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| V1 | PostgreSQL : validation et saisie simultanées → toutes deux OK, évaluation « en cours » avec niveaux déjà reportés | **critique** | saisie et validation sous verrou, écritures conditionnelles (statut, campagne ouverte) ; 409 sinon (vérifié : `200,409,409`, statut final « validée ») |
+| V2 | Matrice de l'écran ignorée : menu masqué → lecture, « À traiter », fiche 360° ; menu en lecture → saisie ; « valider » refusé → validation ; boutons actifs à l'écran | **critique** | `droitsEcran` sur toutes les routes, « À traiter » et la fiche 360° ; droits par évaluation (`saisir`, `validerCelle`, `reassigner`) pilotant l'écran |
+| V3 | Quatre yeux contournés : un valideur réécrivait la note puis validait lui-même ; un valideur sans accès aux données sensibles écrasait et validait « à l'aveugle » | haute | seul l'évaluateur désigné saisit (un valideur reprend une évaluation sans évaluateur ou la réassigne) ; auteur de la dernière saisie mémorisé, refusé à la validation ; accès confidentiel exigé pour saisir, valider, rouvrir |
+| V4 | Notes et taux d'atteinte dans le journal d'audit | haute | journal limité au changement de statut et à la liste des champs modifiés |
+| V5 | La validation baissait un niveau relevé entre-temps (4 → 2) ; compétence hors fonction reportée | haute | niveau constaté mémorisé à la saisie ; report seulement s'il n'a pas changé (sinon signalé) ; compétences de la fonction seulement ; l'écran n'envoie que les niveaux modifiés |
+| V6 | Évaluateurs inopérants (manager sorti, compte en lecture) ; aucune réassignation | haute | comptes actifs, liés à un salarié présent, droit de saisie, écran visible ; route et écran de réassignation (audit) |
+| V7 | PostgreSQL : trois lancements simultanés → trois campagnes ; génération à 20 000 en 5,9 s | haute | contrôle du doublon sous verrou ; insertions par lots de 500 (vérifié : `200,409,409` ; 0,8 s sous PostgreSQL, 0,3 s sous SQLite) |
+| V8 | JSON invalide → 500 ; champs objets (« [object Object] »), type libre, `terminer:"false"` terminait ; messages en français | moyenne | 400 ; champs texte stricts, type en liste blanche, booléen strict, années 2000–2100 ; messages trilingues |
+| V9 | `COUNT` en texte sous PostgreSQL ; « À traiter » après clôture, incluant ses propres saisies, sa propre évaluation et les sortis ; fiche 360° « 0 % » avant saisie | moyenne | conversion en nombres ; campagnes ouvertes, exclusions ; moyenne des seuls objectifs notés, tri stable |
+| V10 | Salarié entré après la fin inclus ; fonction lue sans `fonction` ni `trim` ; suppression de campagne effaçant une saisie concurrente ; campagnes des autres périmètres visibles | moyenne | exclusion, fonction comme dans Compétences, suppression atomique, campagnes filtrées ; export CSV (droit d'export, notes selon l'accès aux données sensibles) |
+| V11 | « Rouvrir » une évaluation à faire ; sans motif ni confirmation | basse | évaluation terminée seulement, motif obligatoire, confirmation |
+| V12 | Saisie perdue après une erreur (campagne, évaluation) ; liste vide par défaut pour un valideur RH ; pagination « ‹ », focus perdu, onglets sans `aria-controls` | moyenne | saisie conservée ; liste complète par défaut à partir du droit de validation ; libellés, focus rétabli (titre du détail, ligne d'origine) |
+| V13 | Démonstration : fiche d'un autre salarié, saisie insérée dans les exigences, campagne « undefined », « rouvrir » → statut inconnu | moyenne | rejeu propre aux évaluations |
+
+Non traité : commentaire, signature et contestation du salarié ; objectifs individuels ; ajout à une campagne des salariés entrés en cours ; conservation et purge des évaluations ; masquage du motif « évaluation » dans l'historique des compétences ; couleurs des étiquettes de statut en thème sombre.
+
+Vérifié :
+- **SQLite.** JSON invalide, nom objet, type inconnu, année 1900 → 400 ; trois lancements `200,409,409` ; évaluateur désigné (manager présent habilité ; aucun pour un manager sorti) ; salarié entré après la fin exclu ; matrice (masqué 403, lecture 403, « À traiter » masqué vide) ; valideur non évaluateur → 403 ; compétence hors fonction écartée ; `terminer:"false"` et commentaire objet → 400 ; journal sans valeurs ; auteur de la saisie, valideur sans accès sensible, actions refusées → 403 ; réouverture sans motif 400, d'une évaluation à faire 409 ; niveau relevé entre saisie et validation conservé ; validation et saisie simultanées `200 / 409` ; réassignation (manager sorti refusé) ; totaux numériques ; export ; deux clôtures `200,409` ; « À traiter » vidé après clôture ; message anglais.
+- **20 000 salariés.** Lancement de 19 617 évaluations : 283 ms (SQLite, latence ≤ 252 ms), 803 ms (PostgreSQL).
+- **PostgreSQL 16.** Lancements simultanés `200,409,409` ; validation + deux saisies `200,409,409`, statut « validée » ; nombres ; JSON invalide 400 ; clôtures `200,409`.
+- **Chromium.** Saisie conservée (campagne refusée, évaluation non terminée), export, pagination nommée, focus sur le détail et au retour, réassignation proposée, compte en lecture sans aucun champ actif, arabe ; démonstration : fiche correcte, terminer, valider, compteur ; aucune erreur JavaScript.
+- **Non-régression.** 56 écrans sans erreur JavaScript ; seul le salarié 10188 diffère, comme attendu.
+
+Livraison : FIWAKTI-56.33.11-correctif-38.zip (cumulatif : correctifs 2 à 37 inclus).

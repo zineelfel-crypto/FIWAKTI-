@@ -224,14 +224,61 @@
     if (p === FR+"/habilitations"){ const ca = catFr().find(x => x.id === b.catalogueId) || {}; chemins().filter(k => sansQ(k) === FR+"/habilitations").forEach(k => { REP[k].lignes.unshift({id:nouvelId("fh"), mat:b.mat, catalogue_id:b.catalogueId, obtenue_le:b.obtenueLe, expire_le:null, titre:ca.titre || "", code:ca.code || "", nom:nomDe(b.mat), actif:1, etat:"valide"}); REP[k].total++; }); return {ok:true, demo:true}; }
     return undefined;
   }
+  /* correctif 38 : évaluations — liste filtrée, fiche propre à chaque évaluation (plus celle d'un autre salarié), saisie
+     et terminaison, validation (compteur), réouverture « en cours », réassignation, lancement, clôture et suppression */
+  const EV = "/api/v1/evaluation";
+  const evLignes = () => { const l = []; chemins().filter(k => sansQ(k) === EV+"/evaluations").forEach(k => (REP[k].lignes || []).forEach(x => { if (!l.some(y => y.id === x.id)) l.push(x); })); return l; };
+  const evCamps = () => (REP[EV+"/campagnes"] || {campagnes:[]}).campagnes;
+  const evModele = () => { const k = chemins().find(x => x.indexOf(EV+"/evaluations/") === 0); return k ? REP[k] : null; };
+  if (!REP[EV+"/evaluations?demo=toutes"]) REP[EV+"/evaluations?demo=toutes"] = {total:0, lignes:[]};
+  function evFiche(id){
+    let d = REP[EV+"/evaluations/"+id]; if (d) return d;
+    const r = evLignes().find(x => x.id === id), M = evModele(); if (!r) return null;
+    const c = evCamps().find(x => x.nom === r.campagne) || {};
+    d = REP[EV+"/evaluations/"+id] = {evaluation:{id, campagne_id:c.id, mat:r.mat, evaluateur:r.evaluateur || null, statut:r.statut, note:r.note == null ? null : r.note, objectifs:((M && M.evaluation.objectifs) || []).map(z => ({libelle:z.libelle, atteinte:null})), competences:[], commentaire:"", maj:maint(), cstatut:c.statut || "ouverte", campagne:r.campagne},
+      salarie:{mat:r.mat, nom:r.nom || nomDe(r.mat), fonction:r.fonction || ""}, exigences:copie((M && M.exigences) || [])};
+    return d;
+  }
+  function evaluation(methode, c, b){
+    const p = sansQ(c); if (p.indexOf(EV+"/") !== 0) return undefined; b = b || {};
+    let m;
+    if (methode === "GET"){
+      if (p === EV+"/evaluations"){ const q = qp(c), ca = q.get("campagne") || "", st = q.get("statut") || "", mes = q.get("mes") === "1", off = +q.get("offset") || 0;
+        const cn = (evCamps().find(x => x.id === ca) || {}).nom, l = evLignes().filter(x => (!ca || x.campagne === cn) && (!st || x.statut === st) && (!mes || x.evaluateur === "admin"));
+        return {total:l.length, lignes:copie(l.slice(off, off + 50))}; }
+      if ((m = /^\/api\/v1\/evaluation\/evaluations\/([^/]+)$/.exec(p))){ const d = evFiche(m[1]); if (!d) return undefined; const v = copie(d), e = v.evaluation, ouv = e.cstatut === "ouverte";
+        v.droits = {saisir:ouv && e.statut !== "validee", validerCelle:ouv && e.statut === "terminee", reassigner:ouv && e.statut !== "validee", valider:true}; return v; }
+      return undefined;
+    }
+    if ((m = /^\/api\/v1\/evaluation\/evaluations\/([^/]+)(?:\/([a-z]+))?$/.exec(p))){
+      const d = evFiche(m[1]); if (!d) return {ok:true, demo:true}; const e = d.evaluation;
+      if (!m[2]){ if (b.note !== undefined) e.note = b.note === "" || b.note == null ? null : +b.note; if (Array.isArray(b.objectifs)) e.objectifs.forEach((z, k) => { const v = b.objectifs[k]; if (v !== undefined && v !== "") z.atteinte = +v; });
+        if (Array.isArray(b.competences)) e.competences = b.competences; if (b.commentaire !== undefined) e.commentaire = b.commentaire; e.statut = b.terminer === true ? "terminee" : "en_cours"; if (!e.evaluateur) e.evaluateur = "admin";
+        modifier(m[1], {statut:e.statut, note:e.note, evaluateur:e.evaluateur}); return {ok:true, demo:true, statut:e.statut}; }
+      if (m[2] === "valider"){ modifier(m[1], {statut:"validee"}); const ca = evCamps().find(x => x.id === e.campagne_id); if (ca) ca.validees = (+ca.validees || 0) + 1; return {ok:true, demo:true, reportes:0, conflits:0}; }
+      if (m[2] === "rouvrir"){ modifier(m[1], {statut:"en_cours"}); return {ok:true, demo:true}; }
+      if (m[2] === "evaluateur"){ modifier(m[1], {evaluateur:b.login}); return {ok:true, demo:true}; }
+    }
+    if (p === EV+"/campagnes"){ const cid = nouvelId("ec"), M = evModele(), objectifs = (b.objectifs || []).map(z => ({libelle:String(z), atteinte:null}));
+      let emps = []; try { emps = (db.emps || []).filter(e => !e.sortie && (!b.fonction || (e.poste || "") === b.fonction)); } catch(e){}
+      evCamps().unshift({id:cid, nom:b.nom, type:b.type || "annuelle", debut:b.debut, fin:b.fin, statut:"ouverte", cree:maint(), par:"admin", total:emps.length, validees:0});
+      const L0 = REP[EV+"/evaluations?demo=toutes"]; emps.forEach(e => { const id = nouvelId("ev"); L0.lignes.push({id, mat:e.mat, evaluateur:null, statut:"a_faire", note:null, maj:maint(), campagne:b.nom, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), fonction:e.poste || ""});
+        REP[EV+"/evaluations/"+id] = {evaluation:{id, campagne_id:cid, mat:e.mat, evaluateur:null, statut:"a_faire", note:null, objectifs:copie(objectifs), competences:[], commentaire:"", maj:maint(), cstatut:"ouverte", campagne:b.nom}, salarie:{mat:e.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), fonction:e.poste || ""}, exigences:copie((M && M.exigences) || [])}; });
+      L0.total = L0.lignes.length; return {ok:true, demo:true, id:cid, evaluations:emps.length}; }
+    if ((m = /^\/api\/v1\/evaluation\/campagnes\/([^/]+)\/(clore|supprimer)$/.exec(p))){ const ca = evCamps().find(x => x.id === m[1]);
+      if (m[2] === "clore"){ if (ca) ca.statut = "close"; evLignes().forEach(x => { if (ca && x.campagne === ca.nom){ const d = REP[EV+"/evaluations/"+x.id]; if (d) d.evaluation.cstatut = "close"; } }); }
+      else if (ca){ const C = REP[EV+"/campagnes"]; C.campagnes = C.campagnes.filter(x => x.id !== m[1]); chemins().filter(k => sansQ(k) === EV+"/evaluations").forEach(k => { REP[k].lignes = REP[k].lignes.filter(x => x.campagne !== ca.nom); REP[k].total = REP[k].lignes.length; }); }
+      return {ok:true, demo:true}; }
+    return undefined;
+  }
   return function(chemin, o){
     const c = "/"+String(chemin || "").replace(/^\.?\//, "");
     const methode = o && (o.methode || (o.corps !== undefined ? "POST" : "GET")) || "GET";
     if (methode !== "GET"){
-      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = formation(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
+      let r; try { r = recrut(methode, c, o && o.corps); if (r === undefined) r = integ(methode, c, o && o.corps); if (r === undefined) r = formation(methode, c, o && o.corps); if (r === undefined) r = evaluation(methode, c, o && o.corps); if (r === undefined) r = ecrire(sansQ(c), o && o.corps); } catch(e){ r = {ok:true, demo:true}; }
       return new Promise(ok => setTimeout(() => ok(r), 150));
     }
-    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr === undefined) rr = formation("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
+    let rr = recrut("GET", c); if (rr === undefined) rr = integ("GET", c); if (rr === undefined) rr = formation("GET", c); if (rr === undefined) rr = evaluation("GET", c); if (rr !== undefined) return new Promise(ok => setTimeout(() => ok(rr), 120));
     const p = sansQ(c), parent = p.replace(/\/[^/]+$/, "/"), cles = chemins();
     let k = REP[c] !== undefined ? c : cles.find(x => sansQ(x) === p);
     if (!k) k = cles.find(x => { const y = sansQ(x); return y.lastIndexOf("/") === parent.length - 1 && y.indexOf(parent) === 0 && y.length > parent.length; });
