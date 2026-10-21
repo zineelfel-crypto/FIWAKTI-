@@ -2645,3 +2645,18 @@ Vérifié (serveur réel) : salarié en calendrier de nuit, 22:00 le 19/10 et 06
 
 Livraison : FIWAKTI-56.33.13-correctif-47.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 46 ; `app/app.js`,
 `public/ext-pointage-jour.js`, `serveur/calcul.js`, `serveur/moteur.js`).
+
+## Correctif 48 — Compteurs standard absents du serveur
+
+Signalé par l'utilisateur : création d'un état « Heure de nuit » refusée — « etats (état « Heure de nuit » : compteur
+inconnu (cpt5611_1)) ».
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| S1 | Les éléments standard ajoutés par `normalize` dans le navigateur (14 compteurs `aritsV5611` : HNUIT, HNUITMAJ, HDIM, HDIMMAJ, HFERIE, HFERIEMAJ, HSJ1, HSJ2, HSJMAJ, HRECUP, ABSPAY, ABSNPAY, NBFERIE, HFERIEPAY ; compteurs et types d'absence du modèle d'origine) n'étaient envoyés au serveur qu'en cas de migration de schéma : sur une installation existante, le navigateur les proposait mais le serveur ne les connaissait pas — état refusé, compteurs absents des calculs du serveur | haute | au démarrage, le serveur joue `normalize` (moteur chargé dans le fil principal) sur une copie de son paramétrage et ajoute les compteurs et types d'absence manquants (même code) ; rien d'existant n'est modifié ; journalisé |
+
+Vérifié : paramétrage du banc privé des 14 compteurs ; ancien serveur : création refusée avec exactement le message de
+l'utilisateur ; nouveau serveur : « paramétrage complété … arits : HNUIT, … » au démarrage, état « Heure de nuit »
+(Heures de nuit, Heures théoriques, Heures travaillées) créé.
+
+Livraison : FIWAKTI-56.33.13-correctif-48.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 47 ; 5 fichiers).

@@ -30,7 +30,7 @@ function chargerMoteur(fichierApp){
 ;globalThis.__moteur = {
   get db(){ return db; }, set db(v){ db = v; },
   reinit(){ ptgTouch(); absTouch(); SUIVI_CACHE = []; if (typeof jvVider === "function") jvVider(); if (typeof PERIM_TICK !== "undefined") PERIM_TICK++; },
-  jourVars, convFor, mvtsDe, mvtsCalc, mvtsJour, jourEstNuit, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
+  jourVars, convFor, mvtsDe, mvtsCalc, mvtsJour, jourEstNuit, normalize, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
   langue(l){ try { if (typeof T !== "undefined" && T[l]){ t = T[l]; if (typeof ui !== "undefined") ui.lang = l; } } catch(e){} },
   counterOrder, ordreRestreint, periodBounds, etatBlocs:typeof etatBlocs === "function" ? etatBlocs : null, etatBornesListe:typeof etatBornesListe === "function" ? etatBornesListe : null
 };`;

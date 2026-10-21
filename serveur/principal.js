@@ -284,6 +284,33 @@ async function ouvrirBase(){
       await meta("migration_conges_jours", "1");
     }
   } catch(e){ journal("migration des compteurs de congé : "+e.message); }
+  /* correctif 48 : éléments standard du paramétrage ajoutés par l'application (compteurs des heures de nuit, dimanches,
+     jours fériés, tranches d'heures supplémentaires… ; types d'absence) — ils n'étaient ajoutés que dans le navigateur,
+     jamais enregistrés sur le serveur (sauf migration de schéma) : un état qui les utilisait était refusé (« compteur
+     inconnu »). La mise à niveau de l'application est jouée sur le paramétrage du serveur et seuls les éléments
+     manquants (même code) sont ajoutés ; rien d'existant n'est modifié. */
+  try {
+    const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP);
+    if (r){
+      const ref = JSON.parse(r.valeur);
+      if (Array.isArray(ref.arits) && ref.arits.length){
+        const M = require("./moteur.js").chargerMoteur(path.join(APP, "app.js")).M, copie = JSON.parse(JSON.stringify(ref));
+        ["emps","ptg","dmd","abs","corrections","ajust","audit","notifs","journal","bio","msgp"].forEach(c=>{ if (!Array.isArray(copie[c])) copie[c] = []; });
+        M.db = copie; M.normalize(); const n = M.db, ajouts = [];
+        const completer = (cle, par) => { if (!Array.isArray(ref[cle]) || !Array.isArray(n[cle])) return;
+          const codes = new Set(ref[cle].filter(x=>x && typeof x === "object").map(x=>String(x[par]))), ids = new Set(ref[cle].filter(x=>x && typeof x === "object").map(x=>String(x.id)));
+          const l = n[cle].filter(x=>x && x[par] != null && !codes.has(String(x[par])) && !ids.has(String(x.id)));
+          if (!l.length) return;
+          ref[cle] = ref[cle].concat(JSON.parse(JSON.stringify(l))); ref.__versions = ref.__versions || {}; ref.__versions[cle] = Number(ref.__versions[cle] || 0) + 1;
+          ajouts.push(cle+" : "+l.map(x=>x[par]).join(", ")); };
+        completer("arits", "code"); completer("tt", "code");
+        if (ajouts.length){
+          await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), CLE_APP);
+          journal("paramétrage complété par les éléments standard de l'application : "+ajouts.join(" ; "));
+        }
+      }
+    }
+  } catch(e){ journal("éléments standard du paramétrage : "+e.message); }
   K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
 }
