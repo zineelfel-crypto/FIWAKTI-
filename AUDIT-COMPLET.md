@@ -2561,3 +2561,31 @@ vérifiée de moins de 24 h et l'intégrité des 2 350 fichiers. Il copie la ver
 attend la nouvelle version puis 90 s de stabilité, avec retour automatique sinon ; `-Retour` revient à la version
 d'avant ; `-Verifier` ne modifie rien. Essayé (PowerShell 7, tâche planifiée simulée, installation 56.33.11 réelle avec
 ses données) : contrôles, mise à jour vers 56.33.13, retour manuel, retour automatique sur une version qui ne démarre pas ; tâche lançant `demarrer.js` (cas d'un client) : mise à jour et retour.
+
+## Correctif 44 — Saisie manuelle des pointages et calcul de la pause
+
+Vérification d'un point de base : saisir le pointage oublié d'un salarié absent.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| P1 | Éditeur des pointages d'une journée (`public/ext-pointage-jour.js`) : 14 libellés jamais définis (`pjTitre`, `pjAjouter`, `pjFermer`, `pjSupprimer`, `pjAucun`, `pjSequence`, `pjHeure`, `pjCloture`, `pjLecture`, `pjConflit`, `pjNouveau`, `pjEnregistre`, `pjRecalcule`, `pjRecap`) : titre, bouton « Ajouter » et bouton « Fermer » vides, messages d'erreur vides | haute | libellés fr / en / ar ajoutés à `app.js` |
+| P2 | Pause non badgée : la pénalité était retirée même sans présence pendant la plage de pause (départ 12:00 : 2 h au lieu de 4 h ; 14:00–17:00 : 1 h au lieu de 3 h) | haute | retrait seulement si les intervalles de présence couvrent la plage de pause (nuit comprise) |
+| P3 | Pause non obligatoire non badgée : jamais retirée (08:00–17:00 : 9 h, 1 h d'heures supplémentaires) | haute | durée de la pause retirée automatiquement (au plus la partie couverte) |
+| P4 | Pénalité par défaut de 120 min (jour type « Journée normale 8 h » et toute pause sans pénalité réglée) : 08:00–17:00 = 7 h | moyenne | défaut = durée de la pause (60 min) pour les nouvelles installations et pauses ; valeurs déjà enregistrées inchangées (à revoir par l'utilisateur) |
+| P5 | Libellés de secours non traduits (Annuler, oui / non, Tous les sites, Salarié introuvable) | basse | ajoutés en fr / en / ar |
+
+Recherche systématique : les 3 415 clés `t.*` utilisées par l'application et ses extensions ont été comparées à celles
+définies ; en dehors de P1 et P5, les seules absentes sont définies par l'extension d'import elle-même ou sont des
+propriétés d'objets locaux (faux positifs). Aucune clé du français ne manque en anglais ni en arabe.
+
+Vérifié :
+- moteur (`evalDay`), 8 cas calculés à la main : 08:00–17:00 avec pause obligatoire (pénalité 60) ou non obligatoire,
+  pénalité 120 conservée, demi-journée matin, après-midi seul, départ 12:30, pause badgée, nuit 22:00–06:00 avec pause
+  de 30 min : 8 / 8 justes (5 faux avec l'ancien moteur) ;
+- serveur réel (SQLite) : salarié absent la veille → Suivi › Pointages & présences › Hier › Absents › « Voir /
+  modifier les pointages » → ajout 08:00 entrée et 17:00 sortie, motif → journée « Présent », 8:00 de présence dans le
+  navigateur et sur le serveur, provenance « manuel » et motif conservés ;
+- éditeur complet en démonstration (titre, boutons, colonne Supprimer) ; non-régression : `t53.js` sans erreur,
+  `t4b.js` seul le salarié 10188 diffère (pauses du jeu de démonstration badgées).
+
+Livraison : FIWAKTI-56.33.13-correctif-44.zip (pour la 56.33.13 ; 1 fichier, `app/app.js`).
