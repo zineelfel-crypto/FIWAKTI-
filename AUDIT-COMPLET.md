@@ -2607,3 +2607,23 @@ Vérifié (20 000 salariés, SQLite) : 30 salariés privés de calendrier et 40 
 
 Livraison : FIWAKTI-56.33.13-correctif-45.zip (pour la 56.33.13 ; cumulatif : correctif 44 ; `app/app.js`,
 `serveur/calcul.js`).
+
+## Correctif 46 — Pointages d'un poste de nuit
+
+Signalé par l'utilisateur : impossible de saisir la sortie 06:00 du lendemain d'une entrée à 22:00.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| N1 | Éditeur des pointages : tout pointage était daté du jour de la journée ; une sortie 06:00 devenait le matin du même jour (avant l'entrée 22:00) : alerte de séquence et nuit fausse, sans moyen de saisir le lendemain | haute | colonne « Jour » (J ou lendemain +1) ; date du pointage selon ce choix, à l'ajout comme à la modification ; contrôle de séquence et résumé sur la date et l'heure |
+| N2 | Poste de nuit : les badgeages du lendemain matin rattachés à la nuit (règle du moteur `mvtsJour` : J après 12:00, lendemain avant 12:00) n'apparaissaient pas dans l'éditeur de la journée | moyenne | chargés et affichés avec la journée quand son jour type est un poste de nuit (fiche chargée à la demande en grand effectif) ; sortie ajoutée proposée au lendemain ; message si le jour type n'est pas de nuit |
+| N3 | Serveur : un badgeage du matin (saisi ou reçu d'une pointeuse) ne faisait recalculer que son propre jour ; la nuit de la veille, à laquelle il appartient, restait en « oubli de sortie » | haute | `invalider` recalcule aussi la veille de chaque jour touché |
+
+Vérifié (serveur réel, SQLite) : salarié affecté à un calendrier de nuit (jour type « Équipe de nuit » 22:00–06:00) ;
+éditeur de la veille : message de poste de nuit, entrée 22:00 (J) et sortie proposée au lendemain (+1), aucune alerte
+de séquence ; enregistrés `2026-10-20 22:00 E` et `2026-10-21 06:00 S` ; 8:00 de présence dans le navigateur et sur le
+serveur ; sortie du lendemain seule modifiée à 07:00 → nuit de la veille recalculée sur le serveur (9 h, heures
+supplémentaires). Démonstration : colonne Jour affichée ; non-régression `t53.js` et `t4b.js` (seul le salarié 10188
+diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-46.zip (pour la 56.33.13 ; cumulatif : correctifs 44 et 45 ; `app/app.js`,
+`public/ext-pointage-jour.js`, `serveur/calcul.js`).

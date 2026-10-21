@@ -181,6 +181,11 @@ function creer(B, D, opts){
     if (Date.now() - INV_PURGE > 600000){ INV_PURGE = Date.now(); await B.run("DELETE FROM calc_invalidations WHERE ts < ?", new Date(Date.now() - 3600000).toISOString()); }
   }
   async function invalider(touches, refCles, opts){
+    /* correctif 46 : un badgeage du matin peut appartenir au poste de nuit de la veille (moteur : poste de nuit = badgeages
+       du jour après 12:00 et du lendemain avant 12:00) — la veille est recalculée aussi ; avant, la sortie 06:00 saisie
+       ou reçue le lendemain laissait la nuit de la veille en « oubli de sortie » */
+    touches = Array.from(new Set([].concat(...(touches||[]).map(t=>{ const i = String(t).indexOf("|"), d = String(t).slice(i+1);
+      return /^\d{4}-\d{2}-\d{2}$/.test(d) ? [t, String(t).slice(0, i+1)+ajout(d, -1)] : [t]; }))));
     if ((refCles||[]).length || !(opts && opts.pointeuse)) GENERATION++; else GEN_P++;
     try { const paires = (refCles||[]).some(k=>REF_GLOBALES.indexOf(k) >= 0) ? [["*", "*"]] : Array.from(new Set(touches||[])).map(t=>t.split("|")).filter(x=>x[0] && x[1]);
       if (paires.length) await noterInvalidations(paires); } catch(e){ if (opts && opts.journal) opts.journal("invalidations : "+e.message); }
