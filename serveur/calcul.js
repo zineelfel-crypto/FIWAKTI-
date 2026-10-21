@@ -407,9 +407,17 @@ function creer(B, D, opts){
        badgeage (nmv>0) : hp reste nul tant que la sortie n'est pas pointée */
     const entres = emps.filter(e=>!(e.entree && e.entree > a));
     const f = global && entres.length === emps.length ? {sql:"", a:[]} : D.filtreMat(new Set(entres.map(e=>String(e.mat))));
-    const n = await B.get("SELECT SUM(CASE WHEN ht>0 THEN 1 ELSE 0 END) att, SUM(CASE WHEN ht>0 AND (nmv>0 OR hp>0) THEN 1 ELSE 0 END) pres FROM calc_jour WHERE d=?"+f.sql, a, ...f.a);
+    /* correctif 45 : détail de l'effectif du jour, pour que les chiffres de l'accueil se vérifient (effectif = attendus +
+       congés + repos ou férié + sans horaire + journées pas encore calculées) ; un salarié en congé sans badgeage n'est
+       plus compté parmi les attendus absents */
+    const CONGE = "nmv=0 AND data NOT LIKE '%\"abs\":\"\"%'";
+    const n = await B.get("SELECT COUNT(*) lignes, SUM(CASE WHEN ht>0 AND NOT ("+CONGE+") THEN 1 ELSE 0 END) att, SUM(CASE WHEN ht>0 AND (nmv>0 OR hp>0) THEN 1 ELSE 0 END) pres,"+
+      " SUM(CASE WHEN ht>0 AND ("+CONGE+") THEN 1 ELSE 0 END) conge, SUM(CASE WHEN (ht IS NULL OR ht<=0) AND jid IN ('repos','ferie') THEN 1 ELSE 0 END) repos,"+
+      " SUM(CASE WHEN (ht IS NULL OR ht<=0) AND (jid IS NULL OR jid NOT IN ('repos','ferie')) THEN 1 ELSE 0 END) sansHoraire FROM calc_jour WHERE d=?"+f.sql, a, ...f.a);
+    const N = x => Number(x)||0;
     const anomalies = Object.assign({}, r.compte); delete anomalies[""];
-    return {anomalies, presents:Number(n.pres)||0, attendus:Number(n.att)||0, effectif:entres.length, recalcul:partiel()};
+    return {anomalies, presents:N(n.pres), attendus:N(n.att), effectif:entres.length, recalcul:partiel(),
+      detail:{total:emps.length, pasEntres:emps.length - entres.length, conge:N(n.conge), repos:N(n.repos), sansHoraire:N(n.sansHoraire), nonCalcules:Math.max(0, entres.length - N(n.lignes))}};
   }
   /* v47 : pré-audit calculé en SQL (colonnes nmv, jid, reel, hsmin) : plus de lecture ligne à ligne */
   const CACHE_PA = new Map();

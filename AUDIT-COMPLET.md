@@ -2589,3 +2589,21 @@ Vérifié :
   `t4b.js` seul le salarié 10188 diffère (pauses du jeu de démonstration badgées).
 
 Livraison : FIWAKTI-56.33.13-correctif-44.zip (pour la 56.33.13 ; 1 fichier, `app/app.js`).
+
+## Correctif 45 — Accueil : effectif du jour
+
+Signalé par l'utilisateur : accueil d'une installation de 6 001 salariés affichant « 0 / 4 559 Présents ».
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| E1 | Grand effectif : « 0 / 4 559 Présents » — le second nombre est celui des salariés attendus aujourd'hui (journée avec horaire), sans libellé ni rapprochement avec l'effectif : l'écran paraissait faux | moyenne | libellé « Présents / attendus aujourd'hui » ; détail renvoyé par `/calcul/accueil` (`detail` : total, pas encore entrés, congé, repos ou férié, sans horaire, journées non calculées) et affiché sous les compteurs (`homeDetailGrand`) ; la somme retombe sur l'effectif |
+| E2 | Salarié en congé (absence, aucun badgeage) compté parmi les attendus, donc parmi les absents | moyenne | exclu des attendus (même règle que l'état des présences : `nmv=0` et absence enregistrée) |
+| E3 | Salarié sans calendrier à la date : journée « repos » (`dayVars`), jamais attendu, jamais absent, sans aucun signal — un import sans calendrier passait inaperçu | haute | journée « non planifiée » (`jid` vide) : comptée « sans horaire ce jour », message invitant à vérifier le calendrier ; statut « Non planifié » dans le Suivi |
+
+Vérifié (20 000 salariés, SQLite) : 30 salariés privés de calendrier et 40 congés du jour ajoutés → 19 369 attendus,
+15 en congé (les 25 autres avaient badgé), 28 sans horaire, 202 pas encore entrés : la somme retombe sur l'effectif
+(19 412 entrés) pour l'administrateur et pour un périmètre de site ; affichage fr et ar sans erreur ; non-régression
+`t53.js` et `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-45.zip (pour la 56.33.13 ; cumulatif : correctif 44 ; `app/app.js`,
+`serveur/calcul.js`).
