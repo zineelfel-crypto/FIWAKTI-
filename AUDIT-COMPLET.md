@@ -2551,3 +2551,13 @@ Constat à traiter (exactitude des calculs) : avec le jour type par défaut « J
 non badgée retire une pénalité de 120 min (08:02–17:05 → 7 h 03, 57 min de déficit) ; pause non obligatoire : la pause
 n'est pas retirée (9 h 03, 63 min d'heures supplémentaires). Seule une pénalité égale à la durée de la pause (60 min)
 donne 8 h 03. À régler avant toute démonstration ; à revoir dans l'analyse de l'exactitude des calculs.
+
+Mise à jour Windows par tâche planifiée : `livraison/FIWAKTI-56.33.13-mise-a-jour-windows.zip` (archive d'installation +
+`METTRE-A-JOUR.ps1`, source dans `outils/livraison/`). Les installations lancées par la tâche planifiée « FIWAKTI » (comme
+celles qui reçoivent les correctifs PowerShell) ne passent pas par `installer-maj.js` (prévu pour un service ou un
+lanceur). Le script lit la tâche et reconnaît trois modes : lanceur (`versions\actuelle.txt`), tâche lançant
+`versions\<version>\serveur\principal.js`, ou fichier .cmd. Il contrôle la version en service, Node.js, la sauvegarde
+vérifiée de moins de 24 h et l'intégrité des 2 350 fichiers. Il copie la version, bascule le lancement, redémarre et
+attend la nouvelle version puis 90 s de stabilité, avec retour automatique sinon ; `-Retour` revient à la version
+d'avant ; `-Verifier` ne modifie rien. Essayé (PowerShell 7, tâche planifiée simulée, installation 56.33.11 réelle avec
+ses données) : contrôles, mise à jour vers 56.33.13, retour manuel, retour automatique sur une version qui ne démarre pas.
