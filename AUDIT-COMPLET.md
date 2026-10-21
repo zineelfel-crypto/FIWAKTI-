@@ -2660,3 +2660,20 @@ l'utilisateur ; nouveau serveur : « paramétrage complété … arits : HNUIT, 
 (Heures de nuit, Heures théoriques, Heures travaillées) créé.
 
 Livraison : FIWAKTI-56.33.13-correctif-48.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 47 ; 5 fichiers).
+
+## Correctif 49 — États sur une période : journées incomplètes et poste de nuit
+
+Signalé par l'utilisateur : état « Heure de nuit » juste sur une journée, « — » partout sur la période du 01 au 20/10.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| I1 | Cumul inconnu (« — ») dès qu'une journée de la période est incomplète (règle voulue de `runCounters`), sans aucune indication en modèle « Journalier » : `etatBlocs` ne comptait les journées incomplètes qu'en modèle « Cumulé » | moyenne | journées incomplètes comptées et datées pour tous les modèles (`joursIncompletsListe`, `incj`) ; badge « ⚠ n journée(s) incomplète(s) (jj/mm, …) » à l'écran, calcul serveur compris |
+| I2 | `jourIncoherent` jugeait les badgeages de la date seule : toute nuit 22:00 → 06:00 (+1) était « incomplète » (états, registre des journées) | haute | badgeages rattachés à la journée (`mvtsJour`), comme le calcul |
+| I3 | Badgeages d'une nuit sans indication du lendemain dans les états et exports | basse | « 06:00 (+1) » |
+
+Vérifié (serveur réel) : salarié en calendrier de nuit, nuit complète du 19/10 et journées incomplètes les 15, 17 et
+18/10 : export CSV « 22:00 06:00 (+1) », 8 h de nuit le 19/10 ; état du 01 au 20/10 : cumuls « — » avec « ⚠ 3
+journée(s) incomplète(s) (15/10, 17/10, 18/10) » ; la nuit du 19/10 n'est plus comptée incomplète. `t53.js`, `t4b.js`
+(seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-49.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 48 ; 5 fichiers).
