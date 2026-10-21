@@ -2528,3 +2528,26 @@ Vérifié :
 Livraison : FIWAKTI-56.33.12-correctif-43.zip, pour la version de référence 56.33.12 (`-Version 56.33.12` par défaut ;
 cumulatif : correctifs 2 à 42 inclus ; 56 fichiers avec `public/anniversaire.js`). Sur une 56.33.11 avec le correctif
 final : `-Version 56.33.11`.
+
+## Version 56.33.13 — version de référence
+
+La 56.33.13 est la 56.33.12 plus le correctif 43 (Accueil, et calcul des journées sous PostgreSQL sur une base neuve).
+Seul le numéro de version change par ailleurs (`serveur/version.json`, `package.json`, `package-lock.json`, manifeste
+FW-BI). Les correctifs suivants visent `versions\56.33.13` par défaut. Guide d'installation complété : prérequis
+(Node.js, PostgreSQL, NSSM), création de la base PostgreSQL, service Windows, ordre de l'assistant, désinstallation.
+
+Livraison : `livraison/FIWAKTI-56.33.13-installation.zip` (12,4 Mo, 2 347 fichiers avec SHA256SUMS.txt), construite par
+`node outils/construire-paquet.js`.
+
+Vérifié :
+- installation neuve avec le lanceur de référence, **sur PostgreSQL 16**, par l'assistant dans le navigateur (type,
+  contrôles, licence, base avec « Tester », administrateur) : installation terminée, sauvegarde vérifiée, aucune erreur
+  JavaScript ; serveur sur PostgreSQL ; paramétrage initial créé à la première ouverture ;
+- sur cette base neuve : 3 salariés et 5 badgeages enregistrés, journées calculées (retard de 40 min, oubli de sortie
+  détecté) — c'est le cas qui échouait avant le correctif 43 ;
+- mise à jour par `installer-maj.js` d'une installation 56.33.12 : intégrité, bascule, essai confirmé, 56.33.13 en service.
+
+Constat à traiter (exactitude des calculs) : avec le jour type par défaut « Journée normale 8 h », une pause obligatoire
+non badgée retire une pénalité de 120 min (08:02–17:05 → 7 h 03, 57 min de déficit) ; pause non obligatoire : la pause
+n'est pas retirée (9 h 03, 63 min d'heures supplémentaires). Seule une pénalité égale à la durée de la pause (60 min)
+donne 8 h 03. À régler avant toute démonstration ; à revoir dans l'analyse de l'exactitude des calculs.

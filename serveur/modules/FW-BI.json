@@ -3,7 +3,7 @@
   "etend": true,
   "nom": "Indicateurs, états et exports",
   "categorie": "metier",
-  "version": "56.33.12",
+  "version": "56.33.13",
   "deps": [
     "FW-Core",
     "FW-RH"

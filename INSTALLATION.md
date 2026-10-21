@@ -1,10 +1,11 @@
-# FIWAKTI 56.33.12 — guide d'installation
+# FIWAKTI 56.33.13 — guide d'installation
 
-> **Contenu de la 56.33.12** : la 56.33.11 avec le correctif final et les correctifs 2 à 42 (détail dans
-> `AUDIT-COMPLET.md`). Un serveur en 56.33.11 sur lequel ces correctifs sont installés a déjà le même code ; la
-> 56.33.12 en fait la version de référence pour toute installation neuve et pour les mises à jour suivantes.
+> **Contenu de la 56.33.13** : la 56.33.11 avec le correctif final et les correctifs 2 à 43 (détail dans
+> `AUDIT-COMPLET.md`), c'est-à-dire la 56.33.12 plus le correctif 43 (Accueil, et calcul des journées sous
+> PostgreSQL sur une base neuve). Un serveur sur lequel ces correctifs sont installés a déjà le même code ; la
+> 56.33.13 en fait la version de référence pour toute installation neuve et pour les mises à jour suivantes.
 
-Ce guide couvre la **mise à jour d'une installation FIWAKTI 56.33.10 ou 56.33.11 existante** (avec ou sans
+Ce guide couvre la **mise à jour d'une installation FIWAKTI 56.33.10, 56.33.11 ou 56.33.12 existante** (avec ou sans
 correctifs), puis, en annexe,
 l'installation sur un serveur neuf. Comptez **30 minutes**, dont environ **2 minutes d'interruption** pour les
 utilisateurs. Les badgeages des pointeuses ne sont pas perdus pendant l'interruption :
@@ -20,9 +21,9 @@ utilisateurs. Les badgeages des pointeuses ne sont pas perdus pendant l'interrup
 
 | Fichier | Rôle |
 |---|---|
-| `FIWAKTI-maj-56.33.12.fwk` | Mise à jour **depuis l'application** (méthode A). Doit être **signé par l'éditeur** (voir § 9). |
-| `FIWAKTI-56.33.12-installation.zip` | Dossier complet pour la **mise à jour par script** (méthode B) ou une installation neuve. |
-| ├ `versions/56.33.12/` | La nouvelle version (app, public, serveur et ses bibliothèques). |
+| `FIWAKTI-maj-56.33.13.fwk` | Mise à jour **depuis l'application** (méthode A). Doit être **signé par l'éditeur** (voir § 9). |
+| `FIWAKTI-56.33.13-installation.zip` | Dossier complet pour la **mise à jour par script** (méthode B) ou une installation neuve. |
+| ├ `versions/56.33.13/` | La nouvelle version (app, public, serveur et ses bibliothèques). |
 | ├ `installer-maj.js` | Script de mise à jour avec contrôles, bascule, vérification et retour arrière automatique. |
 | ├ `lanceur.js` | Lanceur de référence, seulement pour une installation neuve sans lanceur de l'éditeur. |
 | ├ `SHA256SUMS.txt` | Empreintes de tous les fichiers (contrôlées par le script). |
@@ -38,7 +39,7 @@ mais demande un paquet signé. La méthode B se fait sur le serveur, sans signat
 Cochez chaque point :
 
 - [ ] **Fenêtre de maintenance** prévenue (2 minutes d'interruption, utilisateurs déconnectés quelques secondes).
-- [ ] **Version installée = 56.33.10 ou 56.33.11** (avec ou sans correctifs). Elle est indiquée dans Système › État
+- [ ] **Version installée = 56.33.10, 56.33.11 ou 56.33.12** (avec ou sans correctifs). Elle est indiquée dans Système › État
       du système, et dans `<racine>/versions/actuelle.txt`. La mise à jour est prévue à partir de la 56.33.10.
 - [ ] **Node.js 22.13 ou plus** sur le serveur (`node -v`). Il est indiqué aussi dans Système › État du système.
 - [ ] **PostgreSQL 14 ou plus** si vous utilisez PostgreSQL (16 conseillé).
@@ -59,14 +60,14 @@ Cochez chaque point :
 ## 3. Méthode A — mise à jour depuis l'application (recommandée)
 
 1. Connectez-vous avec un compte **administrateur**.
-2. Menu **Système** › section **Mises à jour** › choisissez le fichier `FIWAKTI-maj-56.33.12.fwk`.
+2. Menu **Système** › section **Mises à jour** › choisissez le fichier `FIWAKTI-maj-56.33.13.fwk`.
 3. Confirmez « Installer la mise à jour ? ». FIWAKTI enchaîne alors seul les étapes suivantes :
    1. il vérifie la signature de l'éditeur et l'empreinte de chaque fichier ;
    2. il refuse un paquet plus ancien ou incomplet ;
    3. il fait une **sauvegarde vérifiée** et annule tout si elle échoue ;
-   4. il installe la version dans `versions/56.33.12` sans toucher à la version précédente ;
+   4. il installe la version dans `versions/56.33.13` sans toucher à la version précédente ;
    5. il redémarre sur la nouvelle version, **à l'essai**.
-4. Patientez **10 à 30 secondes**, puis rechargez la page : la version affichée doit être **56.33.12**.
+4. Patientez **10 à 30 secondes**, puis rechargez la page : la version affichée doit être **56.33.13**.
 5. Après 90 secondes de bon fonctionnement, la nouvelle version confirme son essai. Si elle ne démarre pas, le lanceur
    **revient tout seul à la version précédente** : rien à faire, les données sont intactes.
 6. Passez aux contrôles du § 5.
@@ -79,18 +80,18 @@ ou demandez le paquet signé (§ 9).
 ## 4. Méthode B — mise à jour par script sur le serveur
 
 ### 4.1 Copier et décompresser
-Copiez `FIWAKTI-56.33.12-installation.zip` sur le serveur, par exemple dans `C:\Temp` ou `/tmp`, et décompressez-le.
-Ne le mettez **pas** dans la racine d'installation. On obtient un dossier `FIWAKTI-56.33.12`.
+Copiez `FIWAKTI-56.33.13-installation.zip` sur le serveur, par exemple dans `C:\Temp` ou `/tmp`, et décompressez-le.
+Ne le mettez **pas** dans la racine d'installation. On obtient un dossier `FIWAKTI-56.33.13`.
 
 ### 4.2 Contrôle à blanc (rien n'est modifié)
 Windows (invite de commandes **en administrateur**) :
 ```
-cd C:\Temp\FIWAKTI-56.33.12
+cd C:\Temp\FIWAKTI-56.33.13
 node installer-maj.js --racine "C:\FIWAKTI" --verifier
 ```
 Linux :
 ```
-cd /tmp/FIWAKTI-56.33.12
+cd /tmp/FIWAKTI-56.33.13
 sudo node installer-maj.js --racine /opt/fiwakti --verifier
 ```
 Le script contrôle :
@@ -124,10 +125,10 @@ Déroulement observé lors de l'essai :
 intégrité du paquet : 2348 fichiers vérifiés
 sauvegarde vérifiée : fiwakti-20261014-213955.db.chiffre (il y a 0.0 h)
 serveur en service sur http://127.0.0.1:8092 : version 56.33.10, base sqlite
-version 56.33.12 copiée dans …/versions/56.33.12
-bascule : actuelle = 56.33.12 (à l'essai), précédente = 56.33.10
-la version 56.33.12 répond (base sqlite) ; confirmation de l'essai (90 s)…
-OK : FIWAKTI 56.33.12 est en service. Retour possible : node installer-maj.js --racine "…" --retour
+version 56.33.13 copiée dans …/versions/56.33.13
+bascule : actuelle = 56.33.13 (à l'essai), précédente = 56.33.10
+la version 56.33.13 répond (base sqlite) ; confirmation de l'essai (90 s)…
+OK : FIWAKTI 56.33.13 est en service. Retour possible : node installer-maj.js --racine "…" --retour
 ```
 Si la nouvelle version ne répond pas dans les 5 minutes, le script **revient seul à la version précédente** et le dit.
 Journal du script : `<racine>/donnees/journaux/installer-maj.log`.
@@ -136,7 +137,7 @@ Journal du script : `<racine>/donnees/journaux/installer-maj.log`.
 
 ## 5. Contrôles après la mise à jour (15 minutes)
 
-- [ ] Système › État du système : version **56.33.12**, aucun point « bloquant ».
+- [ ] Système › État du système : version **56.33.13**, aucun point « bloquant ».
 - [ ] Connexion d'un administrateur, d'un responsable de site et d'un salarié (portail).
 - [ ] Ouvrir **Salariés**, **Pointage**, **Validation des journées**, **États**, **Pilotage** : affichage normal.
 - [ ] **Pointeuses** : pour chaque appareil, **Diagnostic** puis **Collecter**. Le message de collecte indique la copie
@@ -176,7 +177,7 @@ Journal du script : `<racine>/donnees/journaux/installer-maj.log`.
   avant.
 - **Par script** : `node installer-maj.js --racine <racine> --retour --service <nom>`.
 
-La version précédente (56.33.10 ou 56.33.11) fonctionne sur la base mise à niveau par la 56.33.12 : les ajouts de structure sont compatibles. Le retour
+La version précédente (56.33.10, 56.33.11 ou 56.33.12) fonctionne sur la base mise à niveau par la 56.33.13 : les ajouts de structure sont compatibles. Le retour
 a été essayé, avec connexion et données intactes. Pour revenir aussi **aux données** d'avant la mise à jour, restaurez
 la sauvegarde faite au § 2 (Système › Sauvegardes › Restaurer).
 
@@ -206,12 +207,29 @@ Journaux : `<racine>/donnees/journaux/`
 
 ## Annexe A — installation neuve sur un autre serveur
 
-1. Installez Node.js 22 LTS, puis PostgreSQL 16 (conseillé au-delà de 20 000 salariés) avec une base et un compte
-   dédiés.
-2. Créez la racine, par exemple `/opt/fiwakti` ou `C:\FIWAKTI`.
-3. Copiez-y `versions/56.33.12/` et `lanceur.js` depuis l'archive, puis créez le fichier `versions/actuelle.txt`
-   contenant `56.33.12`.
+**Prérequis, à installer avant FIWAKTI** (l'archive ne les installe pas et s'arrête s'ils manquent) :
+- **Node.js 22 LTS** (22.13 ou plus), installateur officiel ; `node -v` doit afficher v22 ;
+- **PostgreSQL 16** (14 minimum), conseillé au-delà de 500 salariés ; SQLite intégré sinon (rien à installer) ;
+- Windows : **NSSM** (nssm.cc) pour le service.
+
+Base PostgreSQL et compte dédiés (psql ou pgAdmin, connecté en `postgres`) :
+```sql
+CREATE ROLE fiwakti LOGIN PASSWORD 'UnMotDePasseSolide!';
+CREATE DATABASE fiwakti OWNER fiwakti ENCODING 'UTF8';
+```
+
+1. Décompressez l'archive hors de la racine (par exemple `C:\Temp`) : dossier `FIWAKTI-56.33.13`.
+2. Créez la racine, par exemple `C:\FIWAKTI` ou `/opt/fiwakti`, et son dossier `versions`.
+3. Copiez-y `versions/56.33.13/` et `lanceur.js` depuis l'archive, puis créez le fichier `versions/actuelle.txt`
+   contenant `56.33.13`.
 4. Lancez FIWAKTI comme **service**, avec le lanceur de l'éditeur s'il existe, sinon avec `lanceur.js` :
+   - **Windows** (invite de commandes en administrateur) :
+     ```
+     nssm install FIWAKTI "C:\Program Files\nodejs\node.exe" "C:\FIWAKTI\lanceur.js --racine C:\FIWAKTI"
+     nssm set FIWAKTI AppDirectory C:\FIWAKTI
+     nssm start FIWAKTI
+     ```
+     Donnez au dossier `C:\FIWAKTI\donnees` des droits réservés au compte du service et aux administrateurs.
    - **Linux (systemd)** : fichier `/etc/systemd/system/fiwakti.service` :
      ```
      [Unit]
@@ -227,23 +245,24 @@ Journaux : `<racine>/donnees/journaux/`
      WantedBy=multi-user.target
      ```
      puis `systemctl daemon-reload && systemctl enable --now fiwakti`.
-   - **Windows** : service créé avec NSSM, par exemple
-     `nssm install FIWAKTI "C:\Program Files\nodejs\node.exe" "C:\FIWAKTI\lanceur.js --racine C:\FIWAKTI"`.
-     Donnez au dossier `C:\FIWAKTI\donnees` des droits réservés au compte du service et aux administrateurs.
 5. Placez le certificat HTTPS dans `donnees/certificats` : sans HTTPS, FIWAKTI n'écoute que sur le serveur lui-même.
-6. Ouvrez `https://<serveur>:8443/installation.html` (ou `http://localhost:8080/…` sans certificat) et suivez
-   l'assistant : base, licence, administrateur.
-7. Puis § 5 et § 6.
+6. Ouvrez `https://<serveur>:8443/installation.html` (ou `http://localhost:8080/installation.html` sans certificat)
+   et suivez l'assistant :
+   - **base** : PostgreSQL (hôte, port 5432, base `fiwakti`, compte `fiwakti`), bouton « Tester » ;
+   - **licence** : relevez le **code d'installation** affiché, transmettez-le à l'éditeur, collez la licence reçue ;
+   - **administrateur** : identifiant et mot de passe.
+7. Système › Modules : activez les modules couverts par la licence. Puis § 5 et § 6.
 
-Le lanceur de référence a été essayé sous Linux : démarrage, relance après mise à jour, retour automatique. Le service
-Windows avec NSSM est à valider à l'installation.
+Désinstaller : sauvegarde et trousseau de clés si besoin, `nssm stop FIWAKTI`, `nssm remove FIWAKTI confirm`
+(Linux : `systemctl disable --now fiwakti`), suppression de la racine, puis `DROP DATABASE fiwakti;` si la base
+PostgreSQL n'est plus utile. La licence est liée à la machine : une nouvelle installation demande une nouvelle licence.
 
 ## Annexe B — pour l'éditeur : construire et signer le paquet
 
 ```
 cd <dépôt FIWAKTI>
 node outils/construire-paquet.js --cle <clé-privée-éditeur.pem>          # construit et signe
-node outils/construire-paquet.js --signer dist/FIWAKTI-maj-56.33.12.fwk.a-signer --cle <clé-privée-éditeur.pem>
+node outils/construire-paquet.js --signer dist/FIWAKTI-maj-56.33.13.fwk.a-signer --cle <clé-privée-éditeur.pem>
 ```
 La clé privée n'est jamais copiée. Une clé qui ne correspond pas à `serveur/cle-publique.json` est refusée.
 

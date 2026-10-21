@@ -1,6 +1,6 @@
 {
   "name": "fiwakti-serveur",
-  "version": "56.33.12",
+  "version": "56.33.13",
   "description": "FIWAKTI — serveur (socle FW-Core, FW-Licence, modules FW-)",
   "private": true,
   "license": "UNLICENSED",
