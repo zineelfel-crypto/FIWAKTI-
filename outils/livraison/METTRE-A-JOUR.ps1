@@ -108,7 +108,10 @@ $Actions = @($T.Actions)
 $Txt = ($Actions | ForEach-Object { [string]$_.Execute + " " + [string]$_.Arguments + " " + [string]$_.WorkingDirectory }) -join " | "
 Ecrire ("Tâche « " + $Tache + " » : " + $Txt)
 $Mode = ""; $VerLancee = ""; $FichierCmd = ""
-if ($Txt -match "lanceur") { $Mode = "lanceur" }
+$ActTxt = Join-Path $VD "actuelle.txt"
+# lanceur : celui de référence (lanceur.js) ou celui de l'éditeur (ex. demarrer.js à la racine), qui démarre la version
+# écrite dans versions\actuelle.txt (même mécanisme que la mise à jour depuis l'application)
+if ($Txt -match "lanceur" -or ((Test-Path $ActTxt) -and $Txt -match "\.js" -and $Txt -notmatch "principal\.js")) { $Mode = "lanceur" }
 elseif ($Txt -match "versions[\\/](\d+\.\d+\.\d+)") { $Mode = "tache"; $VerLancee = $Matches[1] }
 else {
   foreach ($a in $Actions) {
@@ -123,6 +126,7 @@ else {
 if (-not $Mode) { Arret ("lancement de FIWAKTI non reconnu dans la tâche « $Tache » (ni lanceur, ni dossier versions\<version>). Envoyez cette ligne au support : " + $Txt) }
 $Actuelle = LireTexte (Join-Path $VD "actuelle.txt")
 if ($Mode -eq "lanceur" -and -not $Actuelle) { Arret "la tâche utilise un lanceur mais versions\actuelle.txt est absent." }
+if ($Mode -eq "lanceur") { Ecrire ("versions\actuelle.txt : " + $Actuelle) }
 if ($Mode -ne "lanceur") { $Ancienne = $VerLancee } else { $Ancienne = $Actuelle }
 Ecrire ("Mode de lancement : " + $(if ($Mode -eq "lanceur") { "lanceur (versions\actuelle.txt)" } elseif ($Mode -eq "tache") { "tâche planifiée vers versions\" + $VerLancee } else { "fichier " + $FichierCmd + " vers versions\" + $VerLancee }))
 

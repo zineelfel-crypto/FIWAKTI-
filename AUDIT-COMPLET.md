@@ -2555,9 +2555,9 @@ donne 8 h 03. À régler avant toute démonstration ; à revoir dans l'analyse d
 Mise à jour Windows par tâche planifiée : `livraison/FIWAKTI-56.33.13-mise-a-jour-windows.zip` (archive d'installation +
 `METTRE-A-JOUR.ps1`, source dans `outils/livraison/`). Les installations lancées par la tâche planifiée « FIWAKTI » (comme
 celles qui reçoivent les correctifs PowerShell) ne passent pas par `installer-maj.js` (prévu pour un service ou un
-lanceur). Le script lit la tâche et reconnaît trois modes : lanceur (`versions\actuelle.txt`), tâche lançant
+lanceur). Le script lit la tâche et reconnaît trois modes : lanceur (`lanceur.js`, ou lanceur de l'éditeur tel que `demarrer.js` à la racine, qui démarre la version de `versions\actuelle.txt`), tâche lançant
 `versions\<version>\serveur\principal.js`, ou fichier .cmd. Il contrôle la version en service, Node.js, la sauvegarde
 vérifiée de moins de 24 h et l'intégrité des 2 350 fichiers. Il copie la version, bascule le lancement, redémarre et
 attend la nouvelle version puis 90 s de stabilité, avec retour automatique sinon ; `-Retour` revient à la version
 d'avant ; `-Verifier` ne modifie rien. Essayé (PowerShell 7, tâche planifiée simulée, installation 56.33.11 réelle avec
-ses données) : contrôles, mise à jour vers 56.33.13, retour manuel, retour automatique sur une version qui ne démarre pas.
+ses données) : contrôles, mise à jour vers 56.33.13, retour manuel, retour automatique sur une version qui ne démarre pas ; tâche lançant `demarrer.js` (cas d'un client) : mise à jour et retour.
