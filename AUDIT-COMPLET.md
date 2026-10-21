@@ -2627,3 +2627,21 @@ diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-46.zip (pour la 56.33.13 ; cumulatif : correctifs 44 et 45 ; `app/app.js`,
 `public/ext-pointage-jour.js`, `serveur/calcul.js`).
+
+## Correctif 47 — Badgeages d'un poste de nuit dans les états
+
+Signalé par l'utilisateur : nuit de 10001 (22:00 → 06:00 le lendemain) correctement comptée (8:00) mais la colonne
+« Badgeages » n'affichait que 22:00.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| R1 | Moteur serveur (`moteur.js`, `calculer`) : badgeages enregistrés pour une journée = badgeages de la date (`mvtsDe`), alors que le calcul utilise les badgeages rattachés (`mvtsJour`) : sortie du lendemain absente de la nuit | moyenne | liste des badgeages et des retenus = badgeages rattachés (nuit : J après 12:00 et lendemain avant 12:00 ; lendemain d'une nuit : matin rendu à la nuit), badgeages écartés (doublons) dans la même fenêtre ; 10e valeur = 1 pour le lendemain |
+| R2 | Conséquence : `nmv` de la nuit = 1 (impair) → nuit « incomplète » dans l'état des présences ; 06:00 compté dans le nombre de badgeages du lendemain | haute | `nmv` = badgeages retenus rattachés |
+| R3 | Affichage sans indication du lendemain | basse | « 06:00 (+1) » dans les journées (grand effectif et effectif courant) et dans la liste de régularisation |
+
+Vérifié (serveur réel) : salarié en calendrier de nuit, 22:00 le 19/10 et 06:00 le 20/10 → journée du 19/10 :
+« 22:00E, 06:00S (+1) », 8 h, présent ; journée du 20/10 : aucun badgeage (sortie non comptée deux fois). `t53.js`,
+`t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-47.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 46 ; `app/app.js`,
+`public/ext-pointage-jour.js`, `serveur/calcul.js`, `serveur/moteur.js`).

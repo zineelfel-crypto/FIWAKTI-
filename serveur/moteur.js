@@ -30,7 +30,7 @@ function chargerMoteur(fichierApp){
 ;globalThis.__moteur = {
   get db(){ return db; }, set db(v){ db = v; },
   reinit(){ ptgTouch(); absTouch(); SUIVI_CACHE = []; if (typeof jvVider === "function") jvVider(); if (typeof PERIM_TICK !== "undefined") PERIM_TICK++; },
-  jourVars, convFor, mvtsDe, mvtsCalc, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
+  jourVars, convFor, mvtsDe, mvtsCalc, mvtsJour, jourEstNuit, seqIncoherente, suiviAnomalies, absLibJour, todayKey, dAjout, exportEtatCsv, NUL, jourTypeDe, runCounters, regleEff,
   langue(l){ try { if (typeof T !== "undefined" && T[l]){ t = T[l]; if (typeof ui !== "undefined") ui.lang = l; } } catch(e){} },
   counterOrder, ordreRestreint, periodBounds, etatBlocs:typeof etatBlocs === "function" ? etatBlocs : null, etatBornesListe:typeof etatBornesListe === "function" ? etatBornesListe : null
 };`;
@@ -153,10 +153,22 @@ async function calculer(mats, du, au, horodatage, source){
     for (const k of jours){
       if ((e.entree && k < e.entree) || (e.sortie && k > e.sortie)) continue;
       let v; try { v = E.M.jourVars(e, k, conv); } catch(x){ continue; }
-      const list = E.M.mvtsDe(e.mat, k);
+      let list = E.M.mvtsDe(e.mat, k);
       /* règle « Badgeages répétés » (DOUBLON_MIN) : badgeages retenus pour le calcul ; les autres restent enregistrés et
          affichés comme écartés (8e valeur = 1 ; 9e = sens retenu pour le calcul), le nombre de badgeages (statut « incomplet ») porte sur les retenus */
       let retenus = list; try { retenus = E.M.mvtsCalc(e, k); } catch(x){}
+      /* correctif 47 : badgeages RATTACHÉS à la journée, comme le calcul (mvtsJour) : poste de nuit = badgeages du jour après
+         12:00 et du lendemain avant 12:00 ; lendemain d'une nuit = badgeages du matin rendus à la nuit. Avant : badgeages
+         de la date seule — sortie 06:00 absente de la nuit (affichage, nombre de badgeages, statut « incomplet ») et
+         comptée sur le lendemain. 10e valeur = 1 pour un badgeage du lendemain. */
+      const lend = E.M.dAjout(k, 1);
+      try { const jr0 = v.inf.jour || null, p3 = k.split("-").map(Number), nuit = !!(jr0 && E.M.jourEstNuit(jr0)), hm = m=>String(m.ts).slice(11, 16);
+        const attrib = E.M.mvtsJour(e, p3[0], p3[1]-1, p3[2], jr0).map(x=>x.mv), ids = new Set(attrib.map(m=>String(m.id)));
+        const tousRet = new Set(retenus.concat(nuit ? E.M.mvtsCalc(e, lend) : []).map(m=>String(m.id)));
+        const matinRendu = !nuit && retenus.some(m=>!ids.has(String(m.id)));
+        list = list.concat(nuit ? E.M.mvtsDe(e.mat, lend) : []).filter(m=>{ const id = String(m.id); if (ids.has(id)) return true; if (tousRet.has(id)) return false;
+          const dm = String(m.ts).slice(0, 10); return nuit ? (dm === k ? hm(m) >= "12:00" : hm(m) < "12:00") : !(matinRendu && hm(m) < "12:00"); });
+        retenus = attrib; } catch(x){}
       const sensRetenu = new Map(retenus.map(m=>[String(m.id), m.sens]));
       const nv = x => (x === E.M.NUL || x === undefined || x === null || isNaN(x)) ? null : x;
       const ht = nv(v.d.HT), hp = nv(v.d.HP), ret = nv(v.d.RET);
@@ -165,7 +177,7 @@ async function calculer(mats, du, au, horodatage, source){
       lignes.push([String(e.mat), k, e.deptId||"", e.siteId||"", ht, hp, ret, (hp != null && ht != null) ? Math.round((hp-ht)*60) : null,
         a.length, a.map(x=>x.type).join(","), JSON.stringify(a),
         JSON.stringify({jid:v.inf.jid||"", jour:jr ? jr.nom : "", coul:jr ? jr.couleur : "", reel:!!v.inf.reel,
-          mv:list.map(m=>[m.id, String(m.ts).slice(11,16), m.sens, m.dev||"", m.src||"", m.__v||0, String(m.ts).slice(16,19), sensRetenu.has(String(m.id)) ? 0 : 1, sensRetenu.get(String(m.id)) || ""]), abs:(()=>{ try { return E.M.absLibJour(e.mat, k); } catch(x){ return ""; } })()}),
+          mv:list.map(m=>[m.id, String(m.ts).slice(11,16), m.sens, m.dev||"", m.src||"", m.__v||0, String(m.ts).slice(16,19), sensRetenu.has(String(m.id)) ? 0 : 1, sensRetenu.get(String(m.id)) || "", String(m.ts).slice(0, 10) === lend ? 1 : 0]), abs:(()=>{ try { return E.M.absLibJour(e.mat, k); } catch(x){ return ""; } })()}),
         horodatage, retenus.length, v.inf.jid||"", v.inf.reel ? 1 : 0, a.filter(x=>x.type === "hs").reduce((s, x)=>s + (x.min||0), 0)]);
     }
   }
