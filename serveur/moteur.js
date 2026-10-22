@@ -223,7 +223,9 @@ async function etat(def, mats, du, au, idTache, source, format, lang){
     await contexte(lot, du, au, source, codes);
     E.M.db.emps = E.M.db.emps.filter(e=>dans.has(String(e.mat)));
     E.M.reinit();
-    if (format === "blocs" || format === "blocs-leger"){ blocs.push(...E.M.etatBlocs(JSON.parse(JSON.stringify(def)), {}, format === "blocs-leger" ? {plein:0} : undefined)); continue; }
+    if (format === "blocs" || format === "blocs-leger"){ /* correctif 51 : aperçu à l'écran (blocs-leger) d'un état journalier limité à quelques salariés (filtre sur un salarié,
+       un petit service) : détail des journées (horaire, badgeages, valeurs) transmis ; au-delà de 50 salariés, totaux seuls */
+      blocs.push(...E.M.etatBlocs(JSON.parse(JSON.stringify(def)), {}, format === "blocs-leger" ? {plein:mats.length <= 50 ? Infinity : 0} : undefined)); continue; }
     let contenu = "";
     E.ctx.__capture = (nom, c)=>{ contenu = c; };
     E.M.exportEtatCsv(JSON.parse(JSON.stringify(def)));

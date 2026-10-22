@@ -2693,3 +2693,17 @@ Vérifié (serveur réel, données du banc) : état « Heures supplémentaires p
 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-50.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 49 ; 5 fichiers).
+
+## Correctif 51 — Détail journalier des états à l'écran (grand effectif)
+
+Signalé par l'utilisateur : salarié 10095, heures travaillées visibles dans l'état mais pas ses badgeages (journées de
+repos travaillées, 07:58 → 15:45).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| D1 | Grand effectif : aperçu serveur des états (`blocs-leger`) toujours sans détail des journées (`plein:0`), même filtré sur un salarié : modèle « Journalier » réduit aux totaux, badgeages et horaire invisibles à l'écran | moyenne | détail transmis quand l'aperçu porte sur 50 salariés au plus ; mention « utilisez Excel… » seulement quand le détail n'est pas transmis |
+
+Vérifié (20 000 salariés) : aperçu journalier filtré sur un salarié → 6 journées avec horaire et badgeages (dont un repos
+travaillé 07:55 12:00 13:00 17:00) ; aperçu de tout l'effectif (19 412 salariés) → totaux seuls. `t53.js` sans erreur.
+
+Livraison : FIWAKTI-56.33.13-correctif-51.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 50 ; 5 fichiers).

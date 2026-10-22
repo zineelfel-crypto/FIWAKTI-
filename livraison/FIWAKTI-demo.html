@@ -5309,7 +5309,7 @@ function etatApercuCle(e,opts){return JSON.stringify([e.id,e.champs,e.periode,!!
 function etatApercuServeur(e,opts){const cle=etatApercuCle(e,opts),A=ETAT_APERCU,bouton=lib=>'<button type="button" class="fw-btn sm pri" data-act="et-apercu-srv">'+esc(lib)+"</button>";
 const carte=h=>'<div class="fw-card" style="margin-top:16px"><div style="padding:12px 14px"><strong style="font-size:14px">'+esc(e.nom||"")+"</strong> "+'<span class="fw-muted fw-sm">— '+esc(t.periodOf)+" : "+esc(etatBornesTxt(e))+"</span>"+'<div class="fw-hint" style="margin-top:8px">'+h+"</div></div></div>";
 if(!e.champs||!e.champs.length)return carte(esc(t.noField));
-if(A&&A.cle===cle&&A.etat==="pret"){const info={entete:'<div class="fw-hint" style="margin-top:6px">'+esc(t.etApSrvCalcule.replace("{d}",A.quand))+" "+bouton(t.etApSrvRecalc)+"</div>",pied:e.modele==="jour"?'<div class="fw-hint" style="padding:0 14px 10px">'+esc(t.etApSrvDetail)+"</div>":""};return etatRenduBlocs(e,opts,A.blocs,info)}
+if(A&&A.cle===cle&&A.etat==="pret"){const info={entete:'<div class="fw-hint" style="margin-top:6px">'+esc(t.etApSrvCalcule.replace("{d}",A.quand))+" "+bouton(t.etApSrvRecalc)+"</div>",pied:e.modele==="jour"&&!(A.blocs||[]).some(b=>(b.per||[]).some(p=>p.jours))?'<div class="fw-hint" style="padding:0 14px 10px">'+esc(t.etApSrvDetail)+"</div>":""};return etatRenduBlocs(e,opts,A.blocs,info)}
 if(A&&A.cle===cle&&A.etat==="calcul")return carte(esc(t.etApSrvEnCours.replace("{p}",A.p||0)));
 return carte((A&&A.cle===cle&&A.etat==="erreur"?'<span class="fw-tag warn">'+esc(A.err||t.svcErreur)+"</span> ":"")+esc(t.etApSrvTxt)+" "+bouton(t.etApSrvLancer))}
 async function etatSrvLancer(et,opts,format){const mm=etatBornesMinMax(et);
