@@ -298,6 +298,24 @@ async function ouvrirBase(){
       await meta("migration_hpsem_ferie", "1");
     }
   } catch(e){ journal("migration HPSEM : "+e.message); }
+  /* correctif 55 : validation des heures supplémentaires — HPSEM et HREPOS livrés passent sur les heures RETENUES
+     (PRESENCE_RETENUE : heures au-delà de l'horaire comptées seulement si validées, quand la règle « Autorisation des
+     heures supplémentaires » le demande ; identique à PRESENCE en validation automatique). Une fois, compteurs tels que
+     livrés ou corrigés par les correctifs 52 et 53 seulement. */
+  try {
+    if (!await meta("migration_hs_validation")){
+      const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP);
+      if (r){ const ref = JSON.parse(r.valeur), l = Array.isArray(ref.arits) ? ref.arits : []; let n = 0;
+        const hp = l.find(x=>x && x.code === "HPSEM" && ["PRESENCE", "SI(REPOS = 1; 0; PRESENCE)", "SI(REPOS = 1; 0; SI(FERIE = 1; 0; PRESENCE))"].indexOf(String(x.f || "").trim()) >= 0);
+        if (hp){ hp.f = "SI(REPOS = 1; 0; SI(FERIE = 1; 0; PRESENCE_RETENUE))"; n++; }
+        const hr = l.find(x=>x && x.code === "HREPOS" && String(x.f || "").trim() === "SI(REPOS = 1; PRESENCE; 0)");
+        if (hr){ hr.f = "SI(REPOS = 1; PRESENCE_RETENUE; 0)"; n++; }
+        if (n){ ref.__versions = ref.__versions || {}; ref.__versions.arits = Number(ref.__versions.arits || 0) + 1;
+          await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), CLE_APP);
+          journal("compteurs HPSEM / HREPOS : heures retenues selon la validation des heures supplémentaires"); } }
+      await meta("migration_hs_validation", "1");
+    }
+  } catch(e){ journal("migration validation des heures supplémentaires : "+e.message); }
   /* correctif 48 : éléments standard du paramétrage ajoutés par l'application (compteurs des heures de nuit, dimanches,
      jours fériés, tranches d'heures supplémentaires… ; types d'absence) — ils n'étaient ajoutés que dans le navigateur,
      jamais enregistrés sur le serveur (sauf migration de schéma) : un état qui les utilisait était refusé (« compteur

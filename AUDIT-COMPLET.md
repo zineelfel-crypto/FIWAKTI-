@@ -2752,3 +2752,21 @@ redémarrage → non recréé ; alerte « Fêtes religieuses de 2026 non saisies
 disparue après saisie de l'Aïd el-Idha ; textes fr / en / ar. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-54.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 53 ; 5 fichiers).
+
+## Correctif 55 — Validation des heures supplémentaires
+
+Demande de l'utilisateur : selon le client, heures supplémentaires validées automatiquement ou par les RH ; sans
+validation, une journée de 10 h ne compte que pour son horaire (8 h) dans le décompte hebdomadaire 25 % / 50 %.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| V1 | Règle versionnée « Autorisation des heures supplémentaires » (`HS_AUTORISATION` : constatées / préautorisées / à régulariser) sans aucun effet dans le moteur | haute | `compteursRegles` : en préautorisées ou à régulariser, heures au-delà de l'horaire retenues seulement si la journée est validée (`anoDec` « hs_valide ») ; variables `PRESENCE_RETENUE` et `HS_VALIDEE` ; `HS_REGLE`, `DIMANCHE_TRAV`, `FERIE_TRAV` plafonnés de même |
+| V2 | Décisions « valider / refuser les heures supplémentaires » du Suivi enregistrées sans effet sur les compteurs (statistiques seulement) | haute | prises en compte via V1 ; HPSEM = `SI(REPOS = 1; 0; SI(FERIE = 1; 0; PRESENCE_RETENUE))`, HREPOS = `SI(REPOS = 1; PRESENCE_RETENUE; 0)` (modèle, `normalize`, migration serveur unique `migration_hs_validation`) |
+| V3 | Journée fériée travaillée jamais proposée à la validation (anomalie « heures sup. » exclue des fériés) | moyenne | proposée quand la validation est demandée (`hsAValider`) |
+
+Vérifié (serveur réel, semaine de 11 h/jour avec férié et dimanche de repos travaillés) : automatique → 48 h, HS 25 %
+8 h, repos 6 h, férié 11 h (inchangé) ; à régulariser sans validation → 36 h, 0, 0, 0, journées proposées à la
+validation y compris le férié et le dimanche ; lundi et dimanche validés → 39 h, repos 6 h. Grand effectif (20 000) :
+validation depuis le Suivi enregistrée sur le serveur. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-55.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 54 ; 5 fichiers).
