@@ -288,13 +288,14 @@ async function ouvrirBase(){
      jour de repos entraient dans les heures supplémentaires à 25 % et 50 %, alors qu'elles sont majorées à part (100 %,
      compteur HREPOS). Corrigé une seule fois, et seulement si le compteur est resté tel que livré. */
   try {
-    if (!await meta("migration_hpsem_repos")){
+    /* correctif 53 : jours fériés travaillés exclus de la même façon (majorés à part, compteur HFERIE) */
+    if (!await meta("migration_hpsem_ferie")){
       const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP);
-      if (r){ const ref = JSON.parse(r.valeur), a = (Array.isArray(ref.arits) ? ref.arits : []).find(x=>x && x.code === "HPSEM" && String(x.f || "").trim() === "PRESENCE");
-        if (a){ a.f = "SI(REPOS = 1; 0; PRESENCE)"; ref.__versions = ref.__versions || {}; ref.__versions.arits = Number(ref.__versions.arits || 0) + 1;
+      if (r){ const ref = JSON.parse(r.valeur), a = (Array.isArray(ref.arits) ? ref.arits : []).find(x=>x && x.code === "HPSEM" && ["PRESENCE", "SI(REPOS = 1; 0; PRESENCE)"].indexOf(String(x.f || "").trim()) >= 0);
+        if (a){ a.f = "SI(REPOS = 1; 0; SI(FERIE = 1; 0; PRESENCE))"; ref.__versions = ref.__versions || {}; ref.__versions.arits = Number(ref.__versions.arits || 0) + 1;
           await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), CLE_APP);
-          journal("compteur HPSEM : heures des jours de repos travaillés exclues des heures supplémentaires (majorées à part)"); } }
-      await meta("migration_hpsem_repos", "1");
+          journal("compteur HPSEM : heures des jours de repos et des jours fériés travaillés exclues des heures supplémentaires (majorées à part)"); } }
+      await meta("migration_hpsem_ferie", "1");
     }
   } catch(e){ journal("migration HPSEM : "+e.message); }
   /* correctif 48 : éléments standard du paramétrage ajoutés par l'application (compteurs des heures de nuit, dimanches,
