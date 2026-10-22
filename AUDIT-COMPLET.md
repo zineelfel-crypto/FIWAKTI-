@@ -2707,3 +2707,18 @@ Vérifié (20 000 salariés) : aperçu journalier filtré sur un salarié → 6 
 travaillé 07:55 12:00 13:00 17:00) ; aperçu de tout l'effectif (19 412 salariés) → totaux seuls. `t53.js` sans erreur.
 
 Livraison : FIWAKTI-56.33.13-correctif-51.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 50 ; 5 fichiers).
+
+## Correctif 52 — Repos travaillé hors heures supplémentaires
+
+Règle de l'utilisateur : les heures travaillées un jour de repos ne rentrent pas dans les heures supplémentaires à 25 %
+et 50 % ; elles sont majorées à part, à 100 %.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| H1 | « Heures travaillées de la semaine » (HPSEM = `PRESENCE`) comptait les jours de repos : leurs heures entraient dans HSBRUT, HS25 et HS50 en plus de HREPOS (comptées deux fois en majoration) | haute | HPSEM = `SI(REPOS = 1; 0; PRESENCE)` (modèle d'origine, `normalize` et migration serveur unique `migration_hpsem_repos`, seulement si la formule est restée `PRESENCE`) |
+
+Vérifié (serveur réel) : semaine du 07/09 (5 × 11 h, samedi 4 h, dimanche de repos 6 h, base 48 h) : avant 65 h →
+HS 25 % 8 h, HS 50 % 9 h ; après 59 h → 8 h et 3 h, HREPOS 6 h ; journal de migration présent. `t53.js`, `t4b.js`
+(seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-52.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 51 ; 5 fichiers).
