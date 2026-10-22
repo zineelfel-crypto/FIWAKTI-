@@ -2677,3 +2677,19 @@ journée(s) incomplète(s) (15/10, 17/10, 18/10) » ; la nuit du 19/10 n'est plu
 (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-49.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 48 ; 5 fichiers).
+
+## Correctif 50 — Totaux des états
+
+Signalé par l'utilisateur : impression de l'état « Heures supplémentaires par semaine » (≈ 4 500 salariés) — « Total
+général » vide (« — ») pour les heures travaillées et supplémentaires.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| T1 | Totaux des états (général et par groupe) calculés par `agg` / `etatAgg` / `etatSomme` / `som` : un seul salarié au cumul inconnu rendait le total « — » ; inexploitable en grand effectif | haute | `etatTotConnu` : somme des salariés au cumul connu (écran `etatPied` et `etatRenduBlocs`, impression, Excel, CSV : `etatMatrice`, `etatMatriceDe`) ; libellé « (hors n salarié(s) au cumul inconnu …) » (`etatHors`) ; cumul d'un salarié inchangé (reste inconnu si une de ses journées l'est) |
+
+Vérifié (serveur réel, données du banc) : état « Heures supplémentaires par semaine » du 01 au 21/10, 14 salariés dont
+13 avec journées incomplètes : total général chiffré (237 jours, 1 836 h théoriques, 8,08 h travaillées) avec « hors
+13 salarié(s) au cumul inconnu » à l'écran et dans la matrice d'impression / Excel. `t53.js`, `t4b.js` (seul le salarié
+10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-50.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 49 ; 5 fichiers).
