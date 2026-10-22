@@ -2737,3 +2737,18 @@ HREPOS 6 h ; base de la semaine 40 h (le férié n'est pas un jour ouvré et ré
 l'utilisateur) ; journal de migration présent. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-53.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 52 ; 5 fichiers).
+
+## Correctif 54 — Jours fériés automatiques et rappel des fêtes religieuses
+
+Demande de l'utilisateur : ne plus risquer d'oublier les jours fériés d'une année.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| F1 | Jours fériés à date fixe ajoutés seulement par un bouton à cliquer chaque année : un oubli faisait traiter ces jours comme des journées normales (faux absents, fausses heures) | moyenne | `feriesFixesAuto` (serveur, au démarrage puis toutes les heures) : liste `FER_TN` de l'application ajoutée pour l'année en cours et la suivante, une fois par année (`ref.feriesAuto`) ; journées passées concernées recalculées |
+| F2 | Aucun rappel des fêtes religieuses (dates variables) | moyenne | « À traiter » : `feries-religieuses` pour l'année en cours sans fête religieuse saisie, et l'année suivante en décembre ; profils autorisés à modifier les jours fériés ; détection par libellé (fr / ar), les fêtes nationales (« عيد الاستقلال ») n'étant pas prises pour des fêtes religieuses |
+
+Vérifié (serveur réel) : liste vide → 16 jours fixes ajoutés (2026 et 2027) au démarrage ; 13/08/2026 supprimé puis
+redémarrage → non recréé ; alerte « Fêtes religieuses de 2026 non saisies » (administrateur, RH, chef de site) puis
+disparue après saisie de l'Aïd el-Idha ; textes fr / en / ar. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-54.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 53 ; 5 fichiers).

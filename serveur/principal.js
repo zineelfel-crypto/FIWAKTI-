@@ -327,6 +327,39 @@ async function ouvrirBase(){
   } catch(e){ journal("éléments standard du paramétrage : "+e.message); }
   K = CALCUL.creer(B, D, {base:CONFIG.base || null, dossier:DONNEES, app:path.join(APP, "app.js"), journal, config:()=>CONFIG});
   initPointeuses(); await chargerModules();
+  /* correctif 54 : jours fériés fixes ajoutés seuls (année en cours et suivante), puis vérification toutes les heures */
+  try { await feriesFixesAuto(); } catch(e){ journal("jours fériés fixes : "+e.message); }
+  if (!FERIES_MINUTERIE) FERIES_MINUTERIE = setInterval(()=>{ feriesFixesAuto().catch(e=>journal("jours fériés fixes : "+e.message)); }, 3600000);
+}
+/* correctif 54 : jours fériés tunisiens à date fixe (1er janvier, 20 mars, 9 avril, 1er mai, 25 juillet, 13 août, 15 octobre,
+   17 décembre ; liste FER_TN de l'application) ajoutés automatiquement pour l'année en cours et la suivante, UNE fois par
+   année (ref.feriesAuto) : un jour férié supprimé volontairement n'est pas recréé. Avant : bouton à cliquer chaque année,
+   oubli = jours fériés traités comme des journées normales. Les journées passées concernées sont recalculées. */
+let FERIES_MINUTERIE = null, FER_TN_SRV = null;
+async function feriesFixesAuto(){
+  const r = await B.get("SELECT valeur FROM kv WHERE cle=?", CLE_APP); if (!r) return;
+  const ref = JSON.parse(r.valeur); if (!Array.isArray(ref.arits) || !ref.arits.length) return;   /* paramétrage pas encore initialisé */
+  if (!FER_TN_SRV) FER_TN_SRV = (require("./moteur.js").chargerMoteur(path.join(APP, "app.js")).ctx.FER_TN || []).slice();
+  if (!FER_TN_SRV.length) return;
+  const feries = Array.isArray(ref.feries) ? ref.feries : [], fait = ref.feriesAuto && typeof ref.feriesAuto === "object" && !Array.isArray(ref.feriesAuto) ? ref.feriesAuto : {};
+  const an = new Date().getFullYear(), ajoutes = [];
+  for (const y of [an, an + 1]){
+    if (fait[y]) continue;
+    FER_TN_SRV.forEach(x=>{ const d = y+"-"+x[0];
+      if (!feries.some(f=>f && f.d === d && !(f.sites || []).length)){ feries.push({id:"fe_auto_"+d, d, nom:x[1], nomAr:x[2], nomEn:x[3], type:"paye", sites:[]}); ajoutes.push(d); } });
+    fait[y] = true;
+  }
+  if (ref.feriesAuto && JSON.stringify(ref.feriesAuto) === JSON.stringify(fait) && !ajoutes.length) return;
+  ref.feries = feries; ref.feriesAuto = fait; ref.__versions = ref.__versions || {};
+  ref.__versions.feriesAuto = Number(ref.__versions.feriesAuto || 0) + 1;
+  if (ajoutes.length) ref.__versions.feries = Number(ref.__versions.feries || 0) + 1;
+  await B.run("UPDATE kv SET valeur=?, version=version+1, maj=? WHERE cle=?", JSON.stringify(ref), new Date().toISOString(), CLE_APP);
+  if (ajoutes.length){
+    const auj = aujourdhui();
+    for (const d of ajoutes) if (d <= auj) try { await B.run("DELETE FROM calc_jour WHERE d=?", d); } catch(e){}
+    try { if (K) await K.invalider([], []); } catch(e){}
+    journal("jours fériés fixes ajoutés automatiquement : "+ajoutes.map(d=>d.split("-").reverse().join("/")).join(", "));
+  }
 }
 /* 56.33.11 : réglages d'envoi (paramétrage) + mot de passe chiffré ; « surcharge » = réglages saisis à l'écran, pas
    encore enregistrés (test d'envoi) — jamais le mot de passe */
@@ -2655,6 +2688,12 @@ async function traiter(req, res){
           .filter(r=>dans(r.mat)).map(r=>JSON.parse(r.data)).filter(d=>(d.etat||"attente") === "attente").length;
         if (n) items.push({domaine:"temps", module:"FW-Time", cle:"demandes", nombre:n, urgence:1, vue:"dmd"});
       }
+    }
+    /* correctif 54 : fêtes religieuses (dates variables) non saisies pour l'année en cours, et dès décembre pour la suivante */
+    if (admin || (menuOk("feries") && PERIM.peutEcrire(prof, "feries"))){
+      const RELIG = /\ba[iïî]d\b|fitr|idha|adha|mouled|mawlid|h[ée]gire|hejri|عيد الفطر|عيد الأضحى|المولد|الهجرية/i, n0 = new Date(), an = n0.getFullYear();
+      const saisies = y => (ref.feries || []).some(f=>f && String(f.d || "").slice(0, 4) === String(y) && RELIG.test(String(f.nom || "")+" "+String(f.nomAr || "")));
+      [an].concat(n0.getMonth() === 11 ? [an + 1] : []).forEach(y=>{ if (!saisies(y)) items.push({domaine:"temps", module:"FW-Time", cle:"feries-religieuses", nombre:1, annee:y, urgence:y === an ? 2 : 1, vue:"feries"}); });
     }
     for (const x of MODS_SERVEUR){
       if (!x.inst || !x.inst.aTraiter || (MOD && !MOD.estActif(x.id))) continue;
