@@ -2733,7 +2733,7 @@ supplémentaires à 25 % et 50 %.
 | H2 | HPSEM comptait les jours fériés travaillés (déjà comptés dans HFERIE) | haute | HPSEM = `SI(REPOS = 1; 0; SI(FERIE = 1; 0; PRESENCE))` (modèle, `normalize`, migration serveur unique `migration_hpsem_ferie` si la formule est celle d'origine ou du correctif 52) |
 
 Vérifié (serveur réel) : semaine du 07/09, mercredi férié 11 h, dimanche de repos 6 h : HPSEM 48 h, HFERIE 11 h,
-HREPOS 6 h ; base de la semaine 40 h (le férié n'est pas un jour ouvré : règle de base inchangée, à confirmer avec
+HREPOS 6 h ; base de la semaine 40 h (le férié n'est pas un jour ouvré et réduit la base : règle confirmée par
 l'utilisateur) ; journal de migration présent. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-53.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 52 ; 5 fichiers).
