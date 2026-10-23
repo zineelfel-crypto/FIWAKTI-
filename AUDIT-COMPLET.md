@@ -2789,3 +2789,22 @@ Vérifié (serveur réel, 10241, 11 h pointées du 19 au 21/10, règle à régul
 0:00 » ; même résultat en grand effectif (20 000). `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-56.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 55 ; 5 fichiers).
+
+## Correctif 57 — Mot de passe d'un nouveau compte de gestion
+
+Question de l'utilisateur : nouveau compte « RH » (Ben Amor), quel mot de passe à la première connexion ? Il ne voit
+que 4 personnes du service IT.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| U1 | Compte de gestion créé sans mot de passe (« Invitation en attente ») ; la fiche n'offrait que « Réinitialiser au matricule », alors que le serveur refuse le matricule pour ces comptes (correctifs 19 / 23) et remet un mot de passe temporaire aléatoire : l'administrateur ne pouvait pas deviner la marche à suivre | moyenne | `pcReinitLib` / `pcReinitMat` : « Générer un mot de passe temporaire » (confirmation et texte adaptés) sauf pour un compte du portail salarié ; message « Ce compte n'a pas encore de mot de passe… » quand le serveur indique `sans_mdp` |
+
+Périmètre (4 personnes) : comportement attendu selon le réglage — sans périmètre, un compte rattaché à une fiche voit
+lui-même et son équipe hiérarchique ; un compte de niveau RH doit avoir « Tout le personnel » ou des départements,
+sites, collaborateurs (contrôle existant `vPerimRequis`). La fiche affiche le nombre et l'origine du périmètre.
+
+Vérifié (serveur réel, navigateur) : compte RH « Gestionnaire RH » neuf → message et bouton « Générer un mot de passe
+temporaire », confirmation, mot de passe affiché une fois, connexion acceptée avec changement imposé ; libellés :
+portail → « Réinitialiser au matricule », RH avec ou sans fiche et administrateur → « Générer… ». `t53.js`, `t4b.js`.
+
+Livraison : FIWAKTI-56.33.13-correctif-57.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 56 ; 5 fichiers).
