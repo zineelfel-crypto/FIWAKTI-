@@ -2843,3 +2843,19 @@ Vérifié (serveur réel, navigateur, connexion.html) : « Mohamed2026! » → r
 → application ouverte. `t53.js`.
 
 Livraison : FIWAKTI-56.33.13-correctif-59.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 58 ; 7 fichiers).
+
+## Correctif 60 — Périmètre d'un compte compté par le serveur
+
+Signalement de l'utilisateur (captures) : le compte RH voit 450 employés (menu RH › Employés), mais sa fiche indique
+« 5 employé(s) dans le périmètre ».
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| G1 | `perimEditeurHTML` calculait le périmètre dans le navigateur (`matsPerimetreDirect` sur `empsTous()`) : en grand effectif, seules quelques fiches sont chargées → nombre et noms faux (le périmètre appliqué par le serveur était juste) | moyenne | `perimSrvApercu` : `POST /api/v1/profils/apercu` avec le profil et les réglages du compte en cours d'édition (`compte` : périmètre, salarié rattaché ; délégations reçues du compte enregistré conservées) ; « … » pendant le calcul, calcul local en cas d'échec |
+
+Vérifié (serveur réel, 20 000 salariés, 1 fiche chargée dans le navigateur) : compte RH limité au département
+Production → fiche « 19106 employé(s) » ; connexion de ce compte → `GET /api/v1/employes` total 19106 (avant : nombre
+des seules fiches chargées) ; « Tout le personnel » coché sans enregistrer → « Tous » ; aucun réglage → 0 (équipe
+hiérarchique). `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-60.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 59 ; 7 fichiers).

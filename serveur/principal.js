@@ -2467,10 +2467,16 @@ async function traiter(req, res){
     const ref = await D.referentielLecture() || {}, emps = await D.employes(), ID = "__apercu__";
     const comptes = (ref.users || []).filter(x=>x && (x.profilId === pr.id || (x.deleg || []).some(d=>d && d.profilId === pr.id)));
     const cible = b.login ? (ref.users || []).find(x=>x && String(x.login).toLowerCase() === String(b.login).toLowerCase()) : null;
-    const u = cible ? Object.assign({}, cible, {login:ID, profilId:pr.id, deleg:[]}) : {id:ID, login:ID, profilId:pr.id, empId:"", perim:{}, actif:true};
+    let u = cible ? Object.assign({}, cible, {login:ID, profilId:pr.id, deleg:[]}) : {id:ID, login:ID, profilId:pr.id, empId:"", perim:{}, actif:true};
+    /* correctif 60 : réglages du compte en cours d'édition (fiche Utilisateurs) — périmètre et salarié rattaché ; le compte
+       enregistré du même identifiant interne garde ses délégations reçues */
+    const cp = b.compte && typeof b.compte === "object" && !Array.isArray(b.compte) ? b.compte : null;
+    if (cp){ const c0 = (ref.users || []).find(x=>x && cp.id && String(x.id) === String(cp.id));
+      u = Object.assign({}, c0 || {}, {id:c0 ? c0.id : ID, login:ID, profilId:pr.id, deleg:[], actif:true, empId:typeof cp.empId === "string" ? cp.empId : "",
+        perim:cp.perim && typeof cp.perim === "object" && !Array.isArray(cp.perim) ? cp.perim : {}}); }
     const doc = Object.assign({}, ref, {emps, profils:(ref.profils || []).filter(x=>x && x.id !== pr.id).concat([pr]), users:(ref.users || []).concat([u])});
     let P; try { P = PERIM.perimetre(doc, ID); } catch(e){ return erreur(res, 400, "Profil invalide : "+e.message); }
-    const niv = PERIM.niveauProfil(pr), q = (cible && cible.perim) || {}, perimPropre = !!(q.tout || (q.depts||[]).length || (q.mats||[]).length || (q.sites||[]).length || (q.terms||[]).length || q.equipe);
+    const niv = PERIM.niveauProfil(pr), q = (cp ? u.perim : cible && cible.perim) || {}, perimPropre = !!(q.tout || (q.depts||[]).length || (q.mats||[]).length || (q.sites||[]).length || (q.terms||[]).length || q.equipe);
     const regle = pr.mode === "liste" || (pr.sites||[]).length || (pr.depts||[]).length || (pr.inclus||[]).length || Object.keys(pr.filtres||{}).some(k=>pr.filtres[k]);
     const mats = P.set === null ? null : Array.from(P.set), parMat = new Map(emps.map(e=>[String(e.mat), e]));
     const ex = (mats === null ? emps : mats.map(m=>parMat.get(String(m))).filter(Boolean)).slice(0, 12).map(e=>({mat:e.mat, nom:((e.nom||"")+" "+(e.prenom||"")).trim(), siteId:e.siteId || ""}));
