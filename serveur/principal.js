@@ -556,7 +556,7 @@ async function politique(mdp, compte, secu){
   if (secu.interdireCourants !== false){
     const racine = v.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
     const ent = String(CONFIG.entreprise||"").toLowerCase().replace(/[^a-z]/g, "");
-    if (COURANTS.indexOf(racine) >= 0 || (ent.length >= 4 && racine.indexOf(ent) >= 0) || /^(.)\1+$/.test(racine)) return "Mot de passe trop courant ou trop facile à deviner.";
+    if (COURANTS.indexOf(racine) >= 0 || (ent.length >= 4 && racine.indexOf(ent) >= 0) || /^(.)\1+$/.test(racine)) return "Mot de passe trop courant ou trop facile à deviner : ses lettres forment un mot courant ou le nom de l'entreprise. Ajoutez un autre mot.";
   }
   const n = Math.max(0, Number(secu.historique) || 0);
   if (n && compte.hash && await verifier(v, compte.hash)) return "Le nouveau mot de passe doit être différent de l'actuel.";

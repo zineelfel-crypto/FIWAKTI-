@@ -2828,3 +2828,18 @@ Enregistrer la fiche après génération ne touche pas au code. `t53.js`, `t4b.j
 
 Livraison : FIWAKTI-56.33.13-correctif-58.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 57 ; 7 fichiers, dont
 public/connexion.html et public/connexion.js).
+
+## Correctif 59 — Règle « mot de passe courant » expliquée
+
+Signalement de l'utilisateur (capture) : au choix du mot de passe de « RH », plusieurs essais, la règle « Pas un mot
+de passe courant (prénom, ville, « azerty »…) ni le nom de l'entreprise » reste rouge et « Valider et accéder » grisé.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| P5 | La règle compare les seules LETTRES du mot de passe à la liste des mots courants (« Mohamed2026! » → « mohamed », prénom de la liste) sans le dire : changer chiffres et symboles ne débloque jamais, l'utilisateur tourne en rond | haute | la règle affiche le mot en cause (« ici, les lettres forment « mohamed » : ajoutez un autre mot ») ou « une seule lettre répétée » ; message du serveur précisé ; fr / en / ar |
+
+Vérifié (serveur réel, navigateur, connexion.html) : « Mohamed2026! » → règle rouge avec « mohamed », bouton grisé ;
+« AAAA11112222 » → « une seule lettre répétée » ; « Tunisie@2026X » et « Mohamed-Rh-2026 » → acceptés ; validation
+→ application ouverte. `t53.js`.
+
+Livraison : FIWAKTI-56.33.13-correctif-59.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 58 ; 7 fichiers).
