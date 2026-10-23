@@ -2770,3 +2770,22 @@ validation y compris le férié et le dimanche ; lundi et dimanche validés → 
 validation depuis le Suivi enregistrée sur le serveur. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-55.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 54 ; 5 fichiers).
+
+## Correctif 56 — Heures supplémentaires à valider visibles dans le registre
+
+Signalement de l'utilisateur (capture) : 10001, 21/10, « Travaillé 9:00 · Écart 1:00 » en vert alors que l'heure
+supplémentaire n'est pas validée (« le système compte 9 h sans validation »).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| V4 | Registre › Journées : écart positif toujours affiché en vert, sans distinction entre heure validée, refusée ou en attente ; l'utilisateur ne peut pas voir que la journée n'est retenue que pour son horaire | moyenne | `hsEtatJour` (mode validation RH uniquement) : « ⏳ à valider » en orange et « retenu 8:00 » sous Travaillé ; refusée barrée « ✗ » ; validée « ✓ » ; petit effectif (`ptgLignesJours`) et grand effectif (`grandJourLigne`) |
+| V5 | Carte « Heures supp. » du Suivi muette sur l'effet de la validation (en mode automatique, l'heure est déjà comptée) | basse | détail : « non comptées tant qu'elles ne sont pas validées » ou « déjà comptées (validation automatique …) » |
+
+Rappel : la validation RH dépend de la règle `HS_AUTORISATION` (« À régulariser ») ; par défaut (« Constatées »),
+toutes les heures comptent — cas probable de la capture si la règle n'a pas été posée. Heures réelles inchangées.
+
+Vérifié (serveur réel, 10241, 11 h pointées du 19 au 21/10, règle à régulariser) : 21/10 « 1:00 ⏳ à valider · retenu
+8:00 », 20/10 validé « 1:00 ✓ », 19/10 refusé « 1:00 ✗ · retenu 8:00 », dimanche 18/10 travaillé « à valider · retenu
+0:00 » ; même résultat en grand effectif (20 000). `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-56.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 55 ; 5 fichiers).
