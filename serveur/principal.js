@@ -1839,12 +1839,18 @@ async function traiter(req, res){
     } else if (c.etat === "temp_code"){
       /* mot de passe temporaire remis par l'administrateur : valable « resetValiditeMin » minutes */
       const lim = Math.max(5, Number(secu.resetValiditeMin)||60)*60000;
-      ok = await verifier(b.mdp, c.hash);
+      ok = await verifier(String(b.mdp||"").trim(), c.hash);   /* correctif 58 : espaces du copier-coller ignorés (le code n'en contient pas) */
       if (ok && c.temp_le && new Date(c.temp_le).getTime() + lim < Date.now()) return erreur(res, 401, "Mot de passe temporaire expiré : demandez-en un nouveau à l'administrateur.");
       /* correctif 24 : usage unique — une fois utilisé, le mot de passe temporaire ne rouvre plus de session (il reste
          valable pour le changement de mot de passe de la session ouverte) */
       if (ok) await B.run("UPDATE comptes SET etat='temp_code_utilise' WHERE login=?", c.login);
-    } else if (c.etat === "temp_code_utilise"){ await hacher("leurre"); ok = false;
+    } else if (c.etat === "temp_code_utilise"){
+      /* correctif 58 : le mot de passe temporaire n'ouvre qu'une session ; une première connexion interrompue avant le choix
+         du mot de passe personnel laissait « Identifiant ou mot de passe incorrect » sans explication. Le motif n'est donné
+         qu'à qui saisit le bon code (rien n'est révélé à un tiers) */
+      if (c.hash && await verifier(String(b.mdp||"").trim(), c.hash)){ await audit(c.login, "connexion.echec", "mot de passe temporaire déjà utilisé", ip);
+        return erreur(res, 401, "Ce mot de passe temporaire a déjà servi : il n'ouvre qu'une seule connexion, et le mot de passe personnel n'a pas été choisi. Demandez-en un nouveau à l'administrateur."); }
+      ok = false;
     } else if (c.hash) ok = await verifier(b.mdp, c.hash);
     else { await hacher("leurre"); ok = false; }   /* correctif 23 : compte sans mot de passe — réponse générique, tentatives comptées */
     if (!ok){
@@ -3368,7 +3374,8 @@ async function traiter(req, res){
       await audit(C.login, "compte.reinitialise", c.login+" (matricule)", ip);
       return json(res, 200, {ok:true, mode:"matricule"});
     }
-    const code = crypto.randomBytes(9).toString("base64url").replace(/[-_]/g,"x").slice(0,10)+"7A";
+    /* correctif 58 : alphabet sans caractères ambigus à la lecture (0/O, 1/l/I) — le code est recopié à la main */
+    const ALPHA = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789", code = Array.from(crypto.randomBytes(10), x=>ALPHA[x % ALPHA.length]).join("")+"7A";
     await B.run("UPDATE comptes SET etat='temp_code', hash=?, temp_le=?, changer=1, raison='reinit', echecs=0, verrou=NULL WHERE login=?", await hacher(code), maintenant(), c.login);
     await audit(C.login, "compte.reinitialise", c.login+" (mot de passe temporaire)", ip);
     return json(res, 200, {ok:true, mode:"code", temporaire:code});

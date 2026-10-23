@@ -2808,3 +2808,23 @@ temporaire », confirmation, mot de passe affiché une fois, connexion acceptée
 portail → « Réinitialiser au matricule », RH avec ou sans fiche et administrateur → « Générer… ». `t53.js`, `t4b.js`.
 
 Livraison : FIWAKTI-56.33.13-correctif-57.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 56 ; 5 fichiers).
+
+## Correctif 58 — Première connexion avec un mot de passe temporaire
+
+Signalement de l'utilisateur (capture) : mot de passe temporaire généré pour « RH », connexion refusée
+(« Identifiant ou mot de passe incorrect »).
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| P1 | Mot de passe temporaire à usage unique (correctif 24) : une première connexion interrompue avant le choix du mot de passe personnel (Annuler, page fermée ou rechargée) rendait le code inutilisable, avec le message générique « incorrect » — l'utilisateur pense à une erreur de saisie | haute | état `temp_code_utilise` : si le code saisi est le bon, message « Ce mot de passe temporaire a déjà servi … Demandez-en un nouveau » (rien n'est révélé à qui ne connaît pas le code) ; traduction en / ar sur la page de connexion |
+| P2 | Espaces copiés avec le code (copier-coller depuis la fenêtre) → refus | moyenne | code comparé sans les espaces de début et de fin |
+| P3 | Codes générés avec des caractères ambigus (0/O, 1/l/I) recopiés à la main | basse | alphabet sans caractères ambigus |
+| P4 | Fenêtre du code muette sur l'usage unique et la durée ; aide de la page de connexion « mot de passe = votre matricule » fausse pour un compte de gestion | moyenne | « une seule connexion, 60 minutes (durée réglée), choisir aussitôt son mot de passe » ; aide « salarié : matricule ; autre compte : mot de passe temporaire remis par l'administrateur » |
+
+Vérifié (serveur réel) : code faux → « incorrect » ; code entouré d'espaces → connexion ; même code une 2e fois →
+message « déjà servi » ; code faux ensuite → « incorrect ». Parcours navigateur complet (connexion.html) : code →
+formulaire de changement → nouveau mot de passe → application ouverte → reconnexion avec le nouveau mot de passe.
+Enregistrer la fiche après génération ne touche pas au code. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-58.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 57 ; 7 fichiers, dont
+public/connexion.html et public/connexion.js).
