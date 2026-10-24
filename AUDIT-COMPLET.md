@@ -2887,3 +2887,22 @@ cohérent. Grand effectif (20 000) : registre actualisé en 20 s ; badgeage reç
 
 Livraison : FIWAKTI-56.33.13-correctif-62.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 61 ; 10 fichiers, dont
 serveur/pointeuses.js et les pilotes Hikvision et BioStar 2 du correctif 61).
+
+## Correctif 63 — Horaire exceptionnel d'un salarié sur une période
+
+Demande de l'utilisateur : un endroit simple et visible pour changer, à titre d'exception, l'horaire d'un salarié sur
+une période déterminée, avec retour automatique à son calendrier ensuite.
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| H1 | Aucun moyen direct : il fallait saisir deux prises d'effet dans l'historique du calendrier (écran de modification, en bas de l'onglet) et calculer soi-même le calendrier de retour | moyenne | Bloc « Horaire exceptionnel sur une période » dans la fiche (RH › Employés › Contrat & horaires › Calendrier de travail, en lecture : enregistré aussitôt ; et Administration › fiche › Contrôle horaire) : Du / Au / Calendrier › « Appliquer l'exception » ; liste avec « en cours » et « Retirer ». Stockage : deux prises d'effet ordinaires (`exc:"debut"` avec `au`, `exc:"retour"` le lendemain), lues sans changement par le moteur, le serveur, l'affectation en masse et le contrôle de clôture ; une prise d'effet existant le jour du début est mémorisée (`remplace`) et rétablie au retrait. Contrôles : dates, calendrier identique, changement déjà prévu dans la période, absence de calendrier après la période |
+| H2 | Historique du calendrier (onglet Contrôle horaire) : modifier ou supprimer une ligne utilisait l'index de la liste triée sur le tableau non trié → autre ligne touchée si l'historique n'était pas rangé par date | moyenne | index résolu sur la liste affichée |
+
+Vérifié (serveur réel, navigateur) : 10241 (Administratif — 44 h), exception Production 2×8 du 02/11 au 08/11 → fiche
+« Du 02/11/2026 au 08/11/2026 : Production 2×8 — puis retour à Administratif — 44 h », historique serveur à 3 prises
+d'effet, calendrier du 01/11 Administratif, du 02 au 08 Production, du 09 Administratif ; nouvelle exception
+chevauchante refusée (« changement déjà prévu le 09/11/2026 ») ; « Retirer » → historique d'origine. État serveur
+(travaux, blocs-leger) : journées du 12 au 14/10 sur le calendrier d'exception, retour le 16/10. `t53.js`, `t4b.js`
+(seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-63.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 62 ; 10 fichiers).
