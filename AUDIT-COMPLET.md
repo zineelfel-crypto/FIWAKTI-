@@ -2868,3 +2868,22 @@ Livraison : FIWAKTI-56.33.13-correctif-60.zip (pour la 56.33.13 ; cumulatif : co
 | Chaque collecte relisait 31 jours × 7 types d'événements | Moyenne | Lecture depuis la dernière collecte réussie moins 5 min ; relecture complète chaque heure (badgeage manqué, horloge décalée) ; lecture incrémentale sans nouveauté : pas de ligne d'audit, dernier résultat utile conservé | Journal de la pointeuse simulée : fenêtre de 14 min puis de 5 min toutes les 16 s |
 | Journal (grand effectif) chargé une fois puis figé tant que les filtres ne changent pas | Moyenne | `ptgJournalRafraichir` : relecture toutes les 15 s si la période contient aujourd'hui, redessin seulement si la page a changé, jamais pendant une saisie ni onglet masqué | Même essai : ligne apparue sans action |
 | Accueil : « Cannot access 'HOME_JOUR' before initialization » au premier affichage (correctif 43) | Mineure | Déclaration remontée (`var`) et initialisation à la première utilisation | Balayage de la démonstration : 0 erreur (2 avant) |
+## Correctif 62 — Badgeages en temps réel dans les écrans ouverts (complète le correctif 61)
+
+Signalement de l'utilisateur : « le pointage du matricule 200 n'est pas en temps réel ».
+
+| # | Constat | Gravité | Correction |
+|---|---|---|---|
+| R1 | Le navigateur ne relisait les données qu'au chargement de la page (seule minuterie : contrôle de session) : un badgeage reçu par le serveur (pointeuse, autre poste) restait invisible dans l'écran ouvert jusqu'à F5 — constaté : 0 requête de données en 3 minutes, badgeage absent | haute | `GET /api/v1/donnees/version` (marqueur `K.generation()`, incrémenté par toute invalidation, pointeuses comprises) lu toutes les 30 s, page visible ; si changement : petit effectif → `donnees/periode` (hier, aujourd'hui, ptg) fusionné avec l'instantané de synchronisation (ajouts, modifications et suppressions venues du serveur, jamais une modification locale) ; grand effectif → pages serveur marquées périmées et relues sans être vidées, accueil relu. Rien pendant une saisie, une fenêtre ouverte, un enregistrement en attente ou des badgeages modifiés localement non enregistrés |
+
+Rappel donné à l'utilisateur : délai d'arrivée sur le serveur selon la pointeuse — ZK Push immédiat ; ZK natif,
+Hikvision, BioStar, Sagem selon « Collecte automatique (minutes) » (0 = manuelle) ; Sagem : plus la fréquence d'export
+de MorphoManager / MEMS.
+
+Vérifié (serveur réel, navigateur) : petit effectif — badgeage ajouté par un autre poste visible en 20 s, suppression
+en 30 s, sans recharger ; saisie locale après fusion → seul le nouveau badgeage est envoyé (pas de doublon), serveur
+cohérent. Grand effectif (20 000) : registre actualisé en 20 s ; badgeage reçu d'une pointeuse ZK Push
+(`/iclock/cdata`, « OK: 1 ») visible en 20 s. `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
+
+Livraison : FIWAKTI-56.33.13-correctif-62.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 61 ; 10 fichiers, dont
+serveur/pointeuses.js et les pilotes Hikvision et BioStar 2 du correctif 61).

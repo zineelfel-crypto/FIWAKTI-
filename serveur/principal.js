@@ -2076,6 +2076,8 @@ async function traiter(req, res){
     }
     return texteJson(res, texte);
   }
+  /* correctif 62 : marqueur de changement (badgeages reçus, saisies, calculs) lu toutes les 30 s par les navigateurs ouverts */
+  if (p === "/api/v1/donnees/version" && req.method === "GET") return json(res, 200, {gen:K ? K.generation() : "0"});
   if (p === "/api/v1/donnees/periode" && req.method === "GET"){
     const du = u.searchParams.get("du"), au = u.searchParams.get("au");
     if (!dateOk(du) || !dateOk(au)) return erreur(res, 400, "Dates invalides");
