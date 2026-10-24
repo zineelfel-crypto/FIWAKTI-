@@ -28,7 +28,7 @@ function sensTna(k, T){ const v = String(k == null ? "" : k).trim(); if (!v || v
 /* événements d'authentification réussie (identification, vérification, carte, visage) */
 const SUCCES = c => (c >= 4096 && c < 4352) || (c >= 4864 && c < 5120);
 module.exports = {sensTna,
-  id:"biostar2", nom:"Suprema — BioStar 2 (API REST)",
+  id:"biostar2", nom:"Suprema — BioStar 2 (API REST)", incremental:true,
   marques:["Suprema"], modeles:"BioStation, BioEntry, FaceStation, FaceLite, X-Station, BioLite (via BioStar 2)",
   capacites:["diagnostic","info","collecte","utilisateurs-lire","utilisateurs-envoyer","visages-lire","visages-envoyer","utilisateurs-retirer"],
   champs:[{k:"urlServeur", l:"Adresse du serveur BioStar 2 (https://…)", public:true}, {k:"utilisateur", l:"Identifiant BioStar 2"}, {k:"mdp", l:"Mot de passe BioStar 2", secret:true},
@@ -45,7 +45,7 @@ module.exports = {sensTna,
       return {enLigne:true, info:dev ? {sn:String(dev.id), modele:(dev.device_type_id||{}).name||"", nom:dev.name, etat:dev.status} : {note:"Serveur BioStar 2 joignable ; appareil non trouvé (renseignez son identifiant BioStar dans N° de série)."}};
     }
     if (action === "collecte"){
-      const depuis = new Date(Date.now() - (Number(T.joursCollecte)||31)*86400000).toISOString(), fin = new Date().toISOString();
+      const depuis = new Date(ctx.depuisMs || Date.now() - (Number(T.joursCollecte)||31)*86400000).toISOString(), fin = new Date().toISOString();
       const cond = [{column:"datetime", operator:3, values:[depuis, fin]}];
       if (T.sn) cond.push({column:"device_id.id", operator:2, values:[String(T.sn)]});
       const tous = []; let offset = 0;

@@ -2859,3 +2859,12 @@ des seules fiches chargées) ; « Tout le personnel » coché sans enregistrer �
 hiérarchique). `t53.js`, `t4b.js` (seul le salarié 10188 diffère).
 
 Livraison : FIWAKTI-56.33.13-correctif-60.zip (pour la 56.33.13 ; cumulatif : correctifs 44 à 59 ; 7 fichiers).
+
+## Correctif 61 — pointeuses Hikvision en temps réel (56.33.13)
+
+| Constat | Gravité | Correction | Preuve |
+|---|---|---|---|
+| Badgeage fait sur une pointeuse Hikvision absent du Journal : une pointeuse ISAPI n'envoie rien, FIWAKTI l'interroge seulement selon « Collecte automatique (minutes) » (0 = jamais en automatique) | Majeure | Case « Temps réel » dans la fiche : interrogation toutes les 15 s (tâche `pointeuses-temps-reel`) ; pilotes Hikvision et BioStar 2 en lecture incrémentale (`incremental:true`, `ctx.depuisMs`) ; autres pilotes interrogés : une fois par minute | Pointeuse simulée (ISAPI, Digest MD5) sur un serveur 56.33.13 : badgeage visible dans le Journal en 18 s |
+| Chaque collecte relisait 31 jours × 7 types d'événements | Moyenne | Lecture depuis la dernière collecte réussie moins 5 min ; relecture complète chaque heure (badgeage manqué, horloge décalée) ; lecture incrémentale sans nouveauté : pas de ligne d'audit, dernier résultat utile conservé | Journal de la pointeuse simulée : fenêtre de 14 min puis de 5 min toutes les 16 s |
+| Journal (grand effectif) chargé une fois puis figé tant que les filtres ne changent pas | Moyenne | `ptgJournalRafraichir` : relecture toutes les 15 s si la période contient aujourd'hui, redessin seulement si la page a changé, jamais pendant une saisie ni onglet masqué | Même essai : ligne apparue sans action |
+| Accueil : « Cannot access 'HOME_JOUR' before initialization » au premier affichage (correctif 43) | Mineure | Déclaration remontée (`var`) et initialisation à la première utilisation | Balayage de la démonstration : 0 erreur (2 avant) |

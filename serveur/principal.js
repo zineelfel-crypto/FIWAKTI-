@@ -3737,6 +3737,13 @@ async function demarrer(){
       if (REFUS_LIC.jour && REFUS_LIC.jour !== aujourdhui()) flushRefusLicence(); } catch(e){ journal("licence : "+e.message); }
     if (PT && MOD && (MOD.estActif("FW-Time") || MOD.estActif("FW-Acces"))){ await PT.collecteAuto().catch(e=>journal("collecte automatique : "+e.message)); return "collecte faite"; }
     return "modules relus"; }});
+  /* 56.33.13 (correctif 61) : pointeuses en mode « temps réel » (Hikvision, BioStar 2…) : passage toutes les 15 s ;
+     chaque appareil garde son propre intervalle (collecteAuto ne fait rien pour un appareil qui n'est pas dû) */
+  PLAN.planifier("pointeuses-temps-reel", {intervalle:15000, priorite:1, delai:60000, actif:()=>!!CONFIG.installe, fn:async ()=>{
+    if (!(PT && MOD && (MOD.estActif("FW-Time") || MOD.estActif("FW-Acces")))) return "inactive";
+    const ref = await D.referentielLecture() || {};
+    if (!(ref.terms||[]).some(T=>T.tempsReel && T.actif !== false)) return "aucun appareil en temps réel";
+    await PT.collecteAuto(); return "collecte faite"; }});
   /* v56.16 : tâches de fond déclarées au planificateur central (FW-Scheduler) — une seule minuterie, état visible */
   const installe = () => !!CONFIG.installe;
   PLAN.planifier("sauvegarde-quotidienne", {intervalle:10*60000, priorite:1, delai:30*60000, actif:installe, fn:async ()=>{

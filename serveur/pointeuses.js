@@ -496,7 +496,9 @@ function creer(o){
       /* v56.5 : visages — enregistrement (identifiant de l'appareil → salarié) et visages à envoyer à cet appareil */
       visageRecu:(utilisateur, format, octets, indice)=>visageRecu(T, utilisateur, format, octets, indice),
       visagesPour:(formats)=>visagesPour(T, formats, mats),
-      depuis:T2=>horoTz(Date.now() - (Number(T2.joursCollecte)||31)*86400000), maintenant:()=>horoTz(Date.now())};
+      depuis:T2=>horoTz(Date.now() - (Number(T2.joursCollecte)||31)*86400000), maintenant:()=>horoTz(Date.now()),
+      /* 56.33.13 (correctif 61) : collecte incrémentale (mode temps réel) — début de la fenêtre de lecture ; sinon toute la période réglée */
+      depuisMs:options && Number(options.depuisMs) > 0 ? Number(options.depuisMs) : null};
     const t0 = Date.now();
     const reseau = e => /ECONNRESET|ETIMEDOUT|EPIPE|ECONNREFUSED|EHOSTUNREACH|ne répond plus|fermée|Pas de réponse/i.test((e.code||"")+" "+e.message);
     try {
@@ -509,10 +511,13 @@ function creer(o){
         r = await P.executer(action, T, S, ctx); r.reprise = true;
       }
       const et = (await meta("pointeuses_etat")) || {};
-      et[T.id] = Object.assign({}, et[T.id]||{}, {derniere:horo(new Date()), action, ok:true, motif:"", pilote:P.id, tempsMs:Date.now()-t0, succes:horo(new Date())}, action === "collecte" ? {collecte:horo(new Date()), integres:r.integres||0, purge:!!r.purge, purgeNonFaite:r.purgeNonFaite||"", archive:r.archive||""} : {});
+      const incr = action === "collecte" && !!ctx.depuisMs;
+      et[T.id] = Object.assign({}, et[T.id]||{}, {derniere:horo(new Date()), action, ok:true, motif:"", pilote:P.id, tempsMs:Date.now()-t0, succes:horo(new Date())}, action === "collecte" ? Object.assign({collecte:horo(new Date()), collecteMs:t0, purge:!!r.purge, purgeNonFaite:r.purgeNonFaite||""},
+        /* une lecture incrémentale sans nouveauté ne masque pas le résultat de la dernière collecte utile */
+        !incr || r.lus ? {integres:r.integres||0, archive:r.archive||""} : {}, incr ? {} : {collecteComplete:t0}) : {});
       if (action === "collecte" && r.purgeNonFaite) journal("collecte "+(T.nom||T.id)+" : appareil non effacé — "+r.purgeNonFaite);
       await meta("pointeuses_etat", et);
-      await audit(login, "pointeuse."+action, (T.nom||T.id)+" ("+P.id+") : "+JSON.stringify(Object.assign({}, r, {utilisateurs:r.utilisateurs ? r.utilisateurs.length : undefined, info:undefined})).slice(0,300));
+      if (!(incr && !r.lus)) await audit(login, "pointeuse."+action, (T.nom||T.id)+" ("+P.id+") : "+JSON.stringify(Object.assign({}, r, {utilisateurs:r.utilisateurs ? r.utilisateurs.length : undefined, info:undefined})).slice(0,300));
       return Object.assign({pilote:P.id, tempsMs:Date.now()-t0, le:new Date().toISOString()}, r);
     } catch(e){
       const et = (await meta("pointeuses_etat")) || {};
@@ -568,6 +573,7 @@ function creer(o){
     return out;
   }
   /* ---------- collecte automatique ---------- */
+  const TEMPS_REEL_MS = 15000;
   let enCours = false;
   async function collecteAuto(){
     if (enCours) return; enCours = true;
@@ -575,12 +581,20 @@ function creer(o){
       const ref = await D.referentielLecture() || {};
       const et = (await meta("pointeuses_etat")) || {};
       for (const T of (ref.terms||[])){
-        const min = Number(T.collecteMinutes) || 0;
-        if (!min || T.actif === false) continue;
-        const P = piloteDe(T); if (!P || P.push) continue;
-        const der = et[T.id] && et[T.id].collecte ? new Date(et[T.id].collecte.replace(" ", "T")).getTime() : 0;
-        if (Date.now() - der < min*60000) continue;
-        try { await executer("collecte", T.id, {}, "collecte automatique"); } catch(e){ journal("collecte "+T.nom+" : "+e.message); }
+        const min = Number(T.collecteMinutes) || 0, P = piloteDe(T);
+        if (T.actif === false || !P || P.push) continue;
+        /* 56.33.13 (correctif 61) : « temps réel » — interrogation toutes les 15 s, en ne lisant que les dernières minutes (pilotes
+           à lecture par période : Hikvision, BioStar 2) ; relecture complète de la période réglée une fois par heure,
+           qui rattrape un badgeage manqué (horloge de l'appareil décalée, coupure réseau). Autres pilotes : 1 min au plus. */
+        const tr = !!T.tempsReel, incr = tr && !!P.incremental;
+        const pas = tr ? (incr ? TEMPS_REEL_MS : 60000) : min*60000;
+        if (!pas) continue;
+        const e = et[T.id] || {}, n = Date.now();
+        const der = Number(e.collecteMs) || (e.collecte ? new Date(e.collecte.replace(" ", "T")).getTime() : 0);
+        if (n - der < pas - 1000) continue;
+        const complet = Number(e.collecteComplete) || 0;
+        const opts = incr && der && complet && n - complet < 3600000 && e.ok !== false ? {depuisMs:der - 5*60000} : {};
+        try { await executer("collecte", T.id, opts, "collecte automatique"); } catch(x){ journal("collecte "+T.nom+" : "+x.message); }
       }
     } finally { enCours = false; }
   }

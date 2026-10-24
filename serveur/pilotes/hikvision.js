@@ -28,7 +28,7 @@ const isoZ = (d, fz) => { if (!fz) return iso(d); const o = partiesTz(d, fz); re
 const tzZ = (d, fz) => { if (!fz) return tz(d); const o = partiesTz(d, fz), m = Math.round((Date.UTC(+o.year, +o.month-1, +o.day, +o.hour % 24, +o.minute, +o.second) - Math.floor(d.getTime()/1000)*1000) / 60000), a = Math.abs(m);
   return (m >= 0 ? "+" : "-")+String(Math.floor(a/60)).padStart(2, "0")+":"+String(a%60).padStart(2, "0"); };
 module.exports = {typesEvenements, isoZ, tzZ,
-  id:"hikvision", nom:"Hikvision — ISAPI (HTTP)",
+  id:"hikvision", nom:"Hikvision — ISAPI (HTTP)", incremental:true,
   marques:["Hikvision", "HiLook", "Ezviz (gamme pro)"], modeles:"DS-K1T, DS-K1A, MinMoe et terminaux compatibles ISAPI",
   capacites:["diagnostic","info","collecte","utilisateurs-lire","utilisateurs-envoyer","synchro-heure","redemarrer","visages-lire","visages-envoyer","utilisateurs-retirer"],
   champs:[{k:"utilisateur", l:"Identifiant de l'appareil"}, {k:"mdp", l:"Mot de passe de l'appareil", secret:true},
@@ -50,7 +50,7 @@ module.exports = {typesEvenements, isoZ, tzZ,
     /* 56.33.11 : tous les modes d'identification réussie, pas seulement le visage (avant : type 75 seul — un terminal
        à empreinte ou à badge ne remontait aucun badgeage). Types réglables par appareil (« evenements », ex. 1;38;75). */
     if (action === "collecte"){
-      const depuis = new Date(Date.now() - (Number(T.joursCollecte)||31)*86400000), fin = new Date();
+      const depuis = new Date(ctx.depuisMs || Date.now() - (Number(T.joursCollecte)||31)*86400000), fin = new Date();
       const tous = [], vus = new Set();
       for (const minor of typesEvenements(T)){
         let pos = 0;
@@ -70,7 +70,7 @@ module.exports = {typesEvenements, isoZ, tzZ,
       /* 56.33.11 : rien trouvé avec les types réglés — une page de tous les événements d'accès (minor 0) indique quels types
          d'identification l'appareil enregistre réellement (à ajouter dans « Types d'événements lus » de la fiche) */
       let autresTypes;
-      if (!tous.length){ try {
+      if (!tous.length && !ctx.depuisMs){ try {
         const j = JSON.parse(await appel(T, S, "POST", "/ISAPI/AccessControl/AcsEvent?format=json",
           {AcsEventCond:{searchID:"fiwakti-tous", searchResultPosition:0, maxResults:100, major:5, minor:0, startTime:isoZ(depuis, ctx.fuseau)+tzZ(depuis, ctx.fuseau), endTime:isoZ(fin, ctx.fuseau)+tzZ(fin, ctx.fuseau)}}));
         const c = {}; ((j.AcsEvent && j.AcsEvent.InfoList) || []).forEach(e=>{ if (e.employeeNoString) c[e.minor] = (c[e.minor]||0) + 1; });
